@@ -86,7 +86,7 @@ Most MCP clients accept a `command` + `args` setup. Example for Claude Desktop /
       "args": [
         "run",
         "--project",
-        "D:/Code/Hevo.Drawing/Hevo.Charting.Mcp/Hevo.Charting.Mcp.csproj",
+        "<仓库根>/Hevo.Charting.Mcp/Hevo.Charting.Mcp.csproj",
         "--no-build"
       ]
     }

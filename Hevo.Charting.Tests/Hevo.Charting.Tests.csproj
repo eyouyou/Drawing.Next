@@ -27,6 +27,15 @@
     <ProjectReference Include="..\Hevo.Charting.PythonNet\Hevo.Charting.PythonNet.csproj" />
     <ProjectReference Include="..\Hevo.Trade.Abstractions\Hevo.Trade.Abstractions.csproj" />
     <ProjectReference Include="..\Hevo.Trade.Mock\Hevo.Trade.Mock.csproj" />
+    <!-- 文档示例(开发规范 / 15 分钟上手引用的代码)单独成一个工程,按业务侧红线编译(LangVersion 9 + 生成器),
+         随测试工程一起编译;测试在 DocSampleTests.cs 里跑它们。 -->
+    <ProjectReference Include="DocSamples\Hevo.Charting.DocSamples.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="DocSamples\**" />
+    <None Remove="DocSamples\**" />
+    <EmbeddedResource Remove="DocSamples\**" />
   </ItemGroup>
 
   <!-- §回测 BacktestEngine + Models 住在 Hevo.Drawing.LowCodeDemo(WinExe + WPF + Python.NET 重依赖),

@@ -47,21 +47,6 @@ namespace Hevo.Charting.LowCode
     }
 
     /// <summary>
-    /// 无状态、零分配的纯数学算法接口。
-    /// </summary>
-    public interface IMathAlgorithm
-    {
-        /// <summary>
-        /// 纯数学计算。由于 Span 不能组成数组，我们直接传递裸数组和有效长度 count。
-        /// </summary>
-        /// <param name="count">当前有效数据长度</param>
-        /// <param name="inputs">输入数组池</param>
-        /// <param name="outputs">输出数组池 (已由引擎分配完毕)</param>
-        /// <param name="parameters">算法参数</param>
-        void Calculate(int count, double[][] inputs, double[][] outputs, double[] parameters);
-    }
-
-    /// <summary>
     /// 💥 0-GC 摄入期上下文载体 (Ingestion Payload)。
     /// 意图：将数据源与物理时钟打包，一次性传递给管线中的所有 Ingestor。
     /// 铁律：必须保持为 readonly struct，绝对禁止在管线高频分发时产生任何堆分配。
@@ -116,33 +101,5 @@ namespace Hevo.Charting.LowCode
         void Initialize(Dictionary<string, string> mappings, Dictionary<string, object> activePorts);
         /// <summary>热更新：执行 0 GC 核心计算</summary>
         void Execute(DataBlackboard board);
-    }
-
-    /// <summary>
-    /// Python / 动态脚本算法代理 (预留位)
-    /// </summary>
-    public class DynamicPythonAlgorithm : IMathAlgorithm
-    {
-        private readonly string _script;
-        public DynamicPythonAlgorithm(string script) => _script = script;
-        public void Calculate(int count, double[][] inputs, double[][] outputs, double[] parameters)
-        {
-            // 跨语言指针/内存视图交接执行逻辑
-        }
-    }
-
-    /// <summary>
-    /// 算法注册机
-    /// </summary>
-    public static class MathRegistry
-    {
-        public static IMathAlgorithm Create(string type, string context)
-        {
-            return type.ToUpper() switch
-            {
-                "PYTHON" => new DynamicPythonAlgorithm(context),
-                _ => throw new NotSupportedException($"未知的算法类型: {type}")
-            };
-        }
     }
 }

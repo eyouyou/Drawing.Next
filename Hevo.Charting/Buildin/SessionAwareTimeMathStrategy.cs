@@ -4,6 +4,18 @@ using Hevo.Charting.Core;
 namespace Hevo.Charting.Buildin
 {
     // ==========================================
+    // 【开发关注:否(当前) · 预留策略,期货接入时优先评估】
+    // 目前没有任何 schema、蓝图 JSON、Python 脚本或测试引用,业务开发写图表时不用管。
+    // 保留原因:session 边界完全由数据相邻间隔推断,不依赖固定时间表 ——
+    //   期货的日盘 / 夜盘 / 午休切换天然能识别,接期货分时 / 多日 K 线时是首选候选
+    //   (对比 TradeTimeTickStrategy 依赖时间表,品种多、夜盘时段不同时配置量大)。
+    // 接入方式:作为 strategy 参数传给 NumericTickProvider / TickProvider
+    //   (参考 FeatureCanvasExtensions 里 MirrorRatioTickStrategy 的用法);
+    //   要让蓝图可选,还需另写 JSON 转换器(仿 ZoomStrategyJsonConverter)——当前蓝图不认识它们。
+    // 动它之前:先用一段真实夜盘数据补单测(现在零覆盖)。
+    // ==========================================
+
+    // ==========================================
     // 💥 Session 感知版时间轴策略
     //
     // 在 TradingViewTimeMathStrategy 的 nice-interval 算法基础上,叠加三层保护:

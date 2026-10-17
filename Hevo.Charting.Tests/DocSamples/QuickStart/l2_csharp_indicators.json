@@ -1,0 +1,37 @@
+[
+  { "TypeName": "ComputeFeature",
+    "Properties": { "Compute": "qs_sma20" },
+    "InputBindings":  { "InputPort":  "m_Closes" },
+    "OutputBindings": { "OutputPort": "m_QsSma20" }
+  },
+  { "TypeName": "LineSeriesFeature",
+    "Properties": {
+      "LayerName": "QS_SMA20",
+      "MetaName": "SMA20", "MetaColor": "#FFB74D", "MetaFormat": "F2"
+    },
+    "InputBindings": {
+      "DataPort":   "m_QsSma20",
+      "YRangePort": "m_YRange"
+    }
+  },
+  { "TypeName": "PlotFeature",
+    "Properties": {
+      "IndicatorName": "qs_channel",
+      "Indicator":     "qs_channel",
+      "Series": [
+        { "Name": "upper",  "Kind": "line", "Color": "#26C6DA", "Width": 1.0 },
+        { "Name": "middle", "Kind": "line", "Color": "#78909C", "Width": 1.0 },
+        { "Name": "lower",  "Kind": "line", "Color": "#26C6DA", "Width": 1.0 }
+      ]
+    },
+    "InputBindings": {
+      "InputPort":  "m_Closes",
+      "YRangePort": "m_YRange"
+    },
+    "OutputBindings": {
+      "SeriesOutputs.upper":  "m_QsUpper",
+      "SeriesOutputs.middle": "m_QsMiddle",
+      "SeriesOutputs.lower":  "m_QsLower"
+    }
+  }
+]

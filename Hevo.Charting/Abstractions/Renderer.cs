@@ -32,14 +32,6 @@ namespace Hevo.Charting.Abstractions
     }
 
     /// <summary>
-    /// 3. 服务定位器：RenderContext 实现此接口，Buffer 通过它寻找渲染器
-    /// </summary>
-    public interface IRenderServiceProvider
-    {
-        TService? GetService<TService>() where TService : class;
-    }
-
-    /// <summary>
     /// 渲染器提供者：负责在渲染域内，将不同的 Buffer 路由给对应的武器
     /// </summary>
     public interface IRendererProvider<in TContext>

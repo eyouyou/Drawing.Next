@@ -956,6 +956,10 @@ namespace Hevo.Charting.Core
             Registry = null!;
             _features.Clear();
             _orderedFeatures = Array.Empty<Feature>();
+            // Aspect 链只由 ComposeVisualLayers 串起的 feature 组成,上面第 2 步已逐个 Decompose 过;
+            // 不清空的话基类 DecomposeAll 会沿 Aspect 链把每个 feature 再 Decompose 一遍
+            // (Transact 中途移除的 feature 还留在链上,也会被重复 Decompose)。
+            this.Aspect = ChartAspect.Empty;
 
             // 4. 解除物理容器强引用
             _latestBoard = null;

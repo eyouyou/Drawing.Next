@@ -22,6 +22,10 @@ namespace Hevo.Charting.Renderers
         // --- 文本与媒体 (3个) ---
         DrawText,
         DrawImage,
+        // 【开发关注:否 · 预留指令】目前没有任何图层生产 DrawVideo,图层开发不用管。
+        // 保留原因:视频叠加(如直播画面 / 回放录像)以后可能要用,DrawingRenderer 已能直接画 MediaPlayer。
+        // 约束:位图后端画不了视频 —— RenderMode.Bitmap 图层一帧里只要出现它,整帧回退矢量(CanRasterize);
+        //   Skia 后端直接跳过。真要用,请放在 Software 图层。
         DrawVideo,
 
         // --- 批量优化 (1个) ---

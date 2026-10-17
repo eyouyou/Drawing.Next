@@ -1,0 +1,12 @@
+[
+  { "TypeName": "PlotFeature",
+    "Properties": {
+      "IndicatorName": "pine_triple_ma",
+      "Indicator":     "pine_triple_ma"
+    },
+    "InputBindings": {
+      "InputPort":  "m_Closes",
+      "YRangePort": "m_YRange"
+    }
+  }
+]

@@ -264,8 +264,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer.Wrappers
     //    可同时接受多根连线。代价 = ChartBlueprint.cs 里 ~30 行通用解析逻辑,
     //    收益 = 任何 DataPort<T>[] 属性免 wrapper、自动可视化连线。
 
-    // 💡 Link 系列 wrappers (跟传统 .Inject / .ForwardTo / .ProjectExtent / .LinkStream DSL 一一对应)
-    //    单独搬到 LinkWrappers.cs,在画布上以专门的"桥接 feature"形式呈现,等价 DSL 一行 = 蓝图一根连线。
+    // 💡 Link 系列(跟传统 .Inject / .ForwardTo / .ProjectExtent / .LinkStream / .Compute DSL 对应)
+    //    不再单独写 wrapper:Source Ingestor 走 DataSource.ScalarMappings / VectorMappings,
+    //    board → board 计算走 Features.ComputeFeature(基类 Features.ComputeFeatureBase)。
 
     // ⚠️ GridLayoutLowCode / PlotAreaDecorLowCode 已删除 ——
     //    编辑器 (NodeEditorWindow) 现在直接认 ChartLength / IHevoBrush 类型,
