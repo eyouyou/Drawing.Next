@@ -65,6 +65,9 @@ namespace Hevo.Charting.Tests
                 ArgumentList = { "--sandbox-probe", $"--blocked={blocked}", $"--test-import={testImport}" },
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // 探针按 UTF-8 输出(见 SandboxProbeMain),这里同样按 UTF-8 读,不依赖机器的 ANSI 代码页
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };

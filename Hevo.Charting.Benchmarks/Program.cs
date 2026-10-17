@@ -90,6 +90,9 @@ namespace Hevo.Charting.Benchmarks
 
         private static int SandboxProbeMain(string[] args)
         {
+            // 输出给父进程(SandboxIsolationTests)按 UTF-8 读;默认跟系统 ANSI 代码页,
+            // CI 机器是 1252,中文会变成 '?',测试里匹配"被拦 / 导入成功"就失败
+            Console.OutputEncoding = new System.Text.UTF8Encoding(false);
             try
             {
                 string blocked = ExtractArg(args, "--blocked=") ?? "";
