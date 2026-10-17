@@ -173,7 +173,7 @@ chart.RenderModeOverride = RenderMode.Bitmap;
 | 文件 | 作用 |
 |---|---|
 | `Renderers/Raster/RasterSurface.cs` | 预乘 BGRA32 像素目标(绑定 WriteableBitmap.BackBuffer),裁剪框、脏区、src-over 混合 |
-| `Renderers/Raster/ScanlineFiller.cs` | 扫描线多边形填充,像素中心采样(= `EdgeMode.Aliased`),非零 / 奇偶 |
+| `Renderers/Raster/ScanlineFiller.cs` | 扫描线多边形填充,像素中心采样(边四舍五入到像素边界,平局归右 / 下,同 `PixelSnap`),非零 / 奇偶 |
 | `Renderers/Raster/Stroker.cs` | 折线描边展开(线端 / 拐角 / 虚线,语义同 WPF Pen,DashCap 默认 Square) |
 | `Renderers/Raster/RasterTextRenderer.cs` | 字形蒙版缓存(GlyphTypeface 能覆盖时)+ 整串 FormattedText 兜底(中文回退字体等) |
 | `Renderers/Raster/RasterDrawingRenderer.cs` | `IRenderer<DrawingBuffer / BitmapBuffer, RasterSurface>`,DrawOp 全覆盖(DrawVideo 除外) |
@@ -183,7 +183,7 @@ chart.RenderModeOverride = RenderMode.Bitmap;
 
 ### 跟 WPF 矢量路径的差异
 
-- 像素对齐沿用 `PixelSnap`,覆盖规则是像素中心采样(无抗锯齿):水平 / 垂直线、矩形跟 WPF 路径(全图抗锯齿 + 设备像素对齐)逐像素一致(`RasterRendererTests` 截图对比);斜线 / 曲线位图后端是锯齿的,WPF 路径是平滑的。
+- 像素对齐沿用 `PixelSnap`,覆盖规则是像素中心采样(无抗锯齿,边四舍五入到像素边界,跟矢量路径同一条规则,见 06 §4.1):水平 / 垂直线、矩形跟 WPF 路径(全图抗锯齿 + 设备像素对齐)逐像素一致(`RasterRendererTests` 截图对比);斜线 / 曲线位图后端是锯齿的,WPF 路径是平滑的。
 - `PushOpacity` 逐图元乘透明度(WPF 是整组合成后再乘,组内图元重叠处会略深)。
 - 渐变只取首尾两个色标;ImageBrush / VisualBrush 不支持(该图元跳过)。
 - 文字:字形落在整像素上(WPF 亚像素定位),宽度用 advance 之和;标签框位置可能差 1 像素。

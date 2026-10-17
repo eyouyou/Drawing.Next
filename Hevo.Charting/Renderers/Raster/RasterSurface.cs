@@ -72,15 +72,16 @@ namespace Hevo.Charting.Renderers.Raster
         }
 
         /// <summary>
-        /// 像素中心采样规则(跟 WPF EdgeMode.Aliased 一致):像素 i 的中心 i+0.5 落在 [a, b) 内才算覆盖。
-        /// 返回第一个被覆盖的像素下标,即 ceil(a - 0.5)。坐标先夹到 ±2^24 防溢出。
+        /// 像素中心采样规则:像素 i 的中心 i+0.5 落在 (a, b] 内才算覆盖,即边四舍五入到最近的像素边界,
+        /// 恰好压在中心上的边归右 / 下(跟矢量路径的 PixelSnap 同一条规则)。
+        /// 返回第一个被覆盖的像素下标,即 floor(a + 0.5)。坐标先夹到 ±2^24 防溢出。
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int CenterCeil(float v)
+        public static int EdgePixel(float v)
         {
             if (!(v > -16777216f)) return -16777216; // 含 NaN
             if (v > 16777216f) return 16777216;
-            return (int)MathF.Ceiling(v - 0.5f);
+            return (int)MathF.Floor(v + 0.5f);
         }
     }
 
@@ -213,8 +214,8 @@ namespace Hevo.Charting.Renderers.Raster
         /// <summary>按像素中心规则填一个设备坐标的轴对齐矩形 [left, right) × [top, bottom)。</summary>
         public void FillRect(float left, float top, float right, float bottom, in RasterPaint paint)
         {
-            int x0 = PixelMath.CenterCeil(left), x1 = PixelMath.CenterCeil(right);
-            int y0 = PixelMath.CenterCeil(top), y1 = PixelMath.CenterCeil(bottom);
+            int x0 = PixelMath.EdgePixel(left), x1 = PixelMath.EdgePixel(right);
+            int y0 = PixelMath.EdgePixel(top), y1 = PixelMath.EdgePixel(bottom);
             if (y0 < ClipY0) y0 = ClipY0;
             if (y1 > ClipY1) y1 = ClipY1;
             if (paint.IsGradient) { for (int y = y0; y < y1; y++) FillSpan(y, x0, x1, paint); return; }
@@ -271,8 +272,8 @@ namespace Hevo.Charting.Renderers.Raster
             float dLeft, float dTop, float dRight, float dBottom, uint opacity)
         {
             if (srcW <= 0 || srcH <= 0 || opacity == 0) return;
-            int x0 = PixelMath.CenterCeil(dLeft), x1 = PixelMath.CenterCeil(dRight);
-            int y0 = PixelMath.CenterCeil(dTop), y1 = PixelMath.CenterCeil(dBottom);
+            int x0 = PixelMath.EdgePixel(dLeft), x1 = PixelMath.EdgePixel(dRight);
+            int y0 = PixelMath.EdgePixel(dTop), y1 = PixelMath.EdgePixel(dBottom);
             if (x1 <= x0 || y1 <= y0) return;
             float sxStep = srcW / (dRight - dLeft), syStep = srcH / (dBottom - dTop);
             int cx0 = Math.Max(x0, ClipX0), cx1 = Math.Min(x1, ClipX1);

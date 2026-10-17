@@ -59,6 +59,7 @@ namespace Hevo.Charting.Core
         private readonly List<HevoRect> _upRects = new(256);
         private readonly List<HevoRect> _downRects = new(256);
         private readonly List<HevoPoint> _wicks = new(512);
+        private double _minBodyHeight = 1.0; // DIP,每帧按 PixelsPerDip 重算
 
         public CandleLayer()
         {
@@ -110,20 +111,23 @@ namespace Hevo.Charting.Core
             _wicks.Clear();
 
             // ==========================================
-            // 💥 极致多态：利用 IScale 相邻索引差值，推算绝对物理宽度！
+            // 💥 极致多态：每根的格宽都问 scale(ProjectDomainSlotWidth),不等间距的 scale 也成立
             // ==========================================
-            double unitNormDelta = axis.DomainScale.Normalize(1, xRange) - axis.DomainScale.Normalize(0, xRange);
-            double ppuX = plotArea.Width * Math.Abs(unitNormDelta);
+            // LOD 判定看可见区起点那一格的密度
+            double ppuX = CoordinateExtensions.ProjectDomainSlotWidth(plotArea, xRange, axis, logicalStart);
 
-            // 扣除业务所需的间隙留白 (BodyPadding)
-            double bodyWidth = Math.Max(1.0, ppuX * (1.0 - style.BodyPadding));
-            double halfBody = bodyWidth / 2.0;
+            // 扣除业务所需的间隙留白 (BodyPadding)。宽度取整数设备像素且跟影线同奇偶:
+            // 渲染器按像素中心规则排,整数宽每根都一样宽,影线(同一个中心上的竖线)落在实体正中
+            double pixelsPerDip = PixelsPerDip;
+            int linePx = ColumnWidth.LinePixels(style.WickPen, pixelsPerDip);
+            double bodyRatio = 1.0 - style.BodyPadding;
+            // 十字星(开 = 收)的最小高度:1 个设备像素,不随亚像素位置在 1 / 2 行之间跳
+            _minBodyHeight = ColumnWidth.MinHeight(pixelsPerDip) / pixelsPerDip;
 
             // 💥 LOD:单根不足 1 个物理像素宽时(缩放到几千上万根可见),逐根画只是在同一列像素上反复覆盖,
             // 却让 WPF 为每根建影线 figure + DrawRectangle 记录,2 万根可见时每帧上 MB 的 LOH 分配。
             // 这时按物理像素列聚合(首开、最高、最低、末收,涨跌色按聚合后的开收),每列一根影线 + 一个 1px 实体,
             // 输出上限 = 绘图区物理宽度。聚合只取决于本帧可见区和像素宽度,增量路径(Tick / Append)照常整层重录即可。
-            double pixelsPerDip = PixelsPerDip;
             if (PixelColumnLod.ShouldAggregate(ppuX, pixelsPerDip))
             {
                 double columnHalf = 0.5 / pixelsPerDip;
@@ -135,20 +139,20 @@ namespace Hevo.Charting.Core
                     double o = opens[arrayIndex];
                     if (IsMissing(o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex])) continue;
 
-                    double xCenter = plotArea.Left + axis.DomainScale.Normalize(logicalIndex, xRange) * plotArea.Width;
+                    double xCenter = CoordinateExtensions.ProjectDomainToScreen(plotArea, xRange, axis, logicalIndex);
                     int column = PixelColumnLod.ColumnOf(xCenter, pixelsPerDip);
                     // 整列都在绘图区内才画,跟逐根路径"柱体越界即剔除"同口径
                     if (!PixelColumnLod.ColumnInside(column, pixelsPerDip, plotArea.Left, plotArea.Right)) continue;
 
                     if (acc.Add(column, o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex], out done))
                     {
-                        // 影线给像素左边界:渲染器 snap 成 (列 + half) / k;给列中心 (列 + 0.5) / k 会被 MathF.Round 银行家舍入隔列推到下一列
-                        AddCandle(done.Column / pixelsPerDip, PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
+                        // 影线和 1px 实体都在列中心,渲染器按同一条像素中心规则落到这一列
+                        AddCandle(PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
                     }
                 }
                 if (acc.Flush(out done))
                 {
-                    AddCandle(done.Column / pixelsPerDip, PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
+                    AddCandle(PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
                 }
             }
             else
@@ -160,14 +164,15 @@ namespace Hevo.Charting.Core
                     double o = opens[arrayIndex];
                     if (IsMissing(o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex])) continue;
 
-                    // 💥 绝对中心点：Scale 去操心居中偏移，Layer 只管画！
-                    double xNorm = axis.DomainScale.Normalize(logicalIndex, xRange);
-                    double xCenter = plotArea.Left + (xNorm * plotArea.Width);
+                    // 💥 绝对中心点：Scale 去操心居中偏移，Layer 只管画！(十字线走同一个投影)
+                    double xCenter = CoordinateExtensions.ProjectDomainToScreen(plotArea, xRange, axis, logicalIndex);
+                    double slot = CoordinateExtensions.ProjectDomainSlotWidth(plotArea, xRange, axis, logicalIndex);
+                    double halfBody = ColumnWidth.Of(slot, bodyRatio, pixelsPerDip, linePx) / (2.0 * pixelsPerDip);
 
                     // 边界剔除
                     if (xCenter - halfBody < plotArea.Left || xCenter + halfBody > plotArea.Right) continue;
 
-                    AddCandle(xCenter, xCenter, halfBody, o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex], plotArea, yRange, axis);
+                    AddCandle(xCenter, halfBody, o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex], plotArea, yRange, axis);
                 }
             }
 
@@ -191,8 +196,8 @@ namespace Hevo.Charting.Core
         internal static bool IsMissing(double o, double h, double l, double c)
             => !double.IsFinite(o) || !double.IsFinite(h) || !double.IsFinite(l) || !double.IsFinite(c);
 
-        // wickX:影线 x(交给渲染器 snap);bodyCenter / halfBody:实体中心与半宽
-        private void AddCandle(double wickX, double bodyCenter, double halfBody, double o, double h, double l, double c,
+        // xCenter:影线与实体共用的中心(交给渲染器按像素中心规则落列);halfBody:实体半宽
+        private void AddCandle(double xCenter, double halfBody, double o, double h, double l, double c,
                                HevoRect plotArea, RealRange yRange, ScaleStrategyTrait axis)
         {
             double yOpen = CoordinateExtensions.ProjectValueToScreen(plotArea, yRange, axis, o);
@@ -200,15 +205,15 @@ namespace Hevo.Charting.Core
             double yLow = CoordinateExtensions.ProjectValueToScreen(plotArea, yRange, axis, l);
             double yClose = CoordinateExtensions.ProjectValueToScreen(plotArea, yRange, axis, c);
 
-            _wicks.Add(new HevoPoint((float)wickX, (float)yHigh));
-            _wicks.Add(new HevoPoint((float)wickX, (float)yLow));
+            _wicks.Add(new HevoPoint((float)xCenter, (float)yHigh));
+            _wicks.Add(new HevoPoint((float)xCenter, (float)yLow));
 
             double top = Math.Min(yOpen, yClose);
             double bottom = Math.Max(yOpen, yClose);
-            double height = Math.Max(1.0, bottom - top);
+            double height = Math.Max(_minBodyHeight, bottom - top);
 
-            double leftEdge = bodyCenter - halfBody;
-            double rightEdge = bodyCenter + halfBody;
+            double leftEdge = xCenter - halfBody;
+            double rightEdge = xCenter + halfBody;
             HevoRect rect = new HevoRect((float)leftEdge, (float)top, (float)(rightEdge - leftEdge), (float)height);
 
             if (c >= o) _upRects.Add(rect);

@@ -100,8 +100,9 @@ namespace Hevo.Charting.Tests
             f.Fill(c.S, new RasterPaint(Red));
             var row = new char[40];
             for (int x = 0; x < 40; x++) row[x] = c[x, 5] != 0 ? '#' : '.';
-            // 首段起点用 StartCap(Flat),之后每段两端是 WPF 默认的 DashCap=Square:4 → 5 像素
-            Assert.StartsWith("####...#####...#####", new string(row));
+            // 首段起点用 StartCap(Flat),之后每段两端是 WPF 默认的 DashCap=Square:每段 4 + 2×0.5 = 5 像素宽。
+            // 段边正好压在像素中心(x.5)上,按四舍五入归右:[0, 4.5] → 0..4,[7.5, 12.5] → 8..12
+            Assert.StartsWith("#####...#####...#####", new string(row));
         }
 
         [Fact]

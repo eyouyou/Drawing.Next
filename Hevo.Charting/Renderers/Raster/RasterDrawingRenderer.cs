@@ -258,10 +258,10 @@ namespace Hevo.Charting.Renderers.Raster
                         Push();
                         var r = cmd.Payload.RectArea;
                         DeviceBounds(r, out float l, out float t, out float rr, out float b);
-                        _s.ClipX0 = Math.Max(_s.ClipX0, PixelMath.CenterCeil(l));
-                        _s.ClipY0 = Math.Max(_s.ClipY0, PixelMath.CenterCeil(t));
-                        _s.ClipX1 = Math.Min(_s.ClipX1, PixelMath.CenterCeil(rr));
-                        _s.ClipY1 = Math.Min(_s.ClipY1, PixelMath.CenterCeil(b));
+                        _s.ClipX0 = Math.Max(_s.ClipX0, PixelMath.EdgePixel(l));
+                        _s.ClipY0 = Math.Max(_s.ClipY0, PixelMath.EdgePixel(t));
+                        _s.ClipX1 = Math.Min(_s.ClipX1, PixelMath.EdgePixel(rr));
+                        _s.ClipY1 = Math.Min(_s.ClipY1, PixelMath.EdgePixel(b));
                         break;
                     }
                     case DrawOp.PushOpacity:
