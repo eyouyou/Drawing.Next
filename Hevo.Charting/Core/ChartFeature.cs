@@ -145,6 +145,12 @@ namespace Hevo.Charting.Core
         }
 
         /// <summary>
+        /// 列端口的引用版本(见 <see cref="DataBlackboard.GetIdentityVersion"/>):底层引用换了才变,原地改再 ForceWrite 不变。
+        /// 只读令牌,不订阅、不占 Hook 槽位;配合同一端口的 <see cref="UsePort{T}"/> 使用(先 UsePort 订阅,再看引用变没变)。
+        /// </summary>
+        public VersionToken PortIdentity<T>(DataPort<ReadOnlyMemory<T>> port) => _board.GetIdentityVersion(port);
+
+        /// <summary>
         /// 💥 动态批量引脚订阅 (专治 HEVO003 循环拦截)
         /// 允许安全地订阅一组引脚,数据直接写入 buffer,全程 0-GC。
         /// </summary>

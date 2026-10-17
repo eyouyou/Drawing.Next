@@ -186,7 +186,8 @@ namespace Hevo.Charting.Tests
             double aggOpen = o[inFirst[0]], aggClose = c[inFirst[^1]];
 
             static double Y(double v) => PlotHeight - v / 200 * PlotHeight;
-            Assert.Equal(0.5f, wicks[0].X, 3);
+            // 影线录的是列左边界 0,渲染器按 1px 线宽 snap 到列中心 0.5(直接录 0.5 会被银行家舍入隔列推到下一列)
+            Assert.Equal(0f, wicks[0].X, 3);
             Assert.Equal(Y(aggHigh), wicks[0].Y, 2);
             Assert.Equal(Y(aggLow), wicks[1].Y, 2);
 

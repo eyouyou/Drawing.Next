@@ -171,7 +171,7 @@ namespace Hevo.Charting.Features
                     var dynColor = proxy.Read<DynamicColorTrait>();
                     if (dynColor != null)
                     {
-                        cache.ColorDot.BindHevo(Shape.FillProperty, dynColor.Evaluator(cache.FieldIndex, targetIndex));
+                        cache.ColorDot.BindHevo(Shape.FillProperty, dynColor.Evaluator(doubleData, cache.FieldIndex, targetIndex));
                     }
                 }
                 else

@@ -146,10 +146,11 @@ namespace Hevo.Charting.Core
 
     /// <summary>
     /// 动态颜色外挂包:只有红涨绿跌 / 多空底色这类业务才需要发布。
-    /// Evaluator 签名 = (fieldIndex, localIndex) → IHevoBrush。
+    /// Evaluator 签名 = (data, fieldIndex, localIndex) → IHevoBrush,data 是调用方本帧从同一图层读到的 <see cref="DoubleSeriesDataTrait"/>。
+    /// 列由调用方传进来,Evaluator 不要捕获列(列只在当帧有效,见开发规范铁律第 5 条),所以 Series Feature 在装配时发布一次即可、不用每帧 new。
     /// 由 Series Feature 下发,Crosshair 圆点 / Header 颜色块从此处取色。
     /// </summary>
-    public record DynamicColorTrait(Func<int, int, IHevoBrush> Evaluator) : IVisualTrait;
+    public record DynamicColorTrait(Func<DoubleSeriesDataTrait, int, int, IHevoBrush> Evaluator) : IVisualTrait;
 
     /// <summary>
     /// 💥 万物皆有底色：所有画刷(静态/动态)在渲染时,都表现为"按上下文取画刷"的解析器。
