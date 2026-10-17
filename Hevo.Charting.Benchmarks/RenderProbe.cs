@@ -1079,8 +1079,6 @@ namespace Hevo.Charting.Benchmarks
             Schema.InvalidateEnvironment();
         }
 
-        private long _historyRevision;
-
         public void WriteSeries(bool follow)
         {
             var p = Schema.Ports;
@@ -1091,7 +1089,6 @@ namespace Hevo.Charting.Benchmarks
                 Board.WriteIfChanged(p.High, Slice(Data.High));
                 Board.WriteIfChanged(p.Low, Slice(Data.Low));
                 Board.WriteIfChanged(p.Close, Slice(Data.Close));
-                Board.WriteIfChanged(p.HistoryRevision!, ++_historyRevision);
                 Board.WriteIfChanged(Schema.SmaPort, Slice(Data.Sma));
                 if (Schema.Options.Markers)
                 {
@@ -1212,11 +1209,7 @@ namespace Hevo.Charting.Benchmarks
         public DataPort<ReadOnlyMemory<ArrowMarker>> ArrowPort { get; } = new("P_Arrows");
         public DataPort<ReadOnlyMemory<TextMarker>> TextPort { get; } = new("P_Texts");
 
-        // HistoryRevision:探针模拟数据源的"历史段版本"——WriteSeries(追加 / 归位)递增,TickStep 只改最后一根不碰它
-        public CandlePorts Ports { get; } = new(new("P_Time"), new("P_Open"), new("P_High"), new("P_Low"), new("P_Close"))
-        {
-            HistoryRevision = new DataPort<long>("P_HistoryRevision"),
-        };
+        public CandlePorts Ports { get; } = new(new("P_Time"), new("P_Open"), new("P_High"), new("P_Low"), new("P_Close"));
         public DataPort<ReadOnlyMemory<double>> SmaPort { get; } = new("P_SMA20");
         public DataPort<RealRange> YRangePort { get; } = new("P_YRange");
         public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();

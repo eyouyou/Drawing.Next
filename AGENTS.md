@@ -21,7 +21,7 @@
 - `OnProject` 里 `UsePort` / `UseMemo` 顶层、无条件、固定顺序;不写黑板;不 `new` 集合 / 数组 / 闭包(工作集合做成跨帧复用字段;每帧发布的不可变 Trait 记录除外)。
 - 坐标只走 `IScale.Normalize` / `CoordinateExtensions.ProjectToScreen`,不手写 `(x - min) / span * width`。
 - Layer 用 `partial class`,`IConsumes<T>` 交给生成器,不手写。
-- 往端口发布的列每次一块新缓冲(`ColumnPublisher<T>` / `ResultBufferPool`),不原地改已发布数组。
+- 往端口发布的列每次一块新缓冲(`ColumnPublisher<T>` / `ResultBufferPool`),不原地改已发布数组。唯一例外:K 线类数据块的**最后一根**可以原地改再 `ForceWrite`(实时 tick);历史段(除最后一根)要改先换新数组(写时复制)。`CandleFeature` 按列的引用版本(`DataBlackboard.GetIdentityVersion`,底层引用换了才变)判断历史变没变,原地改历史会让静态层停在旧值。
 - 不引入 `System.Reactive`。
 
 ## 验证

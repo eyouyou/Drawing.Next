@@ -36,6 +36,28 @@ namespace Hevo.Charting.LowCode
             return _portTokens.TryGetValue(port, out var token) ? token : default;
         }
 
+        // 列端口(ReadOnlyMemory<T>)的"引用版本":只在新值的底层引用(数组 / 起点 / 长度)跟当前值不同时才变。
+        // 实时 tick 原地改最后一根再 ForceWrite 同一块 ROM → 版本号(GetVersion)变、引用版本不变;
+        // 追加 / 写时复制 / 缓冲池换块(包括 A → B → A 换回同一块数组)→ 引用版本变。
+        // 消费者只存这个令牌、不存列引用,不违反"列只在当帧有效"(缓冲会被纪元回收重写)。
+        private readonly ConcurrentDictionary<object, VersionToken> _identityTokens = new();
+
+        /// <summary>
+        /// 列端口的引用版本:底层引用(数组 / 起点 / 长度)换了才变。非列端口、没写过的端口返回 default。
+        /// 用于"版本变了但引用没变 = 只有最后一根被原地改"这类判断(如 CandleFeature 静态层)。
+        /// </summary>
+        public VersionToken GetIdentityVersion(object port)
+        {
+            return _identityTokens.TryGetValue(port, out var token) ? token : default;
+        }
+
+        // 只有列端口才记引用版本;按 T 静态缓存,JIT 对其它端口类型折叠掉这段判断
+        private static class ColumnType<T>
+        {
+            public static readonly bool IsColumn =
+                typeof(T).IsGenericType && typeof(T).GetGenericTypeDefinition() == typeof(ReadOnlyMemory<>);
+        }
+
         // ==========================================
         // 💥 给业务层暴露的三大神器 (支持 using 语法)
         // 返回 readonly struct + duck-typed Dispose:每次 using 0 堆分配。
@@ -142,11 +164,17 @@ namespace Hevo.Charting.LowCode
                 throw new InvalidOperationException($"[黑板越权篡改] 写引脚 {port.Id} 失败！必须先调用 BeginTransaction() 或 AcquireWriteLock()！");
             }
 #endif
+            // 列端口:先跟当前值比引用(ROM.Equals 比数组 / 起点 / 长度,不比内容)
+            bool identityChanged = ColumnType<T>.IsColumn
+                && !(_memory.TryGetValue<DataPort<T>, T>(port, out var current) && EqualityComparer<T>.Default.Equals(current, value));
+
             // 2. 0-GC 裸写物理桶
             _memory.Set<DataPort<T>, T>(port, value);
 
             // 3. 拨动时钟(融合 Advance+Snapshot,单次 Interlocked.Increment 取新值,省一次 barrier)
-            _portTokens[port] = _boardClock.AdvanceAndSnapshot();
+            var token = _boardClock.AdvanceAndSnapshot();
+            _portTokens[port] = token;
+            if (identityChanged) _identityTokens[port] = token;
 
             // 4. 路由拦截 (此时必在 WriteLock 的保护伞下)
             if (_transactionDepth > 0)
@@ -276,6 +304,7 @@ namespace Hevo.Charting.LowCode
             _subscriptions.Clear();
             _dirtyPorts.Clear();
             _portTokens.Clear();
+            _identityTokens.Clear();
             OnPortUpdated = null;
             OnTransactionCommitted = null;
         }

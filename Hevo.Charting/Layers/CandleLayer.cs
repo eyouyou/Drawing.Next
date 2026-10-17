@@ -141,10 +141,15 @@ namespace Hevo.Charting.Core
                     if (!PixelColumnLod.ColumnInside(column, pixelsPerDip, plotArea.Left, plotArea.Right)) continue;
 
                     if (acc.Add(column, o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex], out done))
-                        AddCandle(PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
+                    {
+                        // 影线给像素左边界:渲染器 snap 成 (列 + half) / k;给列中心 (列 + 0.5) / k 会被 MathF.Round 银行家舍入隔列推到下一列
+                        AddCandle(done.Column / pixelsPerDip, PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
+                    }
                 }
                 if (acc.Flush(out done))
-                    AddCandle(PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
+                {
+                    AddCandle(done.Column / pixelsPerDip, PixelColumnLod.ColumnCenter(done.Column, pixelsPerDip), columnHalf, done.Open, done.High, done.Low, done.Close, plotArea, yRange, axis);
+                }
             }
             else
             {
@@ -162,7 +167,7 @@ namespace Hevo.Charting.Core
                     // 边界剔除
                     if (xCenter - halfBody < plotArea.Left || xCenter + halfBody > plotArea.Right) continue;
 
-                    AddCandle(xCenter, halfBody, o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex], plotArea, yRange, axis);
+                    AddCandle(xCenter, xCenter, halfBody, o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex], plotArea, yRange, axis);
                 }
             }
 
@@ -186,7 +191,8 @@ namespace Hevo.Charting.Core
         internal static bool IsMissing(double o, double h, double l, double c)
             => !double.IsFinite(o) || !double.IsFinite(h) || !double.IsFinite(l) || !double.IsFinite(c);
 
-        private void AddCandle(double xCenter, double halfBody, double o, double h, double l, double c,
+        // wickX:影线 x(交给渲染器 snap);bodyCenter / halfBody:实体中心与半宽
+        private void AddCandle(double wickX, double bodyCenter, double halfBody, double o, double h, double l, double c,
                                HevoRect plotArea, RealRange yRange, ScaleStrategyTrait axis)
         {
             double yOpen = CoordinateExtensions.ProjectValueToScreen(plotArea, yRange, axis, o);
@@ -194,15 +200,15 @@ namespace Hevo.Charting.Core
             double yLow = CoordinateExtensions.ProjectValueToScreen(plotArea, yRange, axis, l);
             double yClose = CoordinateExtensions.ProjectValueToScreen(plotArea, yRange, axis, c);
 
-            _wicks.Add(new HevoPoint((float)xCenter, (float)yHigh));
-            _wicks.Add(new HevoPoint((float)xCenter, (float)yLow));
+            _wicks.Add(new HevoPoint((float)wickX, (float)yHigh));
+            _wicks.Add(new HevoPoint((float)wickX, (float)yLow));
 
             double top = Math.Min(yOpen, yClose);
             double bottom = Math.Max(yOpen, yClose);
             double height = Math.Max(1.0, bottom - top);
 
-            double leftEdge = xCenter - halfBody;
-            double rightEdge = xCenter + halfBody;
+            double leftEdge = bodyCenter - halfBody;
+            double rightEdge = bodyCenter + halfBody;
             HevoRect rect = new HevoRect((float)leftEdge, (float)top, (float)(rightEdge - leftEdge), (float)height);
 
             if (c >= o) _upRects.Add(rect);
