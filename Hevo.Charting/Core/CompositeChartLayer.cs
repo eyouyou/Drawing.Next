@@ -38,6 +38,9 @@ namespace Hevo.Charting.Core
             _children.Add(child);
         }
 
+        // 子层在本层 OnUpdate 里同步更新,任一子层要求 UI 线程,本层就得留在 UI 线程。
+        protected internal override bool RequiresUiThread => _children.Exists(c => c is ChartLayer { RequiresUiThread: true });
+
         protected override void OnUpdate(IVisualData data, IDrawingSink sink, WidgetBuffer widgetSink)
         {
             // 1. 强转 Sink 为 Buffer，以便使用 Append 功能
@@ -65,6 +68,7 @@ namespace Hevo.Charting.Core
                 }
 
                 // 3. 让子层使用它自己的数据干活
+                if (child is ChartLayer cl) cl.PixelsPerDip = PixelsPerDip;
                 child.Update(childData);
                 masterBuffer.Append(child.Buffer);
             }

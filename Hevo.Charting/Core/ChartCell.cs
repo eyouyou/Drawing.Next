@@ -419,7 +419,8 @@ namespace Hevo.Charting.Core
             if (Template is Abstractions.IPausable p) p.Resume();
 
             // Loaded 时注入真实 DPI:visual 已挂入 visual tree,VisualTreeHelper.GetDpi(this) 才能拿到所在屏的 DPI。
-            _wpfProvider.UpdateDpi(VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            _wpfProvider.UpdateDpi(_pixelsPerDip);
 
             _hookedWindow = Window.GetWindow(this);
             if (_hookedWindow != null)
@@ -463,6 +464,10 @@ namespace Hevo.Charting.Core
         {
             base.OnDpiChanged(oldDpi, newDpi);
             _wpfProvider.UpdateDpi(newDpi.PixelsPerDip);
+
+            // 按物理像素做 LOD 的图层要跟着重录:走环境纪元,下一帧全量重投影 + 重绘
+            _pixelsPerDip = newDpi.PixelsPerDip;
+            RequestUpdate(_ => (Template as IFeatureProjector)?.InvalidateEnvironment());
         }
 
         private void _rootContainer_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -495,6 +500,10 @@ namespace Hevo.Charting.Core
         /// 三阶段:① schema.ProjectAll → 让所有 Feature 重算 trait;② 标脏 + 制作 snapshot 喂给 Layer.Update;
         /// ③ 视任务量同步 / 并行执行。Parallel 阈值 ≥3 是经验值,任务太少时多线程 dispatch 反而亏。
         /// </summary>
+        private double _pixelsPerDip = 1.0;
+
+        private static bool RequiresUiThread(IChartLayer layer) => layer is ChartLayer { RequiresUiThread: true };
+
         internal void ExecutePipeline(RenderContext ctx, PlotMode mode)
         {
             if (Template is IFeatureProjector projector)
@@ -512,6 +521,7 @@ namespace Hevo.Charting.Core
                 if (active[i] is ChartLayer cl && cl.IsDirty) _dirtyLayerBuffer.Add(cl);
             }
             if (_dirtyLayerBuffer.Count == 0) return;
+            for (int i = 0; i < _dirtyLayerBuffer.Count; i++) _dirtyLayerBuffer[i].PixelsPerDip = _pixelsPerDip;
 
             // 2. 制作快照
             using var frame = ctx.PrepareTasks(_dirtyLayerBuffer);
@@ -519,7 +529,9 @@ namespace Hevo.Charting.Core
             // 3. 执行更新 (智能降级)
             if (mode == PlotMode.Parallel && frame.Tasks.Count >= 3)
             {
-                Parallel.ForEach(frame.Tasks, t => t.Layer.Update(t.DataSnapshot));
+                // 线程亲和的图层(OnUpdate 直接改 WPF 控件,如 TooltipWidgetLayer)不能进线程池,留在 UI 线程录制。
+                Parallel.ForEach(frame.Tasks, t => { if (!RequiresUiThread(t.Layer)) t.Layer.Update(t.DataSnapshot); });
+                foreach (var t in frame.Tasks) if (RequiresUiThread(t.Layer)) t.Layer.Update(t.DataSnapshot);
             }
             else
             {
@@ -579,6 +591,12 @@ namespace Hevo.Charting.Core
 
         private void OnCompositionTargetRendering(object? sender, EventArgs e)
         {
+            // 出了锁之后，在安全的 UI 线程里慢慢执行管线
+            if (SwapPendingUpdates()) RunSwappedFrame(PlotMode.Sync);
+        }
+
+        private bool SwapPendingUpdates()
+        {
             // 💥 以极快的速度交换缓冲，然后立刻释放锁，绝不阻塞！
             // swap 后 _pendingUpdates 立即可承接新写入(比如本帧 ExecutePipeline 内回流的 RequestUpdate),
             // 本帧迭代用的是旧 _processingBuffer,锁外读不会被并发追加。
@@ -599,21 +617,46 @@ namespace Hevo.Charting.Core
                     CompositionTarget.Rendering -= OnCompositionTargetRendering;
                 }
             }
-
-            // 出了锁之后，在安全的 UI 线程里慢慢执行管线
-            if (hasWork)
-            {
-                using var ctx = new RenderContext(_sharedData, _localData);
-
-                // 直接 for 索引迭代,跳过 List<T>.Enumerator 的 IDisposable 调用链。
-                var actions = _processingBuffer;
-                for (int i = 0; i < actions.Count; i++) actions[i](ctx);
-                actions.Clear(); // 释放对 captured closures 的引用,避免跨帧拖死 ctx 相关对象
-
-                ExecutePipeline(ctx, PlotMode.Sync);
-                Invalidate();
-            }
+            return hasWork;
         }
+
+        // 一帧的完整工作:排队事务 → 管线 → 上屏。_processingBuffer 由 SwapPendingUpdates 换出。
+        private void RunSwappedFrame(PlotMode mode)
+        {
+            using var ctx = new RenderContext(_sharedData, _localData);
+
+            // 直接 for 索引迭代,跳过 List<T>.Enumerator 的 IDisposable 调用链。
+            var actions = _processingBuffer;
+            for (int i = 0; i < actions.Count; i++) actions[i](ctx);
+            actions.Clear(); // 释放对 captured closures 的引用,避免跨帧拖死 ctx 相关对象
+
+            ExecutePipeline(ctx, mode);
+            LastFrameDirtyLayers = _dirtyLayerBuffer.Count;
+            Invalidate();
+            DevTools.IncrementalRenderProbe.FrameRendered?.Invoke(this);
+        }
+
+        /// <summary>
+        /// 测量工具用(Hevo.Charting.Benchmarks --render-probe):不等 VSync,立刻同步跑一帧,
+        /// 跟 CompositionTarget 回调里那一帧是同一段代码(含 RequestUpdate 排队的事务,如 SizeChanged)。
+        /// 返回本帧重录的图层数。
+        /// </summary>
+        internal int RunFrameNow(PlotMode mode)
+        {
+            SwapPendingUpdates();
+            RunSwappedFrame(mode);
+            return LastFrameDirtyLayers;
+        }
+
+        /// <summary>微基准用:丢掉排队的事务(只测 ProjectAll 时,黑板写入排进来的空回调不跑帧也不能越积越多)。</summary>
+        internal void DiscardPendingUpdates()
+        {
+            if (SwapPendingUpdates()) _processingBuffer.Clear();
+        }
+
+        /// <summary>最近一帧 ExecutePipeline 判脏后重录的图层数(诊断用)。</summary>
+        internal int LastFrameDirtyLayers { get; private set; }
+
         /// <summary>
         /// 把后台录制好的图层指令真正"画"到屏幕上。
         /// 三阶段:① SwapBuffer 把所有脏图层 back→front 同步到同一帧;
