@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Hevo.Charting\Hevo.Charting.csproj" />
+    <ProjectReference Include="..\Hevo.Charting.Skia\Hevo.Charting.Skia.csproj" />
     <ProjectReference Include="..\Hevo.Charting.PythonNet\Hevo.Charting.PythonNet.csproj" />
     <ProjectReference Include="..\Hevo.Trade.Abstractions\Hevo.Trade.Abstractions.csproj" />
     <ProjectReference Include="..\Hevo.Trade.Mock\Hevo.Trade.Mock.csproj" />

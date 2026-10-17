@@ -63,6 +63,9 @@ namespace Hevo.Charting.Benchmarks
             // 绘制策略对照:同一套指令改由框架光栅化进位图(ChartCell.RenderModeOverride / ChartLayer.Mode = Bitmap)
             new("bmp",        "增量+位图(全部图层)", false, false, false, PlotMode.Sync, ProbeRenderer.BitmapAll),
             new("bmp-series", "增量+位图(序列图层)", false, false, false, PlotMode.Sync, ProbeRenderer.BitmapSeries),
+            // Skia 后端(Hevo.Charting.Skia):CPU 帧耗时含光栅;GPU 光栅在随后的 WPF 渲染里。光栅部分另在报告末尾 Skia 表单列
+            new("skia",       "增量+Skia",          false, false, false, PlotMode.Sync, ProbeRenderer.Skia),
+            new("skia-gpu",   "增量+Skia GPU",      false, false, false, PlotMode.Sync, ProbeRenderer.SkiaGpu),
         };
 
         /// <summary>默认跑的逐帧场景(不带 --scenarios 时)。</summary>
@@ -109,6 +112,7 @@ namespace Hevo.Charting.Benchmarks
             // --alloc-types:各轮 GCAllocationTick 采样按 (类型, LOH) 累加
             public readonly Dictionary<(string Type, bool Large), (long Ticks, long Bytes, long MaxObj)> AllocTypes = new();
             public int AllocFrames;
+            public readonly List<double> SkiaRaster = new();
             public string Key => $"bars={Bars}|charts={Charts}|{Scenario}|{Mode.Key}";
         }
 
@@ -265,6 +269,31 @@ namespace Hevo.Charting.Benchmarks
 
         // ── 一段测量:设模式 → 归位 → 跑 steps 帧 ───────────────────────────────
 
+        // 校验用:HEVO_PROBE_PNG_DIR=目录 时,每个 (根数, 图数, 场景, 模式) 测量段结束后把第一张图截一张 PNG,
+        // 用来肉眼比对各绘制后端的画面(截图走 RenderTargetBitmap,不碰屏幕)
+        private static readonly string? s_pngDir = Environment.GetEnvironmentVariable("HEVO_PROBE_PNG_DIR");
+        private static readonly HashSet<string> s_pngDone = new();
+
+        private static void SnapshotOnce(ProbeRig rig, Combo c)
+        {
+            if (string.IsNullOrEmpty(s_pngDir) || !s_pngDone.Add(c.Key)) return;
+            var cell = rig.Charts[0].Cell;
+            cell.UpdateLayout();
+            var dpi = VisualTreeHelper.GetDpi(cell);
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                (int)Math.Ceiling(cell.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(cell.ActualHeight * dpi.DpiScaleY),
+                96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
+            rtb.Render(cell);
+            var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+            Directory.CreateDirectory(s_pngDir);
+            using var fs = File.Create(Path.Combine(s_pngDir, $"{c.Bars}_{c.Charts}_{c.Scenario}_{c.Mode.Key}.png"));
+            enc.Save(fs);
+        }
+
+        // Skia 策略下本段每帧的合成 + 光栅耗时(ms);其余策略为 null
+        private static List<double>? s_rasterSink;
+
         private static void RunSegment(ProbeRig rig, Combo c, int steps, bool record)
         {
             var step = ScenarioStep(rig, c.Scenario);
@@ -284,11 +313,14 @@ namespace Hevo.Charting.Benchmarks
                 IncrementalRenderProbe.ShortCircuitMissDetail.Clear();
 
                 var samples = new List<Sample>(steps);
+                s_rasterSink = record && c.Mode.Renderer is ProbeRenderer.Skia or ProbeRenderer.SkiaGpu ? c.SkiaRaster : null;
                 var sampler = record ? s_allocSampler : null;
                 sampler?.Begin();
                 int g0 = GC.CollectionCount(0), g1 = GC.CollectionCount(1), g2 = GC.CollectionCount(2);
                 bool checkTip = c.Scenario.Contains("Hover", StringComparison.Ordinal);
                 for (int i = 0; i < steps; i++) samples.Add(RunStep(rig, step, i, c.Mode.Plot, checkTip));
+                s_rasterSink = null;
+                if (record) SnapshotOnce(rig, c);
                 if (sampler != null)
                 {
                     Pump(500); // EventPipe 异步派发,等缓冲里的采样事件到齐
@@ -360,6 +392,7 @@ namespace Hevo.Charting.Benchmarks
             var (layers, drawCmds) = RunFrame(rig, plot);
             long t2 = Stopwatch.GetTimestamp();
             long alloc1 = GC.GetAllocatedBytesForCurrentThread();
+            s_rasterSink?.Add(ProbeRenderers.LastRasterTicks() * 1000.0 / Stopwatch.Frequency);
 
             return new Sample(
                 PipelineMs: (t2 - t1) * 1000.0 / Stopwatch.Frequency,
@@ -643,6 +676,26 @@ namespace Hevo.Charting.Benchmarks
                         $"{e.Gen0Per1k:F1}/{e.Gen1Per1k:F1}/{e.Gen2Per1k:F1} |"));
                 }
             }
+            var skia = combos.Where(c => c.SkiaRaster.Count > 0).ToList();
+            if (skia.Count > 0)
+            {
+                md.AppendLine();
+                md.AppendLine("### Skia 后端:录制与光栅拆分(CPU:帧耗时 = Feature 投影 + 图层录制 + SKPicture 重录 + 合成面整面光栅;GPU:光栅在随后的 WPF 渲染里,另计)");
+                md.AppendLine();
+                md.AppendLine("| K 线根数 | 图数 | 场景 | 模式 | 帧耗时中位(ms) | 其中光栅中位(ms) | 光栅 P95(ms) | 端到端中位(ms)=输入+帧 |");
+                md.AppendLine("|---:|---:|---|---|---:|---:|---:|---:|");
+                foreach (var c in skia)
+                {
+                    var all = c.Rounds.SelectMany(r => r).ToList();
+                    // GPU 目标的光栅不在帧耗时里(发生在随后的 WPF 渲染),端到端要加上
+                    bool gpu = c.Mode.Renderer == ProbeRenderer.SkiaGpu;
+                    var e2e = all.Select((x, i) => x.InputMs + x.PipelineMs + (gpu && i < c.SkiaRaster.Count ? c.SkiaRaster[i] : 0));
+                    md.AppendLine(string.Create(CultureInfo.InvariantCulture,
+                        $"| {c.Bars} | {c.Charts} | {c.Scenario} | {c.Mode.Name} | {Stats.Percentile(all.Select(x => x.PipelineMs), 0.5):F3} | " +
+                        $"{Stats.Percentile(c.SkiaRaster, 0.5):F3} | {Stats.Percentile(c.SkiaRaster, 0.95):F3} | {Stats.Percentile(e2e, 0.5):F3} |"));
+                }
+            }
+
             if (entries.Any(e => !e.CountersDeterministic && e.Frames > 0))
                 md.AppendLine().AppendLine("⚠ = 计数在各轮之间不一致(脚本或引擎里有不确定因素),不能作回归门槛。");
 
@@ -1026,6 +1079,8 @@ namespace Hevo.Charting.Benchmarks
             Schema.InvalidateEnvironment();
         }
 
+        private long _historyRevision;
+
         public void WriteSeries(bool follow)
         {
             var p = Schema.Ports;
@@ -1036,6 +1091,7 @@ namespace Hevo.Charting.Benchmarks
                 Board.WriteIfChanged(p.High, Slice(Data.High));
                 Board.WriteIfChanged(p.Low, Slice(Data.Low));
                 Board.WriteIfChanged(p.Close, Slice(Data.Close));
+                Board.WriteIfChanged(p.HistoryRevision!, ++_historyRevision);
                 Board.WriteIfChanged(Schema.SmaPort, Slice(Data.Sma));
                 if (Schema.Options.Markers)
                 {
@@ -1156,7 +1212,11 @@ namespace Hevo.Charting.Benchmarks
         public DataPort<ReadOnlyMemory<ArrowMarker>> ArrowPort { get; } = new("P_Arrows");
         public DataPort<ReadOnlyMemory<TextMarker>> TextPort { get; } = new("P_Texts");
 
-        public CandlePorts Ports { get; } = new(new("P_Time"), new("P_Open"), new("P_High"), new("P_Low"), new("P_Close"));
+        // HistoryRevision:探针模拟数据源的"历史段版本"——WriteSeries(追加 / 归位)递增,TickStep 只改最后一根不碰它
+        public CandlePorts Ports { get; } = new(new("P_Time"), new("P_Open"), new("P_High"), new("P_Low"), new("P_Close"))
+        {
+            HistoryRevision = new DataPort<long>("P_HistoryRevision"),
+        };
         public DataPort<ReadOnlyMemory<double>> SmaPort { get; } = new("P_SMA20");
         public DataPort<RealRange> YRangePort { get; } = new("P_YRange");
         public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();

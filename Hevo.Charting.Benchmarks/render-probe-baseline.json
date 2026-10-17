@@ -17,8 +17,8 @@
     },
     "bars=2000|charts=1|Tick|inc": {
       "FeaturesPerFrame": 1,
-      "LayersPerFrame": 2,
-      "DrawCmdsPerFrame": 9
+      "LayersPerFrame": 1,
+      "DrawCmdsPerFrame": 4
     },
     "bars=2000|charts=1|Append|inc": {
       "FeaturesPerFrame": 6.225,
@@ -47,8 +47,8 @@
     },
     "bars=2000|charts=1|DashTick|inc": {
       "FeaturesPerFrame": 2,
-      "LayersPerFrame": 3,
-      "DrawCmdsPerFrame": 10
+      "LayersPerFrame": 2,
+      "DrawCmdsPerFrame": 5
     },
     "bars=2000|charts=1|Zoom@150|inc": {
       "FeaturesPerFrame": 3.2667,

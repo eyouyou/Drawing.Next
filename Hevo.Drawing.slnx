@@ -24,4 +24,5 @@
   <Folder Name="/05-python/">
     <Project Path="Hevo.Charting.PythonNet/Hevo.Charting.PythonNet.csproj" />
   </Folder>
+  <Project Path="Hevo.Charting.Skia/Hevo.Charting.Skia.csproj" />
 </Solution>
