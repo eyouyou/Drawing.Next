@@ -4,7 +4,8 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
-		<ImplicitUsings>enable</ImplicitUsings>
+		<!-- .NET 5 SDK 不认 ImplicitUsings:改用 GlobalUsings.cs 显式列出(同核心库 Globals.cs) -->
+		<ImplicitUsings>disable</ImplicitUsings>
 
 		<Description>Hevo Trade 内存撮合 Mock 实装 —— 用于回测 / e2e 测试 / 离线开发,不连真实 broker。</Description>
 	</PropertyGroup>

@@ -24,6 +24,8 @@
 
 ### 核心红线
 
+范围:`Hevo.Charting`、`Hevo.Charting.CodeAnalysis`、业务工程(`Hevo.Drawing.LowCodeDemo`、`DocSamples`)以及业务工程引用到的 `Hevo.Charting.PythonNet`、`Hevo.Trade.*`。`scripts/check-net5.ps1` 按下面"切回 .NET 5 的清单"自动检查,CI 的 net5-compat job 每次都跑。这些工程不开 `ImplicitUsings`(.NET 5 SDK 不认),统一用 `Globals.cs` / `GlobalUsings.cs` 写 global using。
+
 1. **业务侧 (`Hevo.Drawing.LowCodeDemo`、`DocSamples` 等下游工程) 严格 `LangVersion=9.0`**。csproj 已显式锁定。禁止使用 record struct、global using、file-scoped namespace、collection expression `[]`、`required` 修饰符、原始字符串字面量等 C# 10+ 特性。
 2. **Framework 侧 (`Hevo.Charting`) `LangVersion=preview`**,可在 `.NET 5 SDK 5.0.408` 下解锁 record struct + global using;但仍只允许使用 .NET 5 SDK preview 编译器实际能编译的 C# 10 特性子集。**禁止使用 `required` (C# 11)、collection expression (C# 12) 等 .NET 5 SDK 不识别的特性**。
 3. **BCL API 红线** — 不得使用以下 .NET 6+ API:

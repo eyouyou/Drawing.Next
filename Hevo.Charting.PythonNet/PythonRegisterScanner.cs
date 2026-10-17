@@ -23,14 +23,12 @@ namespace Hevo.Charting.PythonNet
         // signature / inputs / incremental 任一可缺;inputs 元素只接受单 / 双引号字面量字符串。
         // incremental 接受 True / False(裸 identifier)。
         private static readonly Regex _decoratorRegex = new(
-            """
-            @register\s*\(\s*
-                (?:"(?<name>[^"]*)"|'(?<name>[^']*)')
-                (?<kwargs>(?:\s*,\s*\w+\s*=\s*(?:"[^"]*"|'[^']*'|\[[^\]]*\]|True|False))*)
-                \s*\)
-            \s*\r?\n
-            \s*def\s+(?<func>\w+)\s*\(
-            """,
+            @"@register\s*\(\s*
+    (?:""(?<name>[^""]*)""|'(?<name>[^']*)')
+    (?<kwargs>(?:\s*,\s*\w+\s*=\s*(?:""[^""]*""|'[^']*'|\[[^\]]*\]|True|False))*)
+    \s*\)
+\s*\r?\n
+\s*def\s+(?<func>\w+)\s*\(",
             RegexOptions.IgnorePatternWhitespace | RegexOptions.Compiled);
 
         // 从 kwargs 子串里抓 signature= / inputs= / incremental=

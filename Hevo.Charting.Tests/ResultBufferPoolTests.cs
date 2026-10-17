@@ -84,6 +84,30 @@ namespace Hevo.Charting.Tests
             Assert.Contains(shared, b.PublishedForTest);
         }
 
+        /// <summary>
+        /// PlotFeature 把 Python 结果写进 line / bar 端口后要登记(call.Written):登记过的缓冲发布期间不会再交出去。
+        /// 漏登记的话,调用结束 EndCall 把它当"租了没用"放回空闲池,下一次调用就会改写正在显示的列。
+        /// </summary>
+        [Fact]
+        public void PlotFeatureLineWrite_RegistersPublishedBuffer()
+        {
+            var write = typeof(Hevo.Charting.Features.PlotFeature).GetMethod("WriteValueByKind",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            var b = new ResultBufferPool();
+            var port = new DataPort<ReadOnlyMemory<double>>("T_PlotLine");
+            using var board = new DataBlackboard();
+            double[] published;
+            using (var call = b.BeginCall())
+            {
+                published = call.Rent(100);
+                using (board.AcquireWriteLock())
+                    write.Invoke(null, new object[] { board, port, "line", new ReadOnlyMemory<double>(published, 0, 100), call });
+            }
+            Assert.Contains(published, b.PublishedForTest);
+            for (int i = 0; i < 10; i++)
+                using (var call = b.BeginCall()) Assert.NotSame(published, call.Rent(100));
+        }
+
         [Fact]
         public void ForeignArray_ReplacesPublishedAndIsNotTracked()
         {

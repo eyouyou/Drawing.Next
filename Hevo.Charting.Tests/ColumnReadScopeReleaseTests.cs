@@ -44,6 +44,35 @@ namespace Hevo.Charting.Tests
             }
             Assert.False(ColumnReadScope.CanReleaseForLongCall);                // 没有登记时也不可让出
         }
+
+        /// <summary>
+        /// 真实订阅路径:WatchAsync 回调登记的是可让出读者(长计算期间不挡全进程缓冲复用),
+        /// 同步 Watch 回调登记的是不可让出读者。
+        /// </summary>
+        [Fact]
+        public void WatchAsyncCallback_IsReleasableReader_SyncWatchIsNot()
+        {
+            var source = new MapIngestorNotificationTests.RowSource();
+            var col = new DataPort<ReadOnlyMemory<double>>("RS_Col");
+            bool? asyncCanRelease = null, syncCanRelease = null;
+            using var done = new ManualResetEventSlim(false);
+
+            var flow = source.Pipe().LinkStream(cfg => cfg.Map(col, (x, _) => x.A)).Seal();
+            var watched = Hevo.Charting.WorkFlow.FeatureExtensions.Watch(flow, new object[] { col }, _ =>
+                syncCanRelease = ColumnReadScope.CanReleaseForLongCall);
+            watched = Hevo.Charting.WorkFlow.FeatureExtensions.WatchAsync(watched, new object[] { col }, _ =>
+            {
+                asyncCanRelease = ColumnReadScope.CanReleaseForLongCall;
+                done.Set();
+            });
+            // 不退订:管线退订时先释放黑板、再退 Watch,会抛 ObjectDisposedException(另行跟进);跟其它管线测试一样随测试结束丢弃
+            watched.Subscribe(_ => { });
+
+            source.PublishRows(new MapIngestorNotificationTests.Row(1, 2));
+            Assert.True(done.Wait(5000), "WatchAsync 回调没跑");
+            Assert.True(asyncCanRelease);
+            Assert.False(syncCanRelease);
+        }
     }
 
     /// <summary>真 Python handler:在可让出的读者里调用时,Python 运行期间槽位处于让出状态,且入参内容完整传到 Python。</summary>

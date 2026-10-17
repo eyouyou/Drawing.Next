@@ -41,8 +41,27 @@ namespace Hevo.Charting.Benchmarks
             if (args.Length > 0 && args[0] == "--latency-probe")
                 return LatencyProbe.Run(args);
 
-            BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, BenchConfig(args));
-            return 0;
+            var summaries = BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, BenchConfig(args)).ToList();
+            return BenchExitCode(summaries);
+        }
+
+        // CI 冒烟要能失败:BDN 自己不因为构建失败 / 全 NA 返回非 0(7f60cb4 的 NU1201 就是全 NA、executed 0 还是绿的)。
+        // 没选中任何基准、有严重校验错误、或有一条报告没跑成功时返回 1。
+        internal static int BenchExitCode(System.Collections.Generic.IReadOnlyList<BenchmarkDotNet.Reports.Summary> summaries)
+        {
+            if (summaries.Count == 0) { Console.Error.WriteLine("[bench] 没有选中任何基准"); return 1; }
+            int failed = 0, executed = 0;
+            foreach (var s in summaries)
+            {
+                if (s.HasCriticalValidationErrors) { Console.Error.WriteLine($"[bench] {s.Title}:有严重校验错误"); failed++; }
+                foreach (var r in s.Reports)
+                {
+                    executed++;
+                    if (!r.Success) { Console.Error.WriteLine($"[bench] {r.BenchmarkCase.DisplayInfo}:没有跑成功"); failed++; }
+                }
+            }
+            if (executed == 0) { Console.Error.WriteLine("[bench] 一个基准都没执行"); return 1; }
+            return failed > 0 ? 1 : 0;
         }
 
         // BDN 0.14 不认识 .NET 10:按宿主 runtime 生成的 boilerplate 是 TargetFramework=net10.0,

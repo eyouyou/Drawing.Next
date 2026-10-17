@@ -17,7 +17,7 @@
 
 ## 硬约束速记
 
-- `Hevo.Charting` / `Hevo.Charting.CodeAnalysis` / 业务工程必须能用 .NET 5 SDK 5.0.408 重编:不用 `required`、集合表达式 `[]`、`ArgumentNullException.ThrowIfNull` 等 .NET 6+ / C# 11+ 特性;业务工程(`Hevo.Drawing.LowCodeDemo`、`DocSamples`)锁 `LangVersion 9`。测试 / 基准 / MCP 工程不受限。
+- `Hevo.Charting` / `Hevo.Charting.CodeAnalysis` / 业务工程及其依赖(`Hevo.Charting.PythonNet`、`Hevo.Trade.*`)必须能用 .NET 5 SDK 5.0.408 重编(`scripts/check-net5.ps1`,CI 的 net5-compat job):不用 `required`、集合表达式 `[]`、`ArgumentNullException.ThrowIfNull` 等 .NET 6+ / C# 11+ 特性;业务工程(`Hevo.Drawing.LowCodeDemo`、`DocSamples`)锁 `LangVersion 9`。这些工程不开 `ImplicitUsings`(.NET 5 SDK 不认),用 `Globals.cs` / `GlobalUsings.cs`。测试 / 基准 / MCP 工程不受限。
 - `OnProject` 里 `UsePort` / `UseMemo` 顶层、无条件、固定顺序;不写黑板;不 `new` 集合 / 数组 / 闭包(工作集合做成跨帧复用字段;每帧发布的不可变 Trait 记录除外)。
 - 坐标只走 `IScale.Normalize` / `CoordinateExtensions.ProjectToScreen`,不手写 `(x - min) / span * width`。
 - Layer 用 `partial class`,`IConsumes<T>` 交给生成器,不手写。
