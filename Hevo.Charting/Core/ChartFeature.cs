@@ -102,7 +102,7 @@ namespace Hevo.Charting.Core
         //   定点修(给该 Feature 补 UsePort,或补一个 UseTrait<T>() API)。
         public (T Value, bool IsChanged) UsePort<T>(
             DataPort<T> port,
-            [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(port))] string? portExpression = null)
+            [System.Runtime.CompilerServices.CallerArgumentExpression("port")] string? portExpression = null)
         {
             // 端口非空契约:UsePort 的语义("订阅 + 读 + 防抖")在 port=null 下没有合法路径。
             // 提前 fail-fast 替代 board.Read 内深处的 NRE,堆栈直接定位到出错的 feature + 字段。
@@ -151,7 +151,7 @@ namespace Hevo.Charting.Core
         public bool UsePorts<T>(
             DataPort<T>[] ports,
             T[] buffer,
-            [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(ports))] string? portsExpression = null)
+            [System.Runtime.CompilerServices.CallerArgumentExpression("ports")] string? portsExpression = null)
         {
             if (ports.Length != buffer.Length)
                 throw new ArgumentException("Ports 数组和 Buffer 数组的长度必须一致!");

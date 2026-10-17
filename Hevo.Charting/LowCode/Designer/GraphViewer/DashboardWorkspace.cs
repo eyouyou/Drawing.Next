@@ -32,7 +32,10 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private sealed class CellSlot
         {
-            public required string Id { get; set; }
+            // ctor 代替 required(C# 11):README §2 要求 .NET 5 SDK 5.0.408 可编。
+            public CellSlot(string id) { Id = id; }
+
+            public string Id { get; set; }
             public DashboardCellRole Role { get; set; } = DashboardCellRole.Pane;
             public double HeightRatio { get; set; } = 1;
             // graph editor schema:
@@ -275,7 +278,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void AddCell(string id, DashboardCellRole role, double heightRatio)
         {
-            var slot = new CellSlot { Id = id, Role = role, HeightRatio = heightRatio };
+            var slot = new CellSlot(id) { Role = role, HeightRatio = heightRatio };
             WireSlot(slot);
 
             // build per-slot visuals once
@@ -610,7 +613,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
             foreach (var cell in d.Cells)
             {
-                var slot = new CellSlot { Id = cell.Id, Role = cell.Role, HeightRatio = cell.HeightRatio };
+                var slot = new CellSlot(cell.Id) { Role = cell.Role, HeightRatio = cell.HeightRatio };
                 WireSlot(slot);
                 slot.State.State = GraphDeserializer.FromBlueprint(cell.Blueprint);
                 slot.RootBorder  = BuildCellRoot(slot);
@@ -688,7 +691,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             var body = new StackPanel { Margin = new Thickness(16) };
             var tbId    = DlgField(body, "Cell Id:", slot.Id);
             var cbRole  = DlgCombo<DashboardCellRole>(body, "Role:",
-                [DashboardCellRole.Master, DashboardCellRole.Pane, DashboardCellRole.Raw], slot.Role);
+                new[] { DashboardCellRole.Master, DashboardCellRole.Pane, DashboardCellRole.Raw }, slot.Role);
             var tbRatio = DlgField(body, "高度比 (HeightRatio):", slot.HeightRatio.ToString("0.##"));
 
             var okBtn = Btn("确定"); okBtn.Margin = new Thickness(0, 12, 0, 0);

@@ -711,7 +711,8 @@ namespace Hevo.Charting.LowCode.Designer
 
             Func<int> resolvedLength = lengthProvider ?? (() => 0);
             var ingestorType = typeof(ScatterIngestor<,>).MakeGenericType(itemType, valueType);
-            object? defaultValue = valueType.IsValueType ? Activator.CreateInstance(valueType) : null;
+            // 空位填缺失占位(double 为 NaN),跟手写 Map 同口径
+            object? defaultValue = MissingValue.For(valueType);
 
             var ctor = ingestorType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
                                    .FirstOrDefault(c => c.GetParameters().Length == 5);
@@ -1070,7 +1071,7 @@ namespace Hevo.Charting.LowCode.Designer
             // forward delegate 触发时 lazy 调用,拿最新 snapshot。
             var dsType = dataSource.GetType();
             var getSnapshotMethod = dsType.GetMethod("GetSnapshot",
-                BindingFlags.Public | BindingFlags.Instance, types: Type.EmptyTypes);
+                BindingFlags.Public | BindingFlags.Instance, binder: null, types: Type.EmptyTypes, modifiers: null);
 
             var invoke = handlerType.GetMethod("Invoke")
                 ?? throw new InvalidOperationException($"handler 类型 {handlerType} 没有 Invoke 方法");
