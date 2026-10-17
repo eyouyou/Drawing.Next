@@ -12,6 +12,7 @@
   </Folder>
   <Folder Name="/02-tests/">
     <Project Path="Hevo.Charting.Tests/Hevo.Charting.Tests.csproj" />
+    <Project Path="Hevo.Charting.Tests/DocSamples/Hevo.Charting.DocSamples.csproj" />
     <Project Path="Hevo.Charting.Benchmarks/Hevo.Charting.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/03-mcp/">

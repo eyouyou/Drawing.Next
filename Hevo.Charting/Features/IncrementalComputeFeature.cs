@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
 using Hevo.Charting.LowCode;
-using Hevo.Charting.LowCode.Designer.GraphViewer.Wrappers;
 using Hevo.Charting.WorkFlow;
 
 namespace Hevo.Charting.Features
@@ -89,7 +88,7 @@ namespace Hevo.Charting.Features
     /// </summary>
     // 不 sealed —— 业务派生子类(典型:`EmaFeature : IncrementalComputeFeature` 把 length / alpha 等参数化进字段)
     // DryRun 走 IsAssignableFrom 自动覆盖派生类,§D2.6.4 决策。
-    public class IncrementalComputeFeature : ComputeNodeFeature
+    public class IncrementalComputeFeature : ComputeFeatureBase
     {
         /// <summary>
         /// 单输入端口。跟 <see cref="Inputs"/> 互斥:Inputs.Count > 0 时走多输入路径,InputPort 被忽略。

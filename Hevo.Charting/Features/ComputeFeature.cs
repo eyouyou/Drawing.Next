@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
 using Hevo.Charting.LowCode;
-using Hevo.Charting.LowCode.Designer.GraphViewer.Wrappers;
 using Hevo.Charting.WorkFlow;
 
 namespace Hevo.Charting.Features
@@ -77,7 +76,7 @@ namespace Hevo.Charting.Features
     /// Python handler 的 traceback 已由 PythonNet 端 Translate 进 <see cref="Exception.Message"/>。
     /// </para>
     /// </summary>
-    public sealed class ComputeFeature : ComputeNodeFeature
+    public sealed class ComputeFeature : ComputeFeatureBase
     {
         // 输出缓冲池:Python handler 的结果拷进这里租来的缓冲,不再每次 new(2 万根一块 160 KB 进 LOH)。见 ResultBufferPool
         private ResultBufferPool _outBuffers = new();

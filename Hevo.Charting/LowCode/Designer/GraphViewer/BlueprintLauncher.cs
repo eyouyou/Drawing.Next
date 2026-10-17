@@ -490,7 +490,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             registry[portId] = (type, source);
         }
 
-        // §D2.5.E2E "Output 没接 AutoScale" 警告 ——  PyComputeFeature / ComputeNodeFeature 等
+        // §D2.5.E2E "Output 没接 AutoScale" 警告 ——  PyComputeFeature / ComputeFeatureBase 等
         // 中间节点的 ROM<double> 输出如果只接到 LineSeries.DataPort 而不接 UniversalAutoScale.ValuePorts,
         // Y 范围只看其他 series,该指标在画布外被裁掉(典型坑见低代码.md §8 + 用户反馈)。
         private static void CheckOutputAutoScaleCoverage(ChartBlueprint blueprint, Type?[] featureTypes, List<BlueprintDiagnostic> diagnostics)

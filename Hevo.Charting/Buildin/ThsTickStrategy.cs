@@ -4,6 +4,18 @@ using Hevo.Charting.Core;
 namespace Hevo.Charting.Buildin
 {
     // ==========================================
+    // 【开发关注:否 · 预留策略库】
+    // 本文件 7 个刻度策略(ThsYAxisMath / ThsTimeMath / DomainBoundary / FixedSchedule /
+    // Periodic / AdaptiveYGrid / SmartTradeInterval)是同花顺风格轴刻度的备选实现,
+    // 目前没有任何 schema、蓝图 JSON、Python 脚本或测试引用,业务开发写图表时不用管它们。
+    // 保留原因:同花顺风格 Y 轴等分、按固定时间表/交易间隔出时间刻度是常见需求,以后换轴风格时直接拿来用。
+    // 接入方式:作为 strategy 参数传给 NumericTickProvider / TickProvider
+    //   (参考 FeatureCanvasExtensions 里 MirrorRatioTickStrategy 的用法);
+    //   要让蓝图可选,还需另写 JSON 转换器(仿 ZoomStrategyJsonConverter)——当前蓝图不认识它们。
+    // 动它之前:先补单测(现在零覆盖),行为未经生产验证。
+    // ==========================================
+
+    // ==========================================
     // 💥 1. THS 风格 Y轴 (价格/指标) 等分策略
     // 【架构说明】：Y 轴是连续域纯数学推演，不依赖任何数组数据，
     // 因此天生就是 0-GC，无需做 RefBox 改造，保持原样即可！

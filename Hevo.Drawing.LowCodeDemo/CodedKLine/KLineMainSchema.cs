@@ -150,12 +150,13 @@ namespace Hevo.Drawing.LowCodeDemo.CodedKLine
         // ── SMA(20) 计算状态 ─────────────────────────────────────────────────
         // 单独抽 class 让 .Compute<TState> 接 state —— Compute 闭包要求 static,
         // 不能 capture this。把要用的引用全塞 state 里。
+        // 发布列走 ColumnPublisher:每次写一块新缓冲,不原地改已发布的数组(帧可能正在锁外读它)。
         private sealed class SmaState
         {
             private readonly int _length;
             private readonly DataPort<ReadOnlyMemory<double>> _smaPort;
             private readonly MockKLineDataSource _ds;
-            private double[] _buffer = Array.Empty<double>();
+            private readonly ColumnPublisher<double> _sma = new ColumnPublisher<double>();
 
             public SmaState(int length, DataPort<ReadOnlyMemory<double>> smaPort, MockKLineDataSource ds)
             {
@@ -171,26 +172,26 @@ namespace Hevo.Drawing.LowCodeDemo.CodedKLine
                 // O(N) 滑动 sum → SMA,前 _length-1 根 NaN,LineSeries 自动断点。
                 var snap = _ds.GetSnapshot();
                 int n = snap.Count;
-                if (_buffer.Length < n) _buffer = new double[Math.Max(n, 64)];
+                var buffer = _sma.Rent(n);
 
                 if (n < _length)
                 {
-                    for (int i = 0; i < n; i++) _buffer[i] = double.NaN;
-                    board.WriteIfChanged(_smaPort, _buffer.AsMemory(0, n));
+                    for (int i = 0; i < n; i++) buffer[i] = double.NaN;
+                    _sma.Publish(board, _smaPort, buffer, n);
                     return;
                 }
 
                 var span = snap.AsSpan();
                 double sum = 0.0;
                 for (int i = 0; i < _length; i++) sum += span[i].Close;
-                for (int i = 0; i < _length - 1; i++) _buffer[i] = double.NaN;
-                _buffer[_length - 1] = sum / _length;
+                for (int i = 0; i < _length - 1; i++) buffer[i] = double.NaN;
+                buffer[_length - 1] = sum / _length;
                 for (int i = _length; i < n; i++)
                 {
                     sum += span[i].Close - span[i - _length].Close;
-                    _buffer[i] = sum / _length;
+                    buffer[i] = sum / _length;
                 }
-                board.WriteIfChanged(_smaPort, _buffer.AsMemory(0, n));
+                _sma.Publish(board, _smaPort, buffer, n);
             }
         }
     }

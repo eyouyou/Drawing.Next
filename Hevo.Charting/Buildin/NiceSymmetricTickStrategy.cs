@@ -2,6 +2,12 @@ using Hevo.Charting.Abstractions;
 
 namespace Hevo.Charting.Buildin
 {
+    // 【开发关注:否 · 预留策略】当前没有任何 schema、蓝图 JSON、Python 脚本或测试引用 NiceSymmetricTickStrategy,
+    // 业务开发写图表时不用管。保留原因:MACD 柱、涨跌幅这类围绕 0 的对称轴可用。
+    // 接入方式:作为 strategy 参数传给 NumericTickProvider / TickProvider
+    //   (参考 FeatureCanvasExtensions 里 MirrorRatioTickStrategy 的用法);
+    //   要让蓝图可选,还需另写 JSON 转换器(仿 ZoomStrategyJsonConverter)——当前蓝图不认识它们。
+    // 动它之前:先补单测(现在零覆盖)。
     /// <summary>
     /// 围绕 0 / 围绕参考值对称域专用刻度策略。
     /// 与 AutoScaleStrategy.SymmetricZero / SymmetricReference 配合使用。

@@ -2,7 +2,12 @@
 
 文档目的:**新接入一个图形后端**(Skia 回归 / Direct2D / OpenGL / Avalonia / 跨平台 GPU 等)时,该改哪些文件、扩展哪些抽象、如何融入 ChartCell 路由器。
 
-写于 Skia 拔除之后(详见 [TODO.md](TODO.md)),当前仓库只剩 WPF DrawingContext 一条 backend。
+写于旧 `SkiaRenderer` 拔除之后(详见 [TODO.md](TODO.md))。当前现状:
+
+- 核心库 `Hevo.Charting` 仍零第三方依赖,默认上屏路径是 WPF `DrawingContext`。
+- 核心库新增了 [`IChartRenderBackend`](Renderers/IChartRenderBackend.cs) 扩展点(`ChartCell.RenderBackend`):挂上后整个 cell 的矢量画布改由该后端上屏,控件层仍走 WPF。
+- 本文下面介绍的按图层混合思路(`IRendererProvider` + 新 `RenderMode` 路由,见 §5 思路 A)是另一条路线;两条路线目前并存。
+- Skia 实现(`SkiaRenderBackend`,走 `IChartRenderBackend`)在可选程序集 `Hevo.Charting.Skia` 里,SkiaSharp 依赖只在该程序集;该程序集是实验性的,不随产品打包,业务工程不引用。
 
 ---
 
@@ -82,7 +87,7 @@ public sealed class WpfRenderProvider : IRendererProvider<DrawingContext>
 
 ### 5. 集成进 ChartCell
 
-这是最微妙的一步。当前 ChartCell 是写死的 WPF backend(用 `_wpfProvider` 字段、`_drawingCanvas` UIElement、`RenderOpen()` 拿 DrawingContext)。
+这是最微妙的一步。当前 ChartCell 的默认路径是写死的 WPF backend(用 `_wpfProvider` 字段、`_drawingCanvas` UIElement、`RenderOpen()` 拿 DrawingContext);整 cell 替换走 `ChartCell.RenderBackend`(`IChartRenderBackend`),见文首。
 
 接入新 backend 有两种思路:
 
