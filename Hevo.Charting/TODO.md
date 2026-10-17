@@ -4,6 +4,18 @@
 
 ---
 
+## Skia 后端宿主的原点对齐(重新启用 Skia 时做)
+
+**触发条件**:`Hevo.Charting.Skia` 的 `SkiaRenderBackend` 要随产品打包,或业务开始用 `ChartCell.RenderBackend`。
+
+**问题**:Skia 后端把整张图画成一张位图,宿主元素挂在 `_rootContainer` 里。祖先摆在小数位置(`Grid *`、GridSplitter、125% DPI 下的整数 DIP)时,这张位图跟位图模式图层一样会被重采样发糊、整体错开不到一个设备像素。WPF 路径已处理(06 号文档 §14.9:矢量图层靠 `ChartDrawingCanvas.InsertVisual` 给图层设的 snapping guideline,位图图层靠 `ChartCell` 维护的原点平移,`BitmapLayerSurface.Mount` 套上),Skia 宿主没有覆盖。下面"Skia 引用移除"一节记的"±1 列错位"可能同源,重新启用时先用小数偏移复现确认。
+
+**方案**:跟位图图层一样处理 —— `ChartCell.SnapBitmapOrigin` 算出的平移(交互层那份,宿主不挂 BitmapCache)交给后端,作为宿主元素的 `RenderTransform`,或由后端在 `DrawImage` 外面套上。只改渲染,不改宿主的布局位置;鼠标坐标照旧走 `GetPosition(DrawingCanvas)`。
+
+**验证**:`StaticCacheAliasingTests` 的祖先小数偏移用例加一组 `RenderBackend = new SkiaRenderBackend()`(测试工程已引用 Skia 程序集),开 / 关缓存半透明像素为 0;真实屏幕用小数偏移截图对照。
+
+---
+
 ## ✅ 已完成:Skia 引用移除（commit 8350acf）
 
 > 现状补充:本节记录的是从**核心库**移除旧 `SkiaRenderer` 一事,核心库 `Hevo.Charting` 至今仍零第三方依赖。此后核心库新增了 `IChartRenderBackend` 整 cell 替换扩展点(`ChartCell.RenderBackend`),它与 [Renderer.md](Renderer.md) 介绍的按图层混合思路(`IRendererProvider`)是两条并存的路线;Skia 实现(`SkiaRenderBackend`)在可选程序集 `Hevo.Charting.Skia` 里(实验性,不随产品打包,业务工程不引用)。
@@ -66,18 +78,19 @@ ChartCell 路由器自动把它送进 `_overlayCanvas`(无 cache,跟 Crosshair /
 
 ---
 
-## ⏳ 待触发:静态层缓存策略需要业务级灵活性
+## ✅ 已处理:静态层缓存策略
 
-**触发条件**:出现 tick 行情 schema 或者超低 N 的展示型 schema,默认 `StaticCachePolicy=On` 不再合适。
+`StaticCachePolicy` 只留 `On / Off`,默认 On;`Adaptive`、滞回阈值 500 / 200、`ChartCell.ReportVisibleDataCount` 已删除。
 
-**已实施**([ChartCell.cs](Core/ChartCell.cs)):
-- 三档枚举 `StaticCachePolicy.On / Off / Adaptive`
-- Adaptive 滞回阈值 `StaticCacheEnableThreshold` (500) / `StaticCacheDisableThreshold` (200)
-- `ViewportManagerFeature` 自动调 `chart.ReportVisibleDataCount()`,业务无感
-
-**未实施扩展点**:
-- 命中率统计:跟踪过去 1s 内缓存复用 vs 重建比例,完全自适应,不需要业务配阈值
-- per-layer-group 缓存:不同 layer group 各自独立的 cache canvas(目前所有 background-level static 都共一个 `_drawingCanvas`)
+- 阈值没有测量依据,代码里也没有任何地方用 `Adaptive`(默认一直是 On,阈值从未生效)。
+- 默认 On 的依据(latency-probe,集显 GPU,120 Hz,每张图可见 1000 根 + 成交量):4 张图同屏时十字光标端到端
+  开缓存 16.6 ms、关缓存 33.2 ms(多等一帧),缩放持平;单图、可见 120 根时开关一致。这也是 4 月加缓存时的初衷
+  (多图、K 线多时十字光标稳在一帧)。
+- WPF 软件渲染(远程桌面同款路径)下缓存反而更慢:可见 120 根十字光标 / 缩放 18 → 33 ms,可见 1000 根缩放 33 → 50 ms。
+  业务在这类环境可设 Off。将来若要自动切换,依据应是渲染层级(`RenderCapability.Tier`,远程桌面连上 / 断开会变),
+  不是可见根数。
+- 开缓存时画面与不开逐像素一致:全图抗锯齿,横竖内容按设备像素对齐(06 号文档 §4.3 / §14.9)。
+- 未测:弱独显 / 4K / 多屏混合 DPI 的真机上屏;4 图结果只测了一轮。
 
 ---
 

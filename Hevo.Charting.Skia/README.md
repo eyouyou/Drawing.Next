@@ -61,7 +61,7 @@ cell.Shutdown();
 
 和 `WpfDrawingRenderer`（WPF 默认后端）一致的部分：
 
-- 同样的像素对齐规则、同样的相邻 `DrawLine` 合批、`DrawRectangles` 逐个画，矩形填充关闭抗锯齿（对应 WPF 画布的 `EdgeMode.Aliased`）；
+- 同样的像素对齐规则、同样的相邻 `DrawLine` 合批、`DrawRectangles` 逐个画，矩形填充关闭抗锯齿（边缘已对齐到设备像素，结果跟 WPF 的抗锯齿 + 设备像素对齐一致）；
 - Pen 的语义：`HevoPen.LineCap` 按 WPF `PenLineCap` 解释（0 Flat / 1 Square / 2 Round；3 Triangle Skia 没有，退化为平头），`MiterLimit` = 10，虚线长度以线宽为单位、段端按 WPF 默认的 `DashCap = Square` 外扩半个线宽；
 - 渐变：`HevoLinearGradientBrush` 与资源里的 `LinearGradientBrush` 按 `MappingMode` 处理，默认 `RelativeToBoundingBox` 时起止点按图元包围盒换算；资源笔刷的 `Opacity` 计入颜色；
 - 路径标记：支持 WPF 的 `F0` / `F1` 填充规则前缀，没有前缀时默认 EvenOdd，与 `Geometry.Parse` 相同；

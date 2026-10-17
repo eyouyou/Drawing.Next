@@ -8,8 +8,8 @@ namespace Hevo.Charting.Renderers.Raster
     /// <summary>
     /// 一个位图模式图层的像素宿主:持有一张 <see cref="WriteableBitmap"/>,每帧把图层指令光栅化进去。
     /// <para>
-    /// 图层的 DrawingVisual 里只挂 裁剪 + 一条 DrawImage(这张位图),不管图层画了多少条指令,
-    /// WPF 侧每帧的 RenderData 都是这固定的三条。每次重画后都重新挂一次(而不是只靠 WriteableBitmap 自己通知),
+    /// 图层的 DrawingVisual 里只挂 裁剪 + 原点平移 + 一条 DrawImage(这张位图),不管图层画了多少条指令,
+    /// WPF 侧每帧的 RenderData 都是这固定的五条。每次重画后都重新挂一次(而不是只靠 WriteableBitmap 自己通知),
     /// 保证外层画布开着 BitmapCache 时缓存也一定失效重画;裁剪几何体按可见尺寸缓存并冻结。
     /// </para>
     /// <para>
@@ -78,7 +78,8 @@ namespace Hevo.Charting.Renderers.Raster
         }
 
         /// <summary>把位图挂进图层的 DrawingContext(调用方负责 RenderOpen / Dispose)。</summary>
-        public void Mount(DrawingContext dc)
+        /// <param name="originSnap">把位图贴到设备像素上的平移(ChartCell 按 cell 在窗口里的小数偏移维护,可变、跟着布局改)。</param>
+        public void Mount(DrawingContext dc, Transform originSnap)
         {
             if (_bitmap == null) return;
             double inv = 1.0 / _scale;
@@ -89,8 +90,11 @@ namespace Hevo.Charting.Renderers.Raster
                 _clip.Freeze();
                 _clipW = _visW; _clipH = _visH; _clipScale = _scale;
             }
+            // 裁剪框是几何,图层的 snapping guideline 已经把它贴到像素上了,放在平移外面,免得挪两次
             dc.PushClip(_clip);
+            dc.PushTransform(originSnap);
             dc.DrawImage(_bitmap, new Rect(0, 0, _capW * inv, _capH * inv));
+            dc.Pop();
             dc.Pop();
             IsMounted = true;
         }

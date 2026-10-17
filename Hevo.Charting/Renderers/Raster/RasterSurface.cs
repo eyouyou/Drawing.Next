@@ -217,7 +217,27 @@ namespace Hevo.Charting.Renderers.Raster
             int y0 = PixelMath.CenterCeil(top), y1 = PixelMath.CenterCeil(bottom);
             if (y0 < ClipY0) y0 = ClipY0;
             if (y1 > ClipY1) y1 = ClipY1;
-            for (int y = y0; y < y1; y++) FillSpan(y, x0, x1, paint);
+            if (paint.IsGradient) { for (int y = y0; y < y1; y++) FillSpan(y, x0, x1, paint); return; }
+            // 纯色:裁剪 / 脏区只算一次,逐行直接写(K 线影线、窄实体都是 1~2px 宽、几十行高,逐行调 FillSpan 的开销占大头)
+            if (x0 < ClipX0) x0 = ClipX0;
+            if (x1 > ClipX1) x1 = ClipX1;
+            if (x1 <= x0 || y1 <= y0) return;
+            Touch(x0, y0, x1, y1);
+            uint color = paint.Color;
+            uint a = color >> 24;
+            int n = x1 - x0;
+            uint* p = _px + (long)y0 * _stride + x0;
+            if (a == 255)
+            {
+                if (n == 1) { for (int y = y0; y < y1; y++, p += _stride) *p = color; }
+                else { for (int y = y0; y < y1; y++, p += _stride) new Span<uint>(p, n).Fill(color); }
+            }
+            else if (a != 0)
+            {
+                uint inv = 255 - a;
+                for (int y = y0; y < y1; y++, p += _stride)
+                    for (int x = 0; x < n; x++) p[x] = color + PixelMath.Scale(p[x], inv);
+            }
         }
 
         /// <summary>
