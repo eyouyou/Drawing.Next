@@ -156,14 +156,35 @@ namespace Hevo.Charting
         public DataPipeBuilder<TSource, TItem> Pipe() => new((TSource)this, Stream);
 
         /// <summary>
-        /// 💥 核心：将后厨案板的数据上菜到展示柜,并通过基类 <see cref="DataSource{TSource,T}.Publish"/> 推到 Stream。
+        /// 历史段(除最后一根以外的所有元素)的版本号:只有历史段可能变了才递增。
+        /// 实时 tick 用 <see cref="PublishLastOnly"/> 只改最后一根时不变 —— 下游(如 <c>CandlePorts.HistoryRevision</c>)据此跳过"只画历史"的冷图层重录,
+        /// 判脏仍是版本号,不做内容比较。接法:<c>.Inject(ds => ds.HistoryRevision).ForwardTo(port)</c>。
         /// </summary>
-        protected void Publish()
+        public long HistoryRevision => Interlocked.Read(ref _historyRevision);
+        private long _historyRevision;
+
+        /// <summary>
+        /// 💥 核心：将后厨案板的数据上菜到展示柜,并通过基类 <see cref="DataSource{TSource,T}.Publish"/> 推到 Stream。
+        /// 视为数据可能整体变化(全量加载、追加新 K 线、修正历史),<see cref="HistoryRevision"/> 递增。
+        /// </summary>
+        protected void Publish() => PublishCore(lastOnly: false);
+
+        /// <summary>
+        /// 同 <see cref="Publish()"/>,但声明"跟上次发布比,只有最后一根变了"(实时 tick 更新当前 K 线时用)。
+        /// 历史段没动,<see cref="HistoryRevision"/> 不递增。调用方保证条数没变、前面的元素没改;条数变了按 <see cref="Publish()"/> 处理。
+        /// </summary>
+        protected void PublishLastOnly() => PublishCore(lastOnly: true);
+
+        private void PublishCore(bool lastOnly)
         {
             lock (_lock)
             {
                 // 1. 展示柜尺寸
                 int need = _buffer.Count;
+
+                // 历史段 = 除最后一根以外的元素。只有"只改最后一根"且条数没变才算历史没动
+                bool historyUnchanged = lastOnly && need > 0 && need == _publishedCount;
+                if (!historyUnchanged) Interlocked.Increment(ref _historyRevision);
                 var growth = ReserveSnapshotCapacity ? LowCode.CapacityPolicyOptions.Default : null;
                 if (need == 0)
                 {

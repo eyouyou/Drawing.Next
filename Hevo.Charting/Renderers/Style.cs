@@ -138,7 +138,7 @@ namespace Hevo.Charting
         IHevoBrush Brush,
         double Thickness,
         double[]? DashArray = null, // 传 null 就是实线
-        int LineCap = 0,           // 对应 Flat/Round/Square
+        int LineCap = 0,           // 0 Flat / 1 Square / 2 Round / 3 Triangle（对应 WPF PenLineCap）
         int LineJoin = 0,          // 对应 Miter/Bevel/Round
         bool IsAntialias = true    // 默认开 AA：1px series 斜线段开箱即得平滑
     );

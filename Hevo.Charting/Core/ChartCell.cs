@@ -156,6 +156,63 @@ namespace Hevo.Charting.Core
         }
         private RenderMode? _renderModeOverride;
 
+        /// <summary>
+        /// 上屏后端。null(默认)= WPF DrawingVisual 回放;设成别的后端(如 Hevo.Charting.Skia 的 SkiaRenderBackend)
+        /// 后两块 WPF 矢量画布折叠,图层指令改由后端上屏。运行时可切换,下一帧生效,不重算 Feature、不重录图层。
+        /// 新建 cell 的初值取 <see cref="DefaultRenderBackendFactory"/>。
+        /// <para>
+        /// 所有权:挂上的后端归本 cell 所有。被替换 / 置空时先 Detach 再 Dispose,<see cref="Shutdown"/> 时同样;
+        /// Unloaded(如切 Tab)只是暂停,不释放后端。调用方不要再自己 Dispose 挂上去的后端。
+        /// </para>
+        /// </summary>
+        public IChartRenderBackend? RenderBackend
+        {
+            get => _renderBackend;
+            set
+            {
+                if (ReferenceEquals(_renderBackend, value)) return;
+                // 先挂新的:Attach 抛异常(比如该实例已挂在别的 cell 上)时旧后端原样保留
+                var newHost = value?.Attach(this);
+                ReleaseRenderBackend();
+                _renderBackend = value;
+                if (value != null)
+                {
+                    _renderBackendHost = newHost!;
+                    _renderBackendHost.IsHitTestVisible = false;
+                    // 放在矢量画布原位置:控件层 / loading 蒙层之下
+                    _rootContainer.Children.Insert(_rootContainer.Children.IndexOf(_overlayCanvas) + 1, _renderBackendHost);
+                }
+                else
+                {
+                    _replayAllWpfLayers = true;
+                }
+                var vis = value == null ? Visibility.Visible : Visibility.Collapsed;
+                _drawingCanvas.Visibility = vis;
+                _overlayCanvas.Visibility = vis;
+                RequestUpdate(s_noopUpdate);
+            }
+        }
+        private IChartRenderBackend? _renderBackend;
+        private UIElement? _renderBackendHost;
+
+        // 摘下并释放当前后端(先 Detach 再 Dispose)。只在替换 / 置空 / Shutdown 时调用。
+        private void ReleaseRenderBackend()
+        {
+            var old = _renderBackend;
+            if (old == null) return;
+            _renderBackend = null;
+            old.Detach();
+            if (_renderBackendHost != null) _rootContainer.Children.Remove(_renderBackendHost);
+            _renderBackendHost = null;
+            old.Dispose();
+        }
+
+        /// <summary>
+        /// 新建 ChartCell 时用来创建 <see cref="RenderBackend"/> 的全局工厂(null = WPF 默认)。
+        /// 应用启动时设一次即可让所有图表换后端,例如 <c>ChartCell.DefaultRenderBackendFactory = () => new SkiaRenderBackend();</c>。
+        /// </summary>
+        public static Func<IChartRenderBackend?>? DefaultRenderBackendFactory { get; set; }
+
         private static readonly Action<RenderContext> s_noopUpdate = _ => { };
         private void OnLayerModeChanged(ChartLayer _) => RequestUpdate(s_noopUpdate);
 
@@ -432,6 +489,8 @@ namespace Hevo.Charting.Core
             Loaded += OnCellLoaded;
             Unloaded += OnCellUnloaded;
             IsVisibleChanged += OnCellIsVisibleChanged;
+
+            if (DefaultRenderBackendFactory?.Invoke() is { } backend) RenderBackend = backend;
         }
 
         private Window? _hookedWindow;
@@ -712,8 +771,9 @@ namespace Hevo.Charting.Core
             // 阶段 2：派发渲染指令
             // ==========================================
 
-            // 管线 A: WPF 矢量层 (保留模式，仅给脏图层发新指令)
-            RenderWpfLayers();
+            // 管线 A: 矢量层 (保留模式，仅给脏图层发新指令)。挂了后端就交给后端,否则走 WPF DrawingVisual
+            if (_renderBackend != null) _renderBackend.Present(_staticLayers, _overlayLayers);
+            else RenderWpfLayers();
 
             // 管线 B: WPF 控件层 (仅给脏图层同步新的控件池摆放)
             RenderWidgetLayers();
@@ -739,7 +799,11 @@ namespace Hevo.Charting.Core
         {
             RenderVisualLayers(_visualRegistry, _drawingCanvas);
             RenderVisualLayers(_overlayVisualRegistry, _overlayCanvas);
+            _replayAllWpfLayers = false;
         }
+
+        // 从外部后端切回 WPF 的那一帧:DrawingVisual 里还是挂后端之前的旧内容,所有图层都要按前台指令重放一次
+        private bool _replayAllWpfLayers;
 
         // 每个图层按自己的绘制策略上屏:Software → WpfRenderProvider 回放进 DrawingContext;
         // Bitmap → RasterRenderProvider 光栅化进图层自己的 WriteableBitmap。
@@ -751,7 +815,7 @@ namespace Hevo.Charting.Core
                 if (registry[i].Layer is not ChartLayer cl) continue;
                 bool wantBitmap = (RenderModeOverride ?? cl.Mode) == RenderMode.Bitmap;
                 bool isBitmap = cl.BitmapSurface is { IsMounted: true };
-                if (!cl.IsDirty && wantBitmap == isBitmap) continue;
+                if (!cl.IsDirty && wantBitmap == isBitmap && !_replayAllWpfLayers) continue;
                 if (cl.Buffer is not LayerBuffer buffer) continue;
 
                 if (wantBitmap && TryRenderBitmap(cl, buffer, host)) continue;
@@ -881,6 +945,15 @@ namespace Hevo.Charting.Core
                 schema.DecomposeAll(this, ctx);
             }
             ClearValue(ChartLifecycle.ActiveSessionProperty);
+
+            // 后端归 cell 所有:Detach + Dispose,矢量画布恢复可见(cell 若被复用就回到 WPF 路径)
+            if (_renderBackend != null)
+            {
+                ReleaseRenderBackend();
+                _replayAllWpfLayers = true;
+                _drawingCanvas.Visibility = Visibility.Visible;
+                _overlayCanvas.Visibility = Visibility.Visible;
+            }
         }
 
         // =================================================================
@@ -956,7 +1029,22 @@ namespace Hevo.Charting.Core
 
             // 原子操作：volatile 字段赋值，读侧按 IReadOnlyList<IChartLayer> 访问
             _activeLayersCache = newList;
+
+            // 后端按 Z 序取两组图层(只在 UI 线程读写)
+            _staticLayers = FilterChartLayers(_visualRegistry);
+            _overlayLayers = FilterChartLayers(_overlayVisualRegistry);
         }
+        private IReadOnlyList<ChartLayer> _staticLayers = Array.Empty<ChartLayer>();
+        private IReadOnlyList<ChartLayer> _overlayLayers = Array.Empty<ChartLayer>();
+
+        private static List<ChartLayer> FilterChartLayers(List<(IChartLayer Layer, ChartLayerType Type)> registry)
+        {
+            var list = new List<ChartLayer>(registry.Count);
+            for (int i = 0; i < registry.Count; i++)
+                if (registry[i].Layer is ChartLayer cl) list.Add(cl);
+            return list;
+        }
+
         /// <summary>按 Name 查图层(找不到返回 null)。配合 <see cref="HasLayer"/> 使用。</summary>
         public IChartLayer? GetLayer(string name)
         {
@@ -1039,8 +1127,13 @@ namespace Hevo.Charting.Core
             // ==========================================
             // 第三步：物理资源释放与重绘
             // ==========================================
+            // 先刷新图层缓存:下面那次 Invalidate(以及后端 Present)看到的就已经是移除后的图层列表
+            UpdateActiveLayersCache();
+
             if (isRemoved)
             {
+                if (layer is ChartLayer removedLayer) _renderBackend?.OnLayerRemoved(removedLayer);
+
                 // 调用 Dispose 释放该图层可能持有的 Skia 画笔、路径等非托管资源
                 layer.Dispose();
 
@@ -1052,8 +1145,6 @@ namespace Hevo.Charting.Core
                 // 强制触发一次空重绘，把移除图层后的最新画面刷到屏幕上
                 Invalidate();
             }
-
-            UpdateActiveLayersCache();
         }
         // =================================================================
         // 5. 辅助与校验

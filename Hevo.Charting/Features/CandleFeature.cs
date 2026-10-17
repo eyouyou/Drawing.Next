@@ -52,6 +52,13 @@ namespace Hevo.Charting.Features
     {
         // 极简构造函数，外部直接 new CandlePorts() 即可
         public CandlePorts() : this(new("Candle_Time"), new("Candle_Open"), new("Candle_High"), new("Candle_Low"), new("Candle_Close")) { }
+
+        /// <summary>
+        /// 可选:历史段(除最后一根)版本端口,通常接 <c>.Inject(ds => ds.HistoryRevision).ForwardTo(...)</c>。
+        /// 接上后,只改最后一根的实时 tick 不再重录静态层(版本号没变 = 历史没变);
+        /// 不接时静态层跟 OHLC 列版本走(任一列变就重录)。
+        /// </summary>
+        public DataPort<long>? HistoryRevision { get; init; }
     }
 
     /// <summary>
@@ -108,6 +115,9 @@ namespace Hevo.Charting.Features
         // 动态层：永远只负责绘制“最后一根”正在实时跳动的 K 线，以及挂载十字光标等热数据。
         private readonly CandleLayer _dynamicLayer = new() { Level = ChartLayerType.Interaction };
 
+        // 静态层上次重录时的根数(追加新 K 线时历史段变长,要重录)
+        private int _staticLen = -1;
+
         /// <summary>
         /// 💥 初始化图层与注册元数据 (仅在组件挂载时执行一次)
         /// </summary>
@@ -138,23 +148,32 @@ namespace Hevo.Charting.Features
             var (highs, highsChanged) = ctx.UsePort(Ports.High);
             var (lows, lowsChanged) = ctx.UsePort(Ports.Low);
             var (closes, closesChanged) = ctx.UsePort(Ports.Close);
+            // 💥 铁律:可选端口也要顶层无条件解包,没接时垫空壳引脚保证 Hook 游标对齐
+            var (_, historyChanged) = ctx.UsePort(Ports.HistoryRevision ?? DataPort<long>.Empty);
+
+            // 2. 物理尺寸查脏：缓存图表区域大小变化(💥 Hook 必须在下面的防空 return 之前)
+            HevoRect currentArea = ctx.PlotArea;
+            var (_, areaChanged) = ctx.UseMemo(currentArea, area => area);
 
             int len = opens.Length;
             if (len == 0 || !xRange.IsValid || !yRange.IsValid) return;
 
-            // 2. 物理尺寸查脏：缓存图表区域大小变化
-            HevoRect currentArea = ctx.PlotArea;
-            var (_, areaChanged) = ctx.UseMemo(currentArea, area => area);
-
             // 3. 剥离热数据：无论屏幕上有多少根 K 线，动态层永远只认最后一根！
             int dynamicStartIndex = Math.Max(0, len - 1);
 
-            // 静态层重绘防抖：尺寸 / 视口 / 数据列任一变化都要重绘
+            // 静态层只画历史段 [0, len-1),判脏全走版本号(不比内容):
+            //   - 接了 HistoryRevision:历史段版本 / 根数 / 尺寸 / 视口 / 量程变才重录 —— 实时 tick 只动最后一根,摄入器
+            //     每次发布换新缓冲导致 OHLC 列版本每 tick 都变,但历史段版本不变,静态层保持上次录制;
+            //   - 没接:沿用原规则,OHLC 任一列版本变就重录。
             // （切片器删除后无 Offset 概念：数据是全量、世界索引 == 数组下标）
-            bool needRedrawStatic = areaChanged || xChanged || yChanged || opensChanged || highsChanged || lowsChanged || closesChanged;
+            bool columnsChanged = Ports.HistoryRevision != null
+                ? historyChanged || len != _staticLen
+                : opensChanged || highsChanged || lowsChanged || closesChanged;
+            bool needRedrawStatic = areaChanged || xChanged || yChanged || columnsChanged;
 
             if (needRedrawStatic)
             {
+                _staticLen = len;
                 ctx.For(_staticLayer).PublishData(new XAxisTrait(xRange));
                 ctx.For(_staticLayer).UpdateYAxis(yRange);
                 ctx.For(_staticLayer).PublishData(Style);
