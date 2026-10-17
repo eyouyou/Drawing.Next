@@ -15,7 +15,7 @@ namespace Hevo.Charting.Tests
     /// 且那一次读到最新值;回调抛异常后订阅还能继续工作;退订后不再跑待重跑的那次。
     /// 以前每次通知都丢一个线程池任务:慢回调下任务无限堆积,同一订阅并发执行、乱序提交。
     /// </summary>
-    public sealed class WatchAsyncSingleFlightTests
+    public sealed class WatchAsyncLatestOnlyTests
     {
         private static void WaitIdle(Func<bool> done, int timeoutMs = 10_000)
         {
@@ -28,7 +28,7 @@ namespace Hevo.Charting.Tests
         public void SameSubscription_NeverRunsConcurrently()
         {
             int running = 0, maxRunning = 0, runs = 0;
-            var gate = new FeatureExtensions.SingleFlight(_ =>
+            var gate = new FeatureExtensions.LatestOnlyRunner(_ =>
             {
                 int now = Interlocked.Increment(ref running);
                 int seen;
@@ -57,7 +57,7 @@ namespace Hevo.Charting.Tests
             int value = 0, runs = 0, lastSeen = -1;
             using var inFirst = new ManualResetEventSlim(false);
             using var release = new ManualResetEventSlim(false);
-            var gate = new FeatureExtensions.SingleFlight(_ =>
+            var gate = new FeatureExtensions.LatestOnlyRunner(_ =>
             {
                 int v = Volatile.Read(ref value); // 回调自己读"黑板"最新值
                 if (Interlocked.Increment(ref runs) == 1) { inFirst.Set(); release.Wait(5000); }
@@ -78,7 +78,7 @@ namespace Hevo.Charting.Tests
         public void ThrowingCallback_DoesNotWedgeSubscription()
         {
             int runs = 0;
-            var gate = new FeatureExtensions.SingleFlight(_ =>
+            var gate = new FeatureExtensions.LatestOnlyRunner(_ =>
             {
                 if (Interlocked.Increment(ref runs) == 1) throw new InvalidOperationException("boom");
             });
@@ -97,7 +97,7 @@ namespace Hevo.Charting.Tests
             int runs = 0;
             using var inFirst = new ManualResetEventSlim(false);
             using var release = new ManualResetEventSlim(false);
-            var gate = new FeatureExtensions.SingleFlight(_ =>
+            var gate = new FeatureExtensions.LatestOnlyRunner(_ =>
             {
                 if (Interlocked.Increment(ref runs) == 1) { inFirst.Set(); release.Wait(5000); }
             });
@@ -135,7 +135,7 @@ namespace Hevo.Charting.Tests
                         Compute = (Func<ReadOnlyMemory<double>, ReadOnlyMemory<double>>)(col =>
                         {
                             double g = col.Span[0];
-                            Thread.Sleep(rnd.Value!.Next(0, 15));
+                            Thread.Sleep(rnd.Value!.Next(2, 15));   // 至少 2 ms:一定比下面的推送慢,必然发生合并
                             lock (committed) committed.Add(g); // 合并后同一订阅串行:返回顺序 = 提交顺序
                             return new[] { g };
                         }),
@@ -144,7 +144,7 @@ namespace Hevo.Charting.Tests
                 var cell = new ChartCell { Template = schema };
                 using (var ctx = cell.CreateContext()) schema.ComposeAll(cell, ctx);
 
-                for (int gen = 1; gen <= 300; gen++) { schema.Source.PublishGen(gen, 100); Thread.Sleep(1); }
+                for (int gen = 1; gen <= 300; gen++) { schema.Source.PublishGen(gen, 100); Thread.SpinWait(2000); }
                 lastGen = 300;
                 WaitIdle(() => { lock (committed) return committed.Count > 0 && committed[^1] == 300; });
                 lock (committed) finalOut = committed.Count > 0 ? committed[^1] : double.NaN;
