@@ -9,6 +9,18 @@ using Hevo.Charting.WorkFlow;
 namespace Hevo.Charting.Features
 {
     /// <summary>
+    /// C# 指标的零分配签名:往框架给的 <paramref name="output"/> 里写结果(长度 = 输入长度),不用自己 new 数组。
+    /// output 来自调用点缓冲池(<see cref="ResultBufferPool"/>),内容是上一轮留下的旧值,handler 要把每个元素都写一遍。
+    /// </summary>
+    public delegate void ComputeInto(ReadOnlySpan<double> input, Span<double> output);
+
+    /// <summary>
+    /// 多输入版零分配签名:<paramref name="inputs"/> 按 <see cref="ComputeFeature.InputOrder"/> 排列,
+    /// <paramref name="output"/> 长度 = 第一个输入的长度。同样每个元素都要写。
+    /// </summary>
+    public delegate void ComputeIntoMulti(ReadOnlySpan<ReadOnlyMemory<double>> inputs, Span<double> output);
+
+    /// <summary>
     /// 蓝图层"计算节点":输入 → 委托 → 输出。委托可以是 Python(经 PythonHandlerRegistry 注册)、
     /// C# 方法(<c>[BlueprintHandler]</c>)或业务直接代码注入。
     ///
@@ -53,6 +65,9 @@ namespace Hevo.Charting.Features
     /// </summary>
     public sealed class ComputeFeature : ComputeNodeFeature
     {
+        // 输出缓冲池:Python handler 的结果拷进这里租来的缓冲,不再每次 new(2 万根一块 160 KB 进 LOH)。见 ResultBufferPool
+        private ResultBufferPool _outBuffers = new();
+
         /// <summary>
         /// 单输入端口 —— 数据源 / 上游 Compute 推过来的 ROM&lt;double&gt;。
         /// 跟 <see cref="Inputs"/> 互斥:Inputs.Count > 0 时走多输入路径,InputPort 被忽略。
@@ -96,6 +111,8 @@ namespace Hevo.Charting.Features
         ///   <item>单输入 + 单输出:<c>Func&lt;ROM, ROM&gt;</c></item>
         ///   <item>多输入 + 单输出:<c>Func&lt;ROM, ROM, ..., ROM&gt;</c>(N 参 + 1 返回)</item>
         ///   <item>单/多输入 + 多输出:返回 <c>IDictionary&lt;string, object?&gt;</c>,key 对齐 <see cref="Outputs"/> 字典</item>
+        ///   <item>零分配(单输出):<see cref="ComputeInto"/> / <see cref="ComputeIntoMulti"/>,往框架给的 Span 里写,
+        ///         输出缓冲由调用点池复用(2 万根时每次省一块 160 KB 的 LOH 数组);上面的 Func 签名照常可用。</item>
         /// </list>
         /// 业务侧也可以直接代码注入(测试 / mock 用)。
         /// </summary>
@@ -151,6 +168,14 @@ namespace Hevo.Charting.Features
                 // argsBuf 从 lambda 外共享改 lambda 内 local —— WatchAsync 后台多 task 可能并发,共享会撞写。
                 flow.WatchAsync(watchKeys, board =>
                 {
+                    var buffers = _outBuffers;
+                    using var call = buffers.BeginCall();
+                    try { RunMulti(board, call); }
+                    finally { if (buffers.IsAbandoned) _outBuffers = new(); }
+                });
+
+                void RunMulti(DataBlackboard board, ResultBufferPool.CallScope call)
+                {
                     // ① 瞬间读锁捞 inputs
                     var argsBuf = new object?[orderedPorts.Length];
                     using (board.AcquireReadLock())
@@ -165,7 +190,20 @@ namespace Hevo.Charting.Features
 
                     // ② 锁外裸奔算指标(handler 在后台线程跑,不阻塞 UI / 其他 reader)
                     object? raw;
-                    try { raw = Compute.DynamicInvoke(argsBuf); }
+                    try
+                    {
+                        if (Compute is ComputeIntoMulti cm)
+                        {
+                            if (multiOutput) { WarnSpanMultiOutput(); return; }
+                            var roms = new ReadOnlyMemory<double>[argsBuf.Length];
+                            for (int i = 0; i < roms.Length; i++) roms[i] = (ReadOnlyMemory<double>)argsBuf[i]!;
+                            int n = roms[0].Length;
+                            var arr = call.Rent(n);
+                            cm(roms, arr.AsSpan(0, n));
+                            raw = new ReadOnlyMemory<double>(arr, 0, n);
+                        }
+                        else raw = Compute.DynamicInvoke(argsBuf);
+                    }
                     catch (Exception ex)
                     {
                         System.Diagnostics.Trace.TraceWarning(
@@ -174,14 +212,22 @@ namespace Hevo.Charting.Features
                     }
 
                     // ③ WriteOutput 内部自己 AcquireWriteLock,μs 级提交
-                    WriteOutput(board, raw, multiOutput);
-                });
+                    WriteOutput(board, raw, multiOutput, call);
+                }
                 return;
             }
 
             // 单输入兼容路径
             if (InputPort == null) return;
             flow.WatchAsync(new object[] { InputPort }, board =>
+            {
+                var buffers = _outBuffers;
+                using var call = buffers.BeginCall();
+                try { RunSingle(board, call); }
+                finally { if (buffers.IsAbandoned) _outBuffers = new(); }
+            });
+
+            void RunSingle(DataBlackboard board, ResultBufferPool.CallScope call)
             {
                 // ① 瞬间读锁捞 input
                 ReadOnlyMemory<double> input;
@@ -195,7 +241,14 @@ namespace Hevo.Charting.Features
                 object? raw;
                 try
                 {
-                    if (!multiOutput && Compute is Func<ReadOnlyMemory<double>, ReadOnlyMemory<double>> typed)
+                    if (Compute is ComputeInto cc)
+                    {
+                        if (multiOutput) { WarnSpanMultiOutput(); return; }
+                        var arr = call.Rent(input.Length);
+                        cc(input.Span, arr.AsSpan(0, input.Length));
+                        raw = new ReadOnlyMemory<double>(arr, 0, input.Length);
+                    }
+                    else if (!multiOutput && Compute is Func<ReadOnlyMemory<double>, ReadOnlyMemory<double>> typed)
                         raw = (object)typed(input);
                     else
                         raw = Compute.DynamicInvoke(input);
@@ -207,14 +260,72 @@ namespace Hevo.Charting.Features
                 }
 
                 // ③ 写锁提交
-                WriteOutput(board, raw, multiOutput);
-            });
+                WriteOutput(board, raw, multiOutput, call);
+            }
         }
 
+#if DEBUG
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<System.Reflection.MethodInfo, bool> s_allocHinted = new();
+
+        // 旧写法(返回新数组)的迁移提示只在"真的重"时出,每个方法一次。
+        private readonly HeavyCallMeter _allocMeter = new();
+
+        private void MaybeHintAllocating(object raw)
+        {
+            int len = raw switch { ReadOnlyMemory<double> m => m.Length, double[] a => a.Length, _ => 0 };
+            if (len == 0 || Compute == null || !AllocatesResultEachCall(Compute)) return;
+            if (!_allocMeter.Record(len, System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency)) return;
+            if (!s_allocHinted.TryAdd(Compute.Method, true)) return;
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ComputeFeature] C# 指标 {Compute.Method.DeclaringType?.Name}.{Compute.Method.Name} 每次返回新数组,当前结果 {len} 个元素" +
+                $"(≥ {HeavyCallMeter.HeavyLength},每块进 LOH)且 1 秒内算了 ≥ {HeavyCallMeter.HeavyCallsPerSecond} 次。" +
+                "改用 ComputeInto(input, output) / ComputeIntoMulti 往框架给的缓冲里写,可零分配。");
+        }
+#endif
+
+        /// <summary>
+        /// 判断"返回新数组"的旧写法是否重到值得提示:结果 ≥ <see cref="HeavyLength"/> 个 double(85000 字节,正好进 LOH)
+        /// 且 1 秒窗口内算了 ≥ <see cref="HeavyCallsPerSecond"/> 次。小数据量 / 低频指标不提示,旧写法完全够用。
+        /// </summary>
+        internal sealed class HeavyCallMeter
+        {
+            public const int HeavyLength = 85_000 / sizeof(double);   // 10625
+            public const int HeavyCallsPerSecond = 5;
+            private long _windowStart;
+            private int _calls;
+
+            /// <summary>记一次调用;返回 true 表示已达到"重"的标准(调用方自己保证只提示一次)。</summary>
+            public bool Record(int resultLength, long now, long ticksPerSecond)
+            {
+                if (resultLength < HeavyLength) return false;
+                if (_calls == 0 || now - _windowStart >= ticksPerSecond) { _windowStart = now; _calls = 0; }
+                return ++_calls >= HeavyCallsPerSecond;
+            }
+        }
+
+        /// <summary>
+        /// 是不是"每次自己 new 结果数组"的 C# 指标(DEBUG 下提示迁移到 <see cref="ComputeInto"/>)。
+        /// Python handler 不算:PythonInvokerShim 用表达式树编译(Method.DeclaringType 为空),结果由框架拷进调用点池。
+        /// 返回字典的多输出 handler 也不算(零分配签名只支持单输出)。
+        /// </summary>
+        internal static bool AllocatesResultEachCall(Delegate compute)
+        {
+            if (compute is ComputeInto || compute is ComputeIntoMulti) return false;
+            if (compute.Method.DeclaringType == null) return false;
+            var ret = compute.Method.ReturnType;
+            return ret == typeof(ReadOnlyMemory<double>) || ret == typeof(double[]);
+        }
+
+        private static void WarnSpanMultiOutput() =>
+            System.Diagnostics.Trace.TraceWarning("[ComputeFeature] ComputeInto / ComputeIntoMulti 只支持单输出(OutputPort),多输出请用返回字典的 Func 签名。");
+
         // 把 handler 返回值按 Outputs 字典(多输出)或 OutputPort(单输出)路由到 board。
-        private void WriteOutput(DataBlackboard board, object? raw, bool multiOutput)
+        private void WriteOutput(DataBlackboard board, object? raw, bool multiOutput, ResultBufferPool.CallScope call)
         {
             if (raw == null) return;
+#if DEBUG
+            if (!multiOutput) MaybeHintAllocating(raw);
+#endif
 
             if (multiOutput)
             {
@@ -234,7 +345,7 @@ namespace Hevo.Charting.Features
                             double[] a              => a,
                             _                       => ReadOnlyMemory<double>.Empty,
                         };
-                        if (rom.Length > 0) board.WriteIfChanged(kv.Value, rom);
+                        if (rom.Length > 0) { board.WriteIfChanged(kv.Value, rom); call.Written(kv.Value, rom); }
                     }
                 }
                 return;
@@ -251,7 +362,10 @@ namespace Hevo.Charting.Features
                 }
             }
             using (board.AcquireWriteLock())
+            {
                 board.WriteIfChanged(OutputPort, rom1);
+                call.Written(OutputPort, rom1);
+            }
         }
 
         protected override void OnComputeProject(FeatureContext ctx)

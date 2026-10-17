@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Hevo.Charting.Core;
 using Hevo.Charting.LowCode.Designer;
 using Hevo.Charting.WorkFlow;
@@ -101,7 +102,11 @@ namespace Hevo.Charting
     public abstract class BufferedDataSource<TSource, TItem> : DataSource<TSource, DataSnapshot<TItem>>
         where TSource : BufferedDataSource<TSource, TItem>
     {
-        public abstract int LogicalLength { get; }
+        /// <summary>
+        /// 逻辑长度。默认 = 最近一次推送的条数(<see cref="SnapshotCount"/>),新数据源不用再写;
+        /// 有自己的"逻辑长度"(比如一行一个 Block 的 K 线)时 override。以前是 abstract,现有子类的 override 照常编译。
+        /// </summary>
+        public virtual int LogicalLength => SnapshotCount;
 
         // ==========================================
         // 🔪 后厨案板 (写缓冲区)：专门应对复杂的网络数据合并与增删
@@ -112,6 +117,8 @@ namespace Hevo.Charting
         // ==========================================
         // 📺 前台展示柜 (读缓冲区)：物理连续数组，供 Span 极速读取
         // ==========================================
+        // 不建议子类直接用:开了 ReserveSnapshotCapacity 后长度是容量不是条数,而且 Publish 会原地覆写它(锁外读会读到半新半旧)。
+        // 要读当前数据:锁内用 SnapshotItems,锁外用 GetSnapshot();要长度用 SnapshotCount / LogicalLength。
         protected volatile TItem[] _readSnapshot = Array.Empty<TItem>();
 
         // 💥 挂载物理数据时钟
@@ -119,6 +126,30 @@ namespace Hevo.Charting
 
         // 最近一次 Publish 的有效长度(锁内写)。_buffer.Count 可能在两次 Publish 之间被子类改过,不能代替它。
         private int _publishedCount;
+
+        /// <summary>最近一次 Publish 的有效长度。开了 <see cref="ReserveSnapshotCapacity"/> 的子类,LogicalLength 要用它而不是 <c>_readSnapshot.Length</c>。</summary>
+        protected int SnapshotCount => Volatile.Read(ref _publishedCount);
+
+        /// <summary>
+        /// 最近一次推送的数据(按条数切好的只读视图)。只在 <c>_lock</c> 内用 —— Publish 会原地覆写底层数组;锁外请用 <see cref="GetSnapshot"/>。
+        /// </summary>
+        protected ReadOnlySpan<TItem> SnapshotItems => new ReadOnlySpan<TItem>(_readSnapshot, 0, Math.Min(SnapshotCount, _readSnapshot.Length));
+
+#if DEBUG
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, bool> s_lengthWarned = new();
+#endif
+
+        /// <summary>
+        /// 展示柜 <c>_readSnapshot</c> 的扩缩容规则。
+        /// <list type="bullet">
+        ///   <item>false(默认,兼容旧子类):展示柜长度始终等于有效长度 —— 有子类(包括 hevo.drawing 的数据源)用
+        ///         <c>_readSnapshot.Length</c> 当 LogicalLength、或直接读 <c>_readSnapshot[^1]</c>。代价是每追加一根就整块重分配、整块拷贝
+        ///         (2 万根 K 线每次 ~1 MB 进 LOH)。</item>
+        ///   <item>true:按 <see cref="LowCode.CapacityPolicy"/>(默认参数)留封顶余量、远小于容量时收缩。此时 <c>_readSnapshot.Length</c> 是容量,
+        ///         子类必须用 <see cref="SnapshotCount"/>(或自己的计数)做 LogicalLength,不能直接按数组长度读。</item>
+        /// </list>
+        /// </summary>
+        protected virtual bool ReserveSnapshotCapacity => false;
 
         public VersionToken CurrentVersion => _dataClock.Snapshot();
 
@@ -131,17 +162,28 @@ namespace Hevo.Charting
         {
             lock (_lock)
             {
-                // 1. 数组扩容：如果展示柜不够放了，才换个大点的柜子 (避免频繁 GC)
-                if (_readSnapshot.Length < _buffer.Count)
-                {
-                    _readSnapshot = new TItem[_buffer.Count];
-                }
-                else if (_buffer.Count == 0 && _readSnapshot.Length > 0)
+                // 1. 展示柜尺寸
+                int need = _buffer.Count;
+                var growth = ReserveSnapshotCapacity ? LowCode.CapacityPolicyOptions.Default : null;
+                if (need == 0)
                 {
                     // 归零路径：SwitchContext 清 buffer 后必须把展示柜也清空，
                     // 否则 _readSnapshot[0] 仍持有上一上下文的引用，依赖它计算 LogicalLength
                     // 的子类（如 KLineDataSource）会把"归零信号"误报成"未变化"，下游 Watch 收不到。
-                    _readSnapshot = Array.Empty<TItem>();
+                    if (_readSnapshot.Length > 0) _readSnapshot = Array.Empty<TItem>();
+                }
+                else if (growth == null)
+                {
+                    // 兼容模式:长度 == 有效长度。以前只在变长时换,变短(非归零)时数组还是旧长度,
+                    // 用 _readSnapshot.Length 当 LogicalLength 的子类会报错长度;现在变短也换。
+                    if (_readSnapshot.Length != need) _readSnapshot = new TItem[need];
+                }
+                else
+                {
+                    int cap = LowCode.CapacityPolicy.Resize(_readSnapshot.Length, need, growth);
+                    if (cap != _readSnapshot.Length) _readSnapshot = new TItem[cap];
+                    else if (need < _publishedCount && RuntimeHelpers.IsReferenceOrContainsReferences<TItem>())
+                        Array.Clear(_readSnapshot, need, _publishedCount - need); // 变短:尾部旧元素别拖着引用
                 }
 
                 // 2. 物理拷贝：把后厨数据端到前台(没扩容时是原地覆盖 —— 已发布出去的同一个数组会被改写,
@@ -152,6 +194,14 @@ namespace Hevo.Charting
                 // 3. 拨动时钟(融合 Advance+Snapshot,单次 Interlocked.Increment 取新值)
                 VersionToken newVersion = _dataClock.AdvanceAndSnapshot();
 
+#if DEBUG
+                // 开了预留空位,子类 LogicalLength 却还在用 _readSnapshot.Length:报的是容量,图表会多出一截空数据
+                if (growth != null && _readSnapshot.Length != need && LogicalLength == _readSnapshot.Length
+                    && s_lengthWarned.TryAdd(GetType(), true))
+                    System.Diagnostics.Trace.TraceWarning(
+                        $"[{GetType().Name}] 开了 ReserveSnapshotCapacity,但 LogicalLength 返回的是展示柜数组长度({_readSnapshot.Length})" +
+                        $"而不是有效条数({need})。删掉 LogicalLength 的 override(默认就是条数),或改用 SnapshotCount。");
+#endif
                 // 4. 💥 关键点：传出的是物理数组，但告诉外层有效长度是 _buffer.Count！
                 base.Publish(new DataSnapshot<TItem>(_readSnapshot, _buffer.Count, newVersion));
             }
@@ -354,7 +404,6 @@ namespace Hevo.Charting
     // ==========================================
     public class VirtualDataSource<TItem> : BufferedDataSource<VirtualDataSource<TItem>, TItem>
     {
-        public override int LogicalLength => _readSnapshot.Length;
 
         // 💥 保存上游 CombineLatest 产生的订阅句柄
         private IDisposable? _subscription;
