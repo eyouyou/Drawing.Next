@@ -30,8 +30,15 @@ namespace Hevo.Charting.LowCode.Designer
 
         private sealed class Info
         {
-            public required Type ItemType { get; init; }
-            public required Func<object, object> StreamGetter { get; init; }
+            // ctor 代替 required(C# 11):README §2 要求 .NET 5 SDK 5.0.408 可编。
+            public Info(Type itemType, Func<object, object> streamGetter)
+            {
+                ItemType = itemType;
+                StreamGetter = streamGetter;
+            }
+
+            public Type ItemType { get; }
+            public Func<object, object> StreamGetter { get; }
         }
 
         /// <summary>反查 DS 实例的 TItem + Stream。失败抛 <see cref="InvalidOperationException"/>。</summary>
@@ -73,7 +80,7 @@ namespace Hevo.Charting.LowCode.Designer
             var box = Expression.Convert(getter, typeof(object));
             var streamGetter = Expression.Lambda<Func<object, object>>(box, param).Compile();
 
-            return new Info { ItemType = itemType, StreamGetter = streamGetter };
+            return new Info(itemType, streamGetter);
         }
 
         /// <summary>

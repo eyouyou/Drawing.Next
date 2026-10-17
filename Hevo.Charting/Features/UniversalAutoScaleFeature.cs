@@ -129,100 +129,14 @@ namespace Hevo.Charting.Features
 
                     // 💥 0-GC O(N) 极速视口切片遍历
                     foreach (var valuePort in ValuePorts)
-                    {
-                        var span = board.Read(valuePort).Span;
-                        if (span.Length == 0) continue;
-
-                        int end = Math.Min(span.Length - 1, localEndMax);
-                        if (localStart > end) continue;
-
-                        for (int i = localStart; i <= end; i++)
-                        {
-                            double val = span[i];
-                            if (double.IsNaN(val)) continue;
-
-                            if (val > globalMax) globalMax = val;
-                            if (val < globalMin) globalMin = val;
-                            hasValidData = true;
-                        }
-                    }
+                        AccumulateExtrema(board.Read(valuePort).Span, localStart, localEndMax, ref globalMin, ref globalMax, ref hasValidData);
 
                     if (!hasValidData) return;
 
-                    double finalMin = globalMin;
-                    double finalMax = globalMax;
-                    double baseLine = double.NaN;
-                    double padding = 0;
-
-                    // 💥 核心数学变换：根据大一统枚举策略，对极值进行二次修剪
-                    switch (Strategy)
-                    {
-                        case AutoScaleStrategy.Normal:
-                            padding = (finalMax - finalMin) * PaddingRatio;
-                            if (padding == 0) padding = finalMax == 0 ? 1 : Math.Abs(finalMax * 0.01);
-                            finalMin -= padding;
-                            finalMax += padding;
-                            break;
-
-                        case AutoScaleStrategy.IncludeZero:
-                            if (finalMax < 0) finalMax = 0;
-                            if (finalMin > 0) finalMin = 0;
-                            padding = (finalMax - finalMin) * PaddingRatio;
-                            if (padding == 0) padding = finalMax == 0 ? 1 : Math.Abs(finalMax * 0.01);
-                            // 💥 如果原本就是 0 轴，不加 Padding 防止悬空
-                            finalMin = finalMin == 0 ? 0 : finalMin - padding;
-                            finalMax = finalMax == 0 ? 0 : finalMax + padding;
-                            baseLine = 0;
-                            break;
-
-                        case AutoScaleStrategy.SymmetricZero:
-                            double absMax = Math.Max(Math.Abs(finalMin), Math.Abs(finalMax));
-                            padding = absMax * PaddingRatio;
-                            if (padding == 0) padding = 1;
-                            finalMax = absMax + padding;
-                            finalMin = -absMax - padding;
-                            baseLine = 0;
-                            break;
-
-                        case AutoScaleStrategy.SymmetricReference:
-                            if (ReferencePort != null)
-                            {
-                                double refVal = board.Read(ReferencePort);
-                                if (!double.IsNaN(refVal))
-                                {
-                                    // 💥 分时图核心：计算相对昨收价的最大偏离绝对值
-                                    double diff = Math.Max(Math.Abs(finalMin - refVal), Math.Abs(finalMax - refVal));
-                                    padding = diff * PaddingRatio;
-                                    if (padding == 0) padding = refVal * 0.01;
-                                    finalMin = refVal - diff - padding;
-                                    finalMax = refVal + diff + padding;
-                                    baseLine = refVal;
-                                }
-                            }
-                            break;
-
-                        case AutoScaleStrategy.ZeroWithSpace:
-                            // 💥 财务图核心：给正负值留出 1/10 的空隙，并将基准线设在中心
-                            double location = Math.Max(Math.Abs(finalMin), Math.Abs(finalMax)) / 10.0;
-                            finalMin -= location;
-                            finalMax += location;
-
-                            if (globalMin > 0)
-                            {
-                                baseLine = globalMin / 2.0;
-                                finalMin = globalMin / 2.0;
-                            }
-                            else if (globalMax < 0)
-                            {
-                                baseLine = globalMax / 2.0;
-                                finalMax = globalMax / 2.0;
-                            }
-                            else
-                            {
-                                baseLine = 0;
-                            }
-                            break;
-                    }
+                    double refVal = Strategy == AutoScaleStrategy.SymmetricReference && ReferencePort != null ? board.Read(ReferencePort) : double.NaN;
+                    var (finalRange, baseLine) = ApplyStrategy(Strategy, globalMin, globalMax, PaddingRatio, refVal);
+                    double finalMin = finalRange.Min;
+                    double finalMax = finalRange.Max;
 
                     // 💥 原子级写回黑板
                     using (board.AcquireWriteLock())
@@ -246,6 +160,111 @@ namespace Hevo.Charting.Features
             });
 
         }
+
+        /// <summary>
+        /// 把 <paramref name="span"/>[start..endInclusive] 的极值并进 min/max。只跳过缺失值(NaN / ±∞),
+        /// 负价、零价(期货价差、负油价)照常参与 —— 不能用 &lt;= 0 当缺失。
+        /// </summary>
+        internal static void AccumulateExtrema(ReadOnlySpan<double> span, int start, int endInclusive,
+            ref double min, ref double max, ref bool hasValidData)
+        {
+            int end = Math.Min(span.Length - 1, endInclusive);
+            for (int i = Math.Max(0, start); i <= end; i++)
+            {
+                double val = span[i];
+                if (!double.IsFinite(val)) continue;
+
+                if (val > max) max = val;
+                if (val < min) min = val;
+                hasValidData = true;
+            }
+        }
+
+        /// <summary>
+        /// 按策略把视口内真实极值 [globalMin, globalMax] 修剪成最终量程,并给出基准线(无基准时为 NaN)。
+        /// 纯函数;<paramref name="refVal"/> 仅 SymmetricReference 用,NaN 表示没有参考值(量程原样返回)。
+        /// </summary>
+        internal static (RealRange Range, double BaseLine) ApplyStrategy(
+            AutoScaleStrategy strategy, double globalMin, double globalMax, double paddingRatio, double refVal)
+        {
+            double finalMin = globalMin;
+            double finalMax = globalMax;
+            double baseLine = double.NaN;
+            double padding;
+
+            // 💥 核心数学变换：根据大一统枚举策略，对极值进行二次修剪
+            switch (strategy)
+            {
+                case AutoScaleStrategy.Normal:
+                    padding = (finalMax - finalMin) * paddingRatio;
+                    if (padding == 0) padding = FlatPadding(finalMax);
+                    finalMin -= padding;
+                    finalMax += padding;
+                    break;
+
+                case AutoScaleStrategy.IncludeZero:
+                    if (finalMax < 0) finalMax = 0;
+                    if (finalMin > 0) finalMin = 0;
+                    padding = (finalMax - finalMin) * paddingRatio;
+                    if (padding == 0) padding = FlatPadding(finalMax);
+                    // 💥 如果原本就是 0 轴，不加 Padding 防止悬空
+                    finalMin = finalMin == 0 ? 0 : finalMin - padding;
+                    finalMax = finalMax == 0 ? 0 : finalMax + padding;
+                    baseLine = 0;
+                    break;
+
+                case AutoScaleStrategy.SymmetricZero:
+                    double absMax = Math.Max(Math.Abs(finalMin), Math.Abs(finalMax));
+                    padding = absMax * paddingRatio;
+                    if (padding == 0) padding = 1;
+                    finalMax = absMax + padding;
+                    finalMin = -absMax - padding;
+                    baseLine = 0;
+                    break;
+
+                case AutoScaleStrategy.SymmetricReference:
+                    if (!double.IsNaN(refVal))
+                    {
+                        // 💥 分时图核心：计算相对昨收价的最大偏离绝对值
+                        double diff = Math.Max(Math.Abs(finalMin - refVal), Math.Abs(finalMax - refVal));
+                        padding = diff * paddingRatio;
+                        // 参考价为负(价差合约)时 refVal × 1% 是负数,会把量程往里收;为 0 时没有留白
+                        if (padding == 0) padding = FlatPadding(refVal);
+                        finalMin = refVal - diff - padding;
+                        finalMax = refVal + diff + padding;
+                        baseLine = refVal;
+                    }
+                    break;
+
+                case AutoScaleStrategy.ZeroWithSpace:
+                    // 💥 财务图核心：给正负值留出 1/10 的空隙，并将基准线设在中心
+                    double location = Math.Max(Math.Abs(finalMin), Math.Abs(finalMax)) / 10.0;
+                    finalMin -= location;
+                    finalMax += location;
+
+                    if (globalMin > 0)
+                    {
+                        baseLine = globalMin / 2.0;
+                        finalMin = globalMin / 2.0;
+                    }
+                    else if (globalMax < 0)
+                    {
+                        baseLine = globalMax / 2.0;
+                        finalMax = globalMax / 2.0;
+                    }
+                    else
+                    {
+                        baseLine = 0;
+                    }
+                    break;
+            }
+
+            return (new RealRange(finalMin, finalMax), baseLine);
+        }
+
+        /// <summary>极值重合(一字线)时的留白:取值的 1%(按绝对值,负价也向外扩),值为 0 时取 1。</summary>
+        private static double FlatPadding(double value) => value == 0 ? 1 : Math.Abs(value * 0.01);
+
         protected override void OnProject(FeatureContext ctx) { }
     }
 }

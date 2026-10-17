@@ -26,16 +26,23 @@ namespace Hevo.Charting.Core
     /// 对数比例尺
     /// 场景：长期股价趋势（从 10 涨到 1000）、加密货币、指数增长数据。
     /// 特点：视觉上 10->100 的距离等于 100->1000。
-    /// 限制：数据必须 >0。
+    /// 非正值(期货价差、负油价)对数无定义,处理约定:
+    /// <list type="bullet">
+    /// <item>量程本身含非正值(Min &lt;= 0):整轴退化为线性映射,负价行情照常可读,不塌成一条线;</item>
+    /// <item>量程为正、单个值 &lt;= 0:映射到绘图区下沿之外(<see cref="BelowAxis"/>),被裁剪掉,影线从上方延伸出下沿。</item>
+    /// </list>
     /// </summary>
     public record LogarithmicScale : IScale
     {
         public static readonly LogarithmicScale Instance = new();
 
+        /// <summary>量程为正时非正值的归一化结果:比下沿再低一整个绘图区高度,保证落在裁剪区外且仍是有限值。</summary>
+        public const double BelowAxis = -1.0;
+
         public double Normalize(double value, RealRange range)
         {
-            // 保护：对数不能处理 <= 0
-            if (value <= 0 || range.Min <= 0) return 0;
+            if (range.Min <= 0) return LinearScale.Instance.Normalize(value, range);
+            if (value <= 0) return BelowAxis;
 
             double logVal = Math.Log10(value);
             double logMin = Math.Log10(range.Min);
@@ -49,7 +56,7 @@ namespace Hevo.Charting.Core
 
         public double Denormalize(double normalValue, RealRange range)
         {
-            if (range.Min <= 0) return 0;
+            if (range.Min <= 0) return LinearScale.Instance.Denormalize(normalValue, range);
 
             double logMin = Math.Log10(range.Min);
             double logMax = Math.Log10(range.Max);

@@ -218,8 +218,12 @@ namespace Hevo.Charting.WorkFlow
         internal UniversalDataPipe<TItem> InternalPipe => _pipe;
         internal Func<int> NativeLengthProvider => _nativeLengthProvider;
 
-        // 1. 常规标量映射 (保留兼容)
-        public ScatterConfigurator<TSource, TItem> Map<TValue>(DataPort<ReadOnlyMemory<TValue>> targetPort, Func<TItem, TValue> valueSelector, TValue defaultValue = default!)
+        // 1. 常规标量映射 (保留兼容):没映射到的位置填 MissingValue(double / float 为 NaN,渲染侧按缺失跳过)
+        public ScatterConfigurator<TSource, TItem> Map<TValue>(DataPort<ReadOnlyMemory<TValue>> targetPort, Func<TItem, TValue> valueSelector)
+            => Map(targetPort, valueSelector, MissingValue<TValue>.Value);
+
+        // 1b. 显式指定空位填充值(确实要用 0 之类占位时)
+        public ScatterConfigurator<TSource, TItem> Map<TValue>(DataPort<ReadOnlyMemory<TValue>> targetPort, Func<TItem, TValue> valueSelector, TValue defaultValue)
         {
             _pipe.AddIngestor(new ScatterIngestor<TItem, TValue>(targetPort, _nativeLengthProvider, defaultValue, _indexSelector, valueSelector));
             return this;
@@ -279,13 +283,24 @@ namespace Hevo.Charting.WorkFlow
             var fresh = new ReadOnlySpan<TValue>(target, 0, length);
             if (current != null && board.Read(port) is var published
                 && published.Length == length && published.Span == new ReadOnlySpan<TValue>(current, 0, length)
-                && fresh.SequenceEqual(published.Span, null))
+                && ContentEquals(fresh, published.Span))
             {
                 ring.Unused(target);
                 return;
             }
             board.ForceWrite(port, new ReadOnlyMemory<TValue>(target, 0, length));
             ring.Published(target);
+        }
+
+        // 等价 span.SequenceEqual(other, comparer: null)(该重载 .NET 6+ 才有,README §2 要求 .NET 5 SDK 可编):
+        // TValue 无 IEquatable 约束,逐元素走 EqualityComparer<TValue>.Default。
+        private static bool ContentEquals(ReadOnlySpan<TValue> a, ReadOnlySpan<TValue> b)
+        {
+            if (a.Length != b.Length) return false;
+            var cmp = EqualityComparer<TValue>.Default;
+            for (int i = 0; i < a.Length; i++)
+                if (!cmp.Equals(a[i], b[i])) return false;
+            return true;
         }
 
         public void Process(DataSnapshot<TItem> snapshot, DataBlackboard board)

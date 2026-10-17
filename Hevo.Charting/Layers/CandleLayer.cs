@@ -133,7 +133,7 @@ namespace Hevo.Charting.Core
                 {
                     int arrayIndex = logicalIndex - baseIndex;
                     double o = opens[arrayIndex];
-                    if (o <= 0) continue;
+                    if (IsMissing(o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex])) continue;
 
                     double xCenter = plotArea.Left + axis.DomainScale.Normalize(logicalIndex, xRange) * plotArea.Width;
                     int column = PixelColumnLod.ColumnOf(xCenter, pixelsPerDip);
@@ -153,7 +153,7 @@ namespace Hevo.Charting.Core
                     int arrayIndex = logicalIndex - baseIndex;
 
                     double o = opens[arrayIndex];
-                    if (o <= 0) continue;
+                    if (IsMissing(o, highs[arrayIndex], lows[arrayIndex], closes[arrayIndex])) continue;
 
                     // 💥 绝对中心点：Scale 去操心居中偏移，Layer 只管画！
                     double xNorm = axis.DomainScale.Normalize(logicalIndex, xRange);
@@ -177,6 +177,14 @@ namespace Hevo.Charting.Core
                 if (_downRects.Count > 0) draw.DrawRectangles(style.DownBrush, null, _downRects);
             }
         }
+
+        /// <summary>
+        /// 缺失的 K 线 = OHLC 任一为 NaN / ±∞。以前用 <c>open &lt;= 0</c> 挡 ScatterIngestor 给没映射到的格子填的 0 占位,
+        /// 但期货价差合约、2020 年原油的负价 / 零价是真实行情,不能当缺失。缺失值约定为 NaN:
+        /// 稀疏映射的 K 线列要给 Map 传 <c>defaultValue: double.NaN</c>。
+        /// </summary>
+        internal static bool IsMissing(double o, double h, double l, double c)
+            => !double.IsFinite(o) || !double.IsFinite(h) || !double.IsFinite(l) || !double.IsFinite(c);
 
         private void AddCandle(double xCenter, double halfBody, double o, double h, double l, double c,
                                HevoRect plotArea, RealRange yRange, ScaleStrategyTrait axis)
