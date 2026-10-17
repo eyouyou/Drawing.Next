@@ -45,7 +45,8 @@ namespace Hevo.Charting.Tests
                 threads[t].Start();
             }
             foreach (var t in threads) t.Join();
-            WaitIdle(() => Volatile.Read(ref running) == 0);
+            // 要等回调至少跑过一次:只看 running == 0 的话,线程池还没调度到第一次回调时条件就已成立(CI 上 maxRunning = 0)
+            WaitIdle(() => Volatile.Read(ref runs) >= 1 && Volatile.Read(ref running) == 0);
 
             Assert.Equal(1, maxRunning);
             Assert.True(runs >= 1 && runs < 800, $"800 次通知跑了 {runs} 次");
