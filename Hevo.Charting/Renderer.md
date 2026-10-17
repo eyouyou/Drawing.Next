@@ -153,7 +153,7 @@ WidgetBuffer 不走任何 backend,统一在 `ChartCell.RenderWidgetLayers` 走 `
 ## 位图回放后端(RenderMode.Bitmap)
 
 不是新接一个图形库,而是给同一套 `DrawCmd` 加第二种回放方式:框架自己把指令光栅化进图层的 `WriteableBitmap`,
-图层的 DrawingVisual 里只挂"裁剪 + 一张位图"三条 RenderData。图层代码、Feature、蓝图都不用改。
+图层的 DrawingVisual 里只挂"裁剪 + 原点平移 + 一张位图"五条 RenderData(平移把位图贴到设备像素上,见 06 号文档 §14.9)。图层代码、Feature、蓝图都不用改。
 
 ### 怎么切
 
@@ -183,7 +183,7 @@ chart.RenderModeOverride = RenderMode.Bitmap;
 
 ### 跟 WPF 矢量路径的差异
 
-- 像素对齐沿用 `PixelSnap`,覆盖规则同 `EdgeMode.Aliased`:水平 / 垂直线、矩形逐像素一致(`RasterRendererTests` 截图对比)。
+- 像素对齐沿用 `PixelSnap`,覆盖规则是像素中心采样(无抗锯齿):水平 / 垂直线、矩形跟 WPF 路径(全图抗锯齿 + 设备像素对齐)逐像素一致(`RasterRendererTests` 截图对比);斜线 / 曲线位图后端是锯齿的,WPF 路径是平滑的。
 - `PushOpacity` 逐图元乘透明度(WPF 是整组合成后再乘,组内图元重叠处会略深)。
 - 渐变只取首尾两个色标;ImageBrush / VisualBrush 不支持(该图元跳过)。
 - 文字:字形落在整像素上(WPF 亚像素定位),宽度用 advance 之和;标签框位置可能差 1 像素。

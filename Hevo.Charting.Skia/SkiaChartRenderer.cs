@@ -283,61 +283,22 @@ namespace Hevo.Charting.Skia
         }
 
         // ==========================================
-        // 设备像素对齐(规则同 PixelSnap,只是先乘 DPI 在设备像素上取整,再除回画布的 DIP 坐标)
-        // _scale = 1 时每一步都是精确运算,结果与 PixelSnap 逐位相同
+        // 设备像素对齐:规则只有 PixelSnap 一份(WPF 后端同用),这里只做 SKPoint / 设备缩放的转接
         // ==========================================
 
-        /// <summary>
-        /// 线宽换算到设备像素。整数 DIP 线宽取整到整数设备像素(四舍,.5 舍去,至少 1px):
-        /// 1px 线在 125% / 150% 下仍是 1 个设备像素,不会变成 1.25 / 1.5px 横跨两行发虚。小数线宽按比例缩放。
-        /// </summary>
-        private double DeviceThickness(double t)
-        {
-            if (_scale == 1f || t <= 0) return t;
-            double d = t * _pixelsPerDip;
-            if (t == Math.Floor(t)) d = Math.Max(1.0, Math.Ceiling(d - 0.5));
-            return d;
-        }
+        private double DeviceThickness(double t) => PixelSnap.DeviceThickness(t, _pixelsPerDip);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private float Vertex(float v, float halfPx) => (MathF.Round(v * _scale) + halfPx) / _scale;
+        private float Vertex(float v, float halfPx) => PixelSnap.Vertex(v, halfPx, _scale);
 
-        // H/V 线:平行轴取整(端点像素整列覆盖)、垂直轴 + halfPx(中心落像素中心);斜线两轴都 + halfPx
         private void SnapEndpoints(HevoPoint p1, HevoPoint p2, float halfPx, out SKPoint a, out SKPoint b)
         {
-            if (p1.Y == p2.Y)
-            {
-                float y = Vertex(p1.Y, halfPx);
-                a = new SKPoint(Vertex(p1.X, 0f), y);
-                b = new SKPoint(Vertex(p2.X, 0f), y);
-                return;
-            }
-            if (p1.X == p2.X)
-            {
-                float x = Vertex(p1.X, halfPx);
-                a = new SKPoint(x, Vertex(p1.Y, 0f));
-                b = new SKPoint(x, Vertex(p2.Y, 0f));
-                return;
-            }
-            a = new SKPoint(Vertex(p1.X, halfPx), Vertex(p1.Y, halfPx));
-            b = new SKPoint(Vertex(p2.X, halfPx), Vertex(p2.Y, halfPx));
+            PixelSnap.SnapEndpoints(p1, p2, halfPx, _scale, out var ha, out var hb);
+            a = new SKPoint(ha.X, ha.Y);
+            b = new SKPoint(hb.X, hb.Y);
         }
 
-        // 外边界先取整到设备像素,再向内收半个(设备)线宽
-        private HevoRect InsideStroke(HevoRect r, double deviceThickness)
-        {
-            float s = _scale;
-            float left = MathF.Round(r.X * s);
-            float top = MathF.Round(r.Y * s);
-            float right = MathF.Round(r.Right * s);
-            float bottom = MathF.Round(r.Bottom * s);
-            float h = (float)(deviceThickness / 2.0);
-            return new HevoRect(
-                (left + h) / s,
-                (top + h) / s,
-                Math.Max(0f, right - left - 2f * h) / s,
-                Math.Max(0f, bottom - top - 2f * h) / s);
-        }
+        private HevoRect InsideStroke(HevoRect r, double deviceThickness) => PixelSnap.InsideStroke(r, deviceThickness, _scale);
 
         private void Rect(HevoRect r, IHevoBrush? brush, HevoPen? penDesc)
         {

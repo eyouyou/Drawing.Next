@@ -253,24 +253,54 @@ namespace Hevo.Charting.Tests
             d.DrawRectangle(GreenBrush, GridPen, new HevoRect(150.4f, 112.2f, 50.5f, 25.5f));
         }
 
-        private static int CountDiff(uint[] a, uint[] b, out int covered)
+        /// <summary>
+        /// 逐像素比较(颜色也要对)。<paramref name="skipEdges"/> 时跳过 WPF 截图里半透明的像素及其周围 1px:
+        /// WPF 路径全图抗锯齿(横竖内容按设备像素对齐,斜线 / 曲线平滑),位图后端没有抗锯齿、按像素中心取舍,
+        /// 边缘像素两边本来就不同;抗锯齿边缘叠在不透明图形上时混出来的是不透明的过渡色,紧挨着半透明边缘,一并跳过。
+        /// 其余像素(纯背景、图形内部)位图后端必须一致。不按颜色过滤:颜色画错的不透明像素必须算作不同。
+        /// </summary>
+        private static int CountDiff(uint[] a, uint[] b, bool skipEdges, out int covered)
         {
             int diff = 0;
             covered = 0;
             for (int i = 0; i < a.Length; i++)
             {
+                if (skipEdges && NearPartial(a, i)) continue;
                 if (a[i] != 0 || b[i] != 0) covered++;
                 if (a[i] != b[i]) diff++;
             }
             return diff;
         }
 
+        private static bool IsPartial(uint p) { uint alpha = p >> 24; return alpha != 0 && alpha != 0xFF; }
+
+        private static bool NearPartial(uint[] px, int i)
+        {
+            int x = i % W, y = i / W;
+            for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int nx = x + dx, ny = y + dy;
+                if (nx >= 0 && nx < W && ny >= 0 && ny < H && IsPartial(px[ny * W + nx])) return true;
+            }
+            return false;
+        }
+
+        private static int CountPartial(uint[] px)
+        {
+            int n = 0;
+            foreach (var p in px) if (IsPartial(p)) n++;
+            return n;
+        }
+
         [Fact]
         public void AxisAlignedScene_MatchesWpfPixelForPixel() => IncrementalTestKit.RunOnSta(() =>
         {
             var (wpf, bmp) = RenderBoth(AxisAlignedScene);
-            int diff = CountDiff(wpf, bmp, out int covered);
-            _out.WriteLine($"轴对齐场景:覆盖 {covered} 像素,不同 {diff}");
+            // 横竖内容 WPF 那边按设备像素对齐,不该有半透明边缘;有的话两边比的就不是同一个东西
+            Assert.Equal(0, CountPartial(wpf));
+            int diff = CountDiff(wpf, bmp, skipEdges: false, out int covered);
+            _out.WriteLine($"轴对齐场景:覆盖像素 {covered},不同 {diff}");
             Assert.True(covered > 2000, "场景没画出来");
             Assert.Equal(0, diff);
         });
@@ -281,7 +311,8 @@ namespace Hevo.Charting.Tests
             var line = new List<HevoPoint>();
             for (int i = 0; i < 200; i++) line.Add(new HevoPoint(10 + i * 1.1f, 80 + 50 * MathF.Sin(i / 15f)));
             var linePen = new HevoPen(new HevoSolidBrush(Colors.DarkOrange), 1.5);
-            var dashPen = new HevoPen(new HevoSolidBrush(Colors.Gray), 1, new double[] { 4, 4 });
+            // 虚线不用灰色:灰色 R = G = B,通道顺序写错也看不出来
+            var dashPen = new HevoPen(new HevoSolidBrush(Colors.SteelBlue), 1, new double[] { 4, 4 });
             var (wpf, bmp) = RenderBoth(d =>
             {
                 d.DrawPolyline(linePen, line);
@@ -291,11 +322,12 @@ namespace Hevo.Charting.Tests
                 d.DrawEllipse(null, Pen2, new HevoPoint(180, 120), 20, 12);
                 d.DrawRoundedRectangle(GreenBrush, null, new HevoRect(20, 30, 50, 25), 6, 6);
             });
-            int diff = CountDiff(wpf, bmp, out int covered);
+            int diff = CountDiff(wpf, bmp, skipEdges: true, out int covered);
             double ratio = (double)diff / Math.Max(1, covered);
-            _out.WriteLine($"混合场景(斜线 / 虚线 / 椭圆 / 圆角):覆盖 {covered} 像素,不同 {diff}({ratio:P1})");
+            _out.WriteLine($"混合场景(斜线 / 虚线 / 椭圆 / 圆角):确定像素 {covered},不同 {diff}({ratio:P1})");
             Assert.True(covered > 1000, "场景没画出来");
-            Assert.True(ratio < 0.15, $"跟 WPF 差异 {ratio:P1} 超过 15%");
+            // 斜边和曲线的多边形近似、虚线切分点的浮点误差会让极少数确定像素翻面
+            Assert.True(ratio < 0.02, $"跟 WPF 差异 {ratio:P1} 超过 2%");
         });
 
         [Fact]

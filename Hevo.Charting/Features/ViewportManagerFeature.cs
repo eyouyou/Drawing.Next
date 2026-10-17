@@ -185,11 +185,6 @@ namespace Hevo.Charting.Features
 
                     // 💥 绝对单向流：管家只负责输出现实，不再管意图！打破一切死锁。
                     using (board.AcquireWriteLock()) board.WriteIfChanged(Viewport.ActiveRange, new RealRange(min, max));
-
-                    // 通知 chart 当前可见数据量,供 StaticCachePolicy=Adaptive 时滞回切换 BitmapCache。
-                    // On / Off 模式下 ChartCell 内部直接 no-op,无额外开销。
-                    int visibleCount = (int)Math.Max(0, Math.Round(max - min) + 1);
-                    chart.ReportVisibleDataCount(visibleCount);
                 }
             });
 

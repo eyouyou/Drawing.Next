@@ -54,7 +54,20 @@ namespace Hevo.Charting.Renderers
         // ==========================================
         // 旧实现从 Application.Current.MainWindow 取,多窗口 / 跨屏拖动场景会拿错值。
         // 现在 ChartCell 在 Loaded / DpiChanged 时显式注入,renderer 自身不再做 visual tree walk。
-        public double PixelsPerDip { get; set; } = 1.0;
+        public double PixelsPerDip
+        {
+            get => _pixelsPerDip;
+            set
+            {
+                if (_pixelsPerDip == value) return;
+                _pixelsPerDip = value;
+                // 画笔线宽按设备像素取整(PixelSnap.DeviceThickness),DPI 变了要重建
+                _penCache.Clear();
+                _lastPenDesc = null; _lastPenHandle = null;
+            }
+        }
+        private double _pixelsPerDip = 1.0;
+
 
         // ==========================================
         // 💥 极速桥接器 (强制内联抹除函数开销,float -> double 平滑过渡)
@@ -72,6 +85,8 @@ namespace Hevo.Charting.Renderers
 
             // 💥 用 Span 替代 List 索引访问:省掉边界检查 + 24+ 字节 DrawCmd 值复制,hot loop 提速 5%~10%。
             var span = CollectionsMarshal.AsSpan(buffer.Commands);
+            // 全图抗锯齿;横竖线 / 矩形 / 裁剪框靠设备像素对齐保持锐利(k = PixelsPerDip)
+            float k = (float)PixelsPerDip;
 #if DEBUG
             int pushDepth = 0; // 验证 Push/Pop 配平,失衡会污染下一帧 dc 状态
 #endif
@@ -102,8 +117,8 @@ namespace Hevo.Charting.Renderers
                         var batchPen = GetPen(cmd.Pen);
                         if (batchPen != null)
                         {
-                            float vHalfBatch = PixelSnap.HalfPx(cmd.Pen!.Thickness);
-                            dc.DrawGeometry(null, batchPen, BuildLineBatch(span.Slice(i, run), vHalfBatch));
+                            float vHalfBatch = PixelSnap.HalfPx(PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k));
+                            dc.DrawGeometry(null, batchPen, BuildLineBatch(span.Slice(i, run), vHalfBatch, k));
                         }
                         i += run - 1; // 跳过整批,for 自增 +1 = i + run
                         continue;
@@ -119,8 +134,8 @@ namespace Hevo.Charting.Renderers
                     {
                         var pen = GetPen(cmd.Pen);
                         if (pen == null) break;
-                        float vHalf = PixelSnap.HalfPx(cmd.Pen!.Thickness);
-                        PixelSnap.SnapEndpoints(cmd.Payload.P1, cmd.Payload.P2, vHalf, out var p1, out var p2);
+                        float vHalf = PixelSnap.HalfPx(PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k));
+                        PixelSnap.SnapEndpoints(cmd.Payload.P1, cmd.Payload.P2, vHalf, k, out var p1, out var p2);
                         dc.DrawLine(pen, T(p1), T(p2));
                         break;
                     }
@@ -129,10 +144,10 @@ namespace Hevo.Charting.Renderers
                         var r = cmd.Payload.RectArea;
                         var brush = GetBrush(cmd.Brush);
                         var pen = GetPen(cmd.Pen);
-                        if (brush != null) dc.DrawRectangle(brush, null, T(r));
+                        if (brush != null) dc.DrawRectangle(brush, null, T(PixelSnap.FillRect(r, k)));
                         if (pen != null)
                         {
-                            var sr = PixelSnap.InsideStroke(r, cmd.Pen!.Thickness);
+                            var sr = PixelSnap.InsideStroke(r, PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k), k);
                             dc.DrawRectangle(null, pen, T(sr));
                         }
                         break;
@@ -145,7 +160,7 @@ namespace Hevo.Charting.Renderers
                         if (brush != null) dc.DrawRoundedRectangle(brush, null, T(r), cmd.Payload.Val1, cmd.Payload.Val2);
                         if (pen != null)
                         {
-                            var sr = PixelSnap.InsideStroke(r, cmd.Pen!.Thickness);
+                            var sr = PixelSnap.InsideStroke(r, PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k), k);
                             dc.DrawRoundedRectangle(null, pen, T(sr), cmd.Payload.Val1, cmd.Payload.Val2);
                         }
                         break;
@@ -157,7 +172,7 @@ namespace Hevo.Charting.Renderers
                         var brush = GetBrush(cmd.Brush);
                         var pen = GetPen(cmd.Pen);
                         var c = cmd.Payload.P1;
-                        var snapped = new Point(MathF.Round(c.X), MathF.Round(c.Y));
+                        var snapped = new Point(MathF.Round(c.X * k) / k, MathF.Round(c.Y * k) / k);
                         dc.DrawEllipse(brush, pen, snapped, cmd.Payload.Val1, cmd.Payload.Val2);
                         break;
                     }
@@ -166,8 +181,8 @@ namespace Hevo.Charting.Renderers
                         var pen = GetPen(cmd.Pen);
                         if (pen != null && cmd.RefData is List<HevoPoint> polyPts && polyPts.Count > 1)
                         {
-                            float vHalf = PixelSnap.HalfPx(cmd.Pen!.Thickness);
-                            dc.DrawGeometry(null, pen, BuildPolyline(polyPts, vHalf));
+                            float vHalf = PixelSnap.HalfPx(PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k));
+                            dc.DrawGeometry(null, pen, BuildPolyline(polyPts, vHalf, k));
                         }
                         break;
                     }
@@ -176,8 +191,8 @@ namespace Hevo.Charting.Renderers
                         var pen = GetPen(cmd.Pen);
                         if (pen != null && cmd.RefData is List<HevoPoint> segPts && segPts.Count > 1)
                         {
-                            float vHalf = PixelSnap.HalfPx(cmd.Pen!.Thickness);
-                            dc.DrawGeometry(null, pen, BuildLineSegments(segPts, vHalf));
+                            float vHalf = PixelSnap.HalfPx(PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k));
+                            dc.DrawGeometry(null, pen, BuildLineSegments(segPts, vHalf, k));
                         }
                         break;
                     }
@@ -186,9 +201,9 @@ namespace Hevo.Charting.Renderers
                         var pen = GetPen(cmd.Pen);
                         if (pen != null && cmd.RefData is HevoPoint[] ctrls && ctrls.Length == 2)
                         {
-                            float vHalf = PixelSnap.HalfPx(cmd.Pen!.Thickness);
+                            float vHalf = PixelSnap.HalfPx(PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k));
                             dc.DrawGeometry(null, pen,
-                                BuildCubicBezier(cmd.Payload.P1, ctrls[0], ctrls[1], cmd.Payload.P2, vHalf));
+                                BuildCubicBezier(cmd.Payload.P1, ctrls[0], ctrls[1], cmd.Payload.P2, vHalf, k));
                         }
                         break;
                     }
@@ -201,13 +216,14 @@ namespace Hevo.Charting.Renderers
                         var brush = GetBrush(cmd.Brush);
                         var pen = GetPen(cmd.Pen);
                         double penThick = cmd.Pen?.Thickness ?? 0;
+                        double devThick = PixelSnap.DeviceThickness(penThick, k);
                         for (int j = 0; j < rects.Count; j++)
                         {
                             var raw = rects[j];
-                            if (brush != null) dc.DrawRectangle(brush, null, T(raw));
+                            if (brush != null) dc.DrawRectangle(brush, null, T(PixelSnap.FillRect(raw, k)));
                             if (pen != null)
                             {
-                                var sr = PixelSnap.InsideStroke(raw, penThick);
+                                var sr = PixelSnap.InsideStroke(raw, devThick, k);
                                 dc.DrawRectangle(null, pen, T(sr));
                             }
                         }
@@ -261,17 +277,16 @@ namespace Hevo.Charting.Renderers
                             textInfo.PaddingX, textInfo.PaddingY,
                             textInfo.AlignX, textInfo.AlignY);
 
-                        // 3. 背景框:遵守像素对齐协议 §13 —— fill 走原 rect、stroke 走 InsideStroke。
+                        // 3. 背景框:遵守像素对齐协议 §13 —— fill 四边按设备像素取整、stroke 走 InsideStroke。
                         if (textInfo.BgBrush != null || textInfo.BorderPen != null)
                         {
                             var bgWpfBrush = GetBrush(textInfo.BgBrush);
                             var borderWpfPen = GetPen(textInfo.BorderPen);
-                            var rawRect = new Rect(layout.BoxX, layout.BoxY, layout.BoxWidth, layout.BoxHeight);
-                            if (bgWpfBrush != null) dc.DrawRectangle(bgWpfBrush, null, rawRect);
+                            var hevoRect = new HevoRect((float)layout.BoxX, (float)layout.BoxY, (float)layout.BoxWidth, (float)layout.BoxHeight);
+                            if (bgWpfBrush != null) dc.DrawRectangle(bgWpfBrush, null, T(PixelSnap.FillRect(hevoRect, k)));
                             if (borderWpfPen != null)
                             {
-                                var hevoRect = new HevoRect((float)layout.BoxX, (float)layout.BoxY, (float)layout.BoxWidth, (float)layout.BoxHeight);
-                                var snapped = PixelSnap.InsideStroke(hevoRect, textInfo.BorderPen!.Thickness);
+                                var snapped = PixelSnap.InsideStroke(hevoRect, PixelSnap.DeviceThickness(textInfo.BorderPen!.Thickness, k), k);
                                 dc.DrawRectangle(null, borderWpfPen, T(snapped));
                             }
                         }
@@ -287,7 +302,8 @@ namespace Hevo.Charting.Renderers
                         if (cmd.RefData is MediaPlayer player) dc.DrawVideo(player, T(cmd.Payload.RectArea));
                         break;
                     case DrawOp.PushClip:
-                        dc.PushClip(new RectangleGeometry(T(cmd.Payload.RectArea)));
+                        // 裁剪框同样按设备像素取整:小数裁剪边会把被裁的图形边缘裁成半透明
+                        dc.PushClip(new RectangleGeometry(T(PixelSnap.FillRect(cmd.Payload.RectArea, k))));
 #if DEBUG
                         pushDepth++;
 #endif
@@ -340,7 +356,7 @@ namespace Hevo.Charting.Renderers
         // batch detector 辅助:把 N 个相邻 DrawLine 合成单 StreamGeometry 多 figure。
         // 每 figure 一段独立直线,不闭合(IsClosed=false 避免 fill 路径)、IsFilled=false 避免触发
         // 历史的 "figure 间幻线" 问题(详见 §4.2 DrawRectangles 注释)。
-        private static Geometry BuildLineBatch(ReadOnlySpan<DrawCmd> cmds, float vHalf)
+        private static Geometry BuildLineBatch(ReadOnlySpan<DrawCmd> cmds, float vHalf, float k)
         {
             var geo = new StreamGeometry();
             using (var ctx = geo.Open())
@@ -348,7 +364,7 @@ namespace Hevo.Charting.Renderers
                 for (int j = 0; j < cmds.Length; j++)
                 {
                     ref readonly var c = ref cmds[j];
-                    PixelSnap.SnapEndpoints(c.Payload.P1, c.Payload.P2, vHalf, out var a, out var b);
+                    PixelSnap.SnapEndpoints(c.Payload.P1, c.Payload.P2, vHalf, k, out var a, out var b);
                     ctx.BeginFigure(new Point(a.X, a.Y), isFilled: false, isClosed: false);
                     ctx.LineTo(new Point(b.X, b.Y), isStroked: true, isSmoothJoin: false);
                 }
@@ -359,25 +375,25 @@ namespace Hevo.Charting.Renderers
 
         // points 由 DrawingExtensions 公共 API 锁死为 List<HevoPoint>，可直接 AsSpan 走数组。
         // 跳过 IList<T>.this[int] 的虚分发，8K 顶点折线 / Catmull-Rom 输出收益最显著。
-        private static Geometry BuildPolyline(List<HevoPoint> points, float vHalf)
+        private static Geometry BuildPolyline(List<HevoPoint> points, float vHalf, float k)
         {
             var geo = new StreamGeometry();
             using (var ctx = geo.Open())
             {
                 var span = CollectionsMarshal.AsSpan(points);
                 ref readonly var p0 = ref span[0];
-                ctx.BeginFigure(new Point(PixelSnap.Vertex(p0.X, vHalf), PixelSnap.Vertex(p0.Y, vHalf)), false, false);
+                ctx.BeginFigure(new Point(PixelSnap.Vertex(p0.X, vHalf, k), PixelSnap.Vertex(p0.Y, vHalf, k)), false, false);
                 for (int i = 1; i < span.Length; i++)
                 {
                     ref readonly var p = ref span[i];
-                    ctx.LineTo(new Point(PixelSnap.Vertex(p.X, vHalf), PixelSnap.Vertex(p.Y, vHalf)), true, false);
+                    ctx.LineTo(new Point(PixelSnap.Vertex(p.X, vHalf, k), PixelSnap.Vertex(p.Y, vHalf, k)), true, false);
                 }
             }
             geo.Freeze();
             return geo;
         }
 
-        private static Geometry BuildLineSegments(List<HevoPoint> points, float vHalf)
+        private static Geometry BuildLineSegments(List<HevoPoint> points, float vHalf, float k)
         {
             var geo = new StreamGeometry();
             using (var ctx = geo.Open())
@@ -386,7 +402,7 @@ namespace Hevo.Charting.Renderers
                 int last = span.Length - 1;
                 for (int i = 0; i < last; i += 2)
                 {
-                    PixelSnap.SnapEndpoints(span[i], span[i + 1], vHalf, out var a, out var b);
+                    PixelSnap.SnapEndpoints(span[i], span[i + 1], vHalf, k, out var a, out var b);
                     ctx.BeginFigure(new Point(a.X, a.Y), false, false);
                     ctx.LineTo(new Point(b.X, b.Y), true, false);
                 }
@@ -397,16 +413,16 @@ namespace Hevo.Charting.Renderers
 
         // 三次贝塞尔:端点做像素对齐(跟 polyline 同口径,跨帧不晃),控制点不需对齐(它们不出现在画面上)。
         // BezierTo 内部走 WPF 几何引擎的硬件抗锯齿曲线管线,长边也无折角。
-        private static Geometry BuildCubicBezier(HevoPoint p0, HevoPoint c1, HevoPoint c2, HevoPoint p3, float vHalf)
+        private static Geometry BuildCubicBezier(HevoPoint p0, HevoPoint c1, HevoPoint c2, HevoPoint p3, float vHalf, float k)
         {
             var geo = new StreamGeometry();
             using (var ctx = geo.Open())
             {
-                ctx.BeginFigure(new Point(PixelSnap.Vertex(p0.X, vHalf), PixelSnap.Vertex(p0.Y, vHalf)), false, false);
+                ctx.BeginFigure(new Point(PixelSnap.Vertex(p0.X, vHalf, k), PixelSnap.Vertex(p0.Y, vHalf, k)), false, false);
                 ctx.BezierTo(
                     new Point(c1.X, c1.Y),
                     new Point(c2.X, c2.Y),
-                    new Point(PixelSnap.Vertex(p3.X, vHalf), PixelSnap.Vertex(p3.Y, vHalf)),
+                    new Point(PixelSnap.Vertex(p3.X, vHalf, k), PixelSnap.Vertex(p3.Y, vHalf, k)),
                     isStroked: true, isSmoothJoin: false);
             }
             geo.Freeze();
@@ -453,7 +469,8 @@ namespace Hevo.Charting.Renderers
             var brush = GetBrush(desc.Brush);
             if (brush == null) return null;
 
-            wpfPen = new Pen(brush, desc.Thickness);
+            // 线宽按设备像素取整(1px 线在 125% / 150% 下仍是 1 个设备像素),k = 1 时就是原线宽
+            wpfPen = new Pen(brush, PixelSnap.DeviceThickness(desc.Thickness, PixelsPerDip) / PixelsPerDip);
             if (desc.DashArray != null && desc.DashArray.Length > 0) wpfPen.DashStyle = new DashStyle(desc.DashArray, 0);
             wpfPen.StartLineCap = (PenLineCap)desc.LineCap;
             wpfPen.EndLineCap = (PenLineCap)desc.LineCap;

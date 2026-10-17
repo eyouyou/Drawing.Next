@@ -398,6 +398,40 @@ namespace Hevo.Charting.Tests
             Assert.Equal(0, CountDiff(RenderOnce(cells, tri, new SkiaRenderBackend()), RenderOnce(cells, flat, new SkiaRenderBackend())));
         });
 
+        // 小数坐标的填充矩形(K 线实体)与裁剪框边缘全是实心像素,跟 WPF 后端一致(Skia 填充 / 裁剪不开抗锯齿,按像素中心取舍)
+        [Theory]
+        [InlineData(1.0)]
+        [InlineData(1.25)]
+        [InlineData(1.5)]
+        public void FractionalFillRects_HaveNoSemiTransparentEdges(double dpi) => IncrementalTestKit.RunOnSta(() =>
+        {
+            using var cells = new Cells();
+            var cell = NewCell(cells, new SkiaRenderBackend(), dpi);
+            var layer = new ScriptLayer(d =>
+            {
+                using (d.PushClip(new HevoRect(3.3f, 2.6f, W - 7.1f, H - 5.4f)))
+                {
+                    var rects = new List<HevoRect>();
+                    for (int i = 0; i < 30; i++) rects.Add(new HevoRect(1.3f + i * 7.1f, 20.4f + i % 7, 4.6f, 30.7f));
+                    d.DrawRectangles(Up, null, rects);
+                    d.DrawRectangle(Down, null, new HevoRect(0.4f, 100.2f, W, 20.5f)); // 两侧被裁剪框截断
+                }
+            });
+            cell.AddUnmanagedLayer(layer);
+            Record(cell, layer);
+            var px = Capture(cell, dpi, out _, out _);
+            int solid = 0, partial = 0;
+            foreach (var p in px)
+            {
+                uint a = p >> 24;
+                if (a == 255) solid++;
+                else if (a != 0) partial++;
+            }
+            _out.WriteLine($"DPI {dpi}:实心 {solid},半透明 {partial}");
+            Assert.True(solid > 2000, "场景没画出来");
+            Assert.Equal(0, partial);
+        });
+
         [Theory]
         [InlineData(1.25)]
         [InlineData(1.5)]
