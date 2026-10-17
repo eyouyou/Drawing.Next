@@ -115,5 +115,26 @@ namespace Hevo.Charting.Tests
             rig.Source.PublishRows(new Row(double.NaN, 1), new Row(2, 1));
             Assert.Equal(a0, rig.NotifyA);   // NaN 跟 NaN 视为相同,不通知
         }
+
+        /// <summary>
+        /// "内容没变就不发布"只在端口上挂的还是摄入器自己上次发布的那块时成立:别处往同一端口写过一块(内容碰巧相同),
+        /// 摄入器下一次推送要照常发布自己的缓冲,不能把别人的数组当成自己的留在端口上(别人可能原地改它)。
+        /// </summary>
+        [Fact]
+        public void PortOverwrittenElsewhere_RepublishesOwnBuffer()
+        {
+            var rig = new Rig();
+            rig.Source.PublishRows(new Row(1, 2), new Row(3, 4));
+            var foreign = new[] { 1.0, 3.0 };                                   // 内容跟摄入器发布的一样
+            using (rig.Board.AcquireWriteLock()) rig.Board.ForceWrite(rig.ColA, new ReadOnlyMemory<double>(foreign));
+
+            rig.Source.PublishRows(new Row(1, 2), new Row(3, 4));
+
+            ReadOnlyMemory<double> now;
+            using (rig.Board.AcquireReadLock()) now = rig.Board.Read(rig.ColA);
+            Assert.True(System.Runtime.InteropServices.MemoryMarshal.TryGetArray(now, out var seg));
+            Assert.NotSame(foreign, seg.Array);
+            Assert.Equal(new[] { 1.0, 3.0 }, now.ToArray());
+        }
     }
 }

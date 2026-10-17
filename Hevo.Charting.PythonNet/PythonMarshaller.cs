@@ -43,12 +43,12 @@ namespace Hevo.Charting.PythonNet
 
                 // ReadOnlyMemory<double>:首选业务数据形态(指标计算的核心)
                 case ReadOnlyMemory<double> rom_d: return ToNumpyArray(rom_d, "float64");
-                case Memory<double> m_d:           return ToNumpyArray(m_d.Span, "float64");
-                case double[] arr_d:               return ToNumpyArray(arr_d.AsSpan(), "float64");
+                case Memory<double> m_d:           return ToNumpyArray<double>(m_d.Span, "float64");
+                case double[] arr_d:               return ToNumpyArray<double>(arr_d.AsSpan(), "float64");
 
                 case ReadOnlyMemory<int> rom_i: return ToNumpyArray(rom_i, "int32");
-                case Memory<int> m_i:           return ToNumpyArray(m_i.Span, "int32");
-                case int[] arr_i:               return ToNumpyArray(arr_i.AsSpan(), "int32");
+                case Memory<int> m_i:           return ToNumpyArray<int>(m_i.Span, "int32");
+                case int[] arr_i:               return ToNumpyArray<int>(arr_i.AsSpan(), "int32");
 
                 // 兜底:让 pythonnet 自己反射桥接(record / 自定义 .NET 类型 → Python 通用 .NET ref)
                 default:

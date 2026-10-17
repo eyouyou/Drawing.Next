@@ -6,7 +6,8 @@
 		<LangVersion>preview</LangVersion>
 		<UseWPF>true</UseWPF>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<ImplicitUsings>enable</ImplicitUsings>
+		<!-- .NET 5 SDK 不认 ImplicitUsings:改用 GlobalUsings.cs 显式列出(同核心库 Globals.cs) -->
+		<ImplicitUsings>disable</ImplicitUsings>
 
 		<!-- Python 集成层 ——
 		     - 抽象层 (IPythonRuntime / NullPythonRuntime / PythonHandlerRegistry / 装饰器扫 / 委托类型推断 / 热重载 / 诊断异常)

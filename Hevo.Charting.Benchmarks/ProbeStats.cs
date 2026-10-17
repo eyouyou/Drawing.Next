@@ -97,6 +97,13 @@ namespace Hevo.Charting.Benchmarks
                 regressed |= Row(sb, e.Key, "图层重录/帧", b.LayersPerFrame, e.LayersPerFrame, tolerance, 0.01);
                 regressed |= Row(sb, e.Key, "绘制命令/帧", b.DrawCmdsPerFrame, e.DrawCmdsPerFrame, tolerance, 1);
             }
+            // 基线里有、本次没跑出来的组合也算失败:场景改名 / 从 --ci 预设里移掉后,门槛不能悄悄变成"少比几个"
+            var ran = new HashSet<string>(current.Select(e => e.Key));
+            foreach (var key in Entries.Keys.Where(k => !ran.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))
+            {
+                regressed = true;
+                sb.AppendLine($"| {key} | - | - | - | ❌ 本次没有跑出这个组合(场景 / 参数改了就用 --write-baseline 更新基线) |");
+            }
             if (checkedCount == 0)
             {
                 regressed = true;

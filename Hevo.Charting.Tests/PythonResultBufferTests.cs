@@ -39,6 +39,12 @@ namespace Hevo.Charting.Tests
                     head = float(prev[0]) if prev is not None else -1.0
                     return np.array([head, float(len(arr)), float(arr[-1])], dtype=np.float64)
 
+                @register('cb_sleep_past_timeout', signature='(ReadOnlyMemory[double]) -> ReadOnlyMemory[double]')
+                def cb_sleep_past_timeout(arr):
+                    import time
+                    time.sleep(5.5)                  # 超过夹具的 PerCallTimeoutMs = 5000
+                    return np.asarray(arr, dtype=np.float64)
+
                 @register('cb_fail_on_negative', signature='(ReadOnlyMemory[double]) -> ReadOnlyMemory[double]')
                 def cb_fail_on_negative(arr):
                     a = np.asarray(arr)
@@ -96,6 +102,20 @@ namespace Hevo.Charting.Tests
             // 变得很短:固定缓冲按 CapacityPolicy 收缩成新的一块,存住的旧视图还指着 5 万那块(内容不变、内存还活着)
             var r3 = InCallSite(b, fn, new double[] { 4 }, port).ToArray();
             Assert.Equal(new[] { 0.0, 1.0, 4.0 }, r3);
+        }
+
+        /// <summary>
+        /// 调用超时:Python 线程变成孤儿、可能还拿着调用点的输出池,调用点要被标记弃用
+        /// (ComputeFeature / PlotFeature 看到 IsAbandoned 就换新池,孤儿线程写的旧池不会再交给任何人)。
+        /// </summary>
+        [Fact]
+        public void Timeout_AbandonsCallSite()
+        {
+            if (!_fx.Available) return;
+            var fn = Load("cb_sleep_past_timeout");
+            var b = new ResultBufferPool();
+            Assert.ThrowsAny<Exception>(() => InCallSite(b, fn, new double[] { 1, 2, 3 }, new object()));
+            Assert.True(b.IsAbandoned);
         }
 
         [Fact]
