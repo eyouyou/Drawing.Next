@@ -12,6 +12,10 @@ namespace Hevo.Charting.Tests
     /// </summary>
     public sealed class PerCallTimeoutWatchdogTests
     {
+        // 期望"不超时"的用例给足余量:Task.Run 要排线程池,CI 的 2 核机器上并行测试占满线程池时
+        // 调度可能等上 1s 以上(1000ms 时 Func_FastWork 在 CI 上偶发超时)。这些用例测的是结果 / 异常怎么传回来,不是超时阈值
+        private const int GenerousTimeoutMs = 10_000;
+
         // ── Func<T> 路径 ───────────────────────────────────────────────────
 
         [Fact]
@@ -32,9 +36,9 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void Func_FastWork_ReturnsResult()
         {
-            var result = PerCallTimeoutWatchdog.RunWithTimeout(1000, () =>
+            var result = PerCallTimeoutWatchdog.RunWithTimeout(GenerousTimeoutMs, () =>
             {
-                Thread.Sleep(50);   // 远小于 1000ms timeout
+                Thread.Sleep(50);   // 远小于 timeout
                 return "ok";
             });
             Assert.Equal("ok", result);
@@ -63,7 +67,7 @@ namespace Hevo.Charting.Tests
             // PerCallTimeoutWatchdog 不该把 PythonDiagnosticsException 包成 TimeoutException 或 AggregateException ——
             // 调用方应直接收到原始异常(traceback 才不会丢)。
             var ex = Assert.Throws<PythonDiagnosticsException>(() =>
-                PerCallTimeoutWatchdog.RunWithTimeout(1000, () =>
+                PerCallTimeoutWatchdog.RunWithTimeout(GenerousTimeoutMs, () =>
                 {
                     throw new PythonDiagnosticsException(
                         "test error",
@@ -103,7 +107,7 @@ namespace Hevo.Charting.Tests
         {
             // Action 路径 task.Wait 完成后手动 unwrap AggregateException.InnerException
             var ex = Assert.Throws<InvalidOperationException>(() =>
-                PerCallTimeoutWatchdog.RunWithTimeout(1000, () =>
+                PerCallTimeoutWatchdog.RunWithTimeout(GenerousTimeoutMs, () =>
                 {
                     throw new InvalidOperationException("business logic broken");
                 }));
