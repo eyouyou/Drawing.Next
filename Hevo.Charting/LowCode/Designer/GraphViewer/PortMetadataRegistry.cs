@@ -10,6 +10,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     /// 反射时优先级:本注册表 &gt; <c>[PortDirection]</c> 属性 &gt; 默认 (Input + 无注释)。
     /// 业务侧也可在启动时为自定义 Feature 调一次 Register,GraphViewer 立即生效。
     /// </para>
+    /// <para>线程约定:Register* 须在启动阶段、任何 DryRun / 节点创建之前完成;之后本表只读,
+    /// 多线程并发读普通 Dictionary 是安全的(DryRun 可在任意线程并发调用)。启动后再登记不保证跟并发读者安全。</para>
     /// </summary>
     public static class PortMetadataRegistry
     {
@@ -18,10 +20,15 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         // (类型, 属性名) → 端口注释覆盖
         private static readonly Dictionary<(Type, string), string> _description = new();
 
+        /// <summary>方向登记每变一次 +1。按类型缓存了方向的调用方(BlueprintLauncher.DryRun)据此判断缓存是否过期。</summary>
+        public static int DirectionVersion => _directionVersion;
+        private static int _directionVersion;
+
         /// <summary>批量登记某类型的某些属性为 Output 端口。</summary>
         public static void RegisterOutputs(Type type, params string[] propertyNames)
         {
             foreach (var n in propertyNames) _direction[(type, n)] = PortDirection.Output;
+            Interlocked.Increment(ref _directionVersion);
         }
 
         /// <summary>泛型快捷:<c>RegisterOutputs&lt;UniversalAutoScaleFeature&gt;("YRangePort", ...)</c>。</summary>
