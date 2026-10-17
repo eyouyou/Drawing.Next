@@ -931,7 +931,7 @@ namespace Hevo.Charting.Features
 
             // 4. 正向投影：根据吸附后的标准逻辑索引，重新计算出它绝对居中的物理屏幕 X 坐标
             double centerRelativeX = scaleStrategy.DomainScale.Normalize(globalIndex, activeRange);
-            double centerX = plotArea.Left + (plotArea.Width * centerRelativeX);
+            double centerX = CoordinateExtensions.ProjectDomainToScreen(plotArea, activeRange, scaleStrategy, globalIndex);
             var hit = new DomainHitResult(globalIndex, centerX, centerRelativeX);
 
             using (board.AcquireWriteLock())

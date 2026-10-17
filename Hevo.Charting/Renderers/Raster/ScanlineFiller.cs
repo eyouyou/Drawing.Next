@@ -99,8 +99,8 @@ namespace Hevo.Charting.Renderers.Raster
             if (_count == 0) return;
             Array.Sort(_keys, _edges, 0, _count);
 
-            int yStart = Math.Max(PixelMath.CenterCeil(_minY), s.ClipY0);
-            int yEnd = Math.Min(PixelMath.CenterCeil(_maxY), s.ClipY1);
+            int yStart = Math.Max(PixelMath.EdgePixel(_minY), s.ClipY0);
+            int yEnd = Math.Min(PixelMath.EdgePixel(_maxY), s.ClipY1);
             int next = 0, activeCount = 0;
 
             for (int y = yStart; y < yEnd; y++)
@@ -164,7 +164,7 @@ namespace Hevo.Charting.Renderers.Raster
                     bool inside = evenOdd ? (winding & 1) != 0 : winding != 0;
                     if (!wasInside && inside) spanStart = _xs[i];
                     else if (wasInside && !inside)
-                        s.FillSpan(y, PixelMath.CenterCeil(spanStart), PixelMath.CenterCeil(_xs[i]), paint);
+                        s.FillSpan(y, PixelMath.EdgePixel(spanStart), PixelMath.EdgePixel(_xs[i]), paint);
                 }
             }
         }

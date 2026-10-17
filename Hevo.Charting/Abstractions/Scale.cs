@@ -96,6 +96,11 @@ namespace Hevo.Charting.Abstractions
     /// <summary>
     /// 归一化比例尺
     /// 核心职责：负责 "Data Space" (业务域) <-> "Normal Space" ([0.0 ~ 1.0] 归一域) 的双向转换
+    /// <para>
+    /// 作自变量(X)用时,索引 i 的中心 = Normalize(i),一格宽 = Normalize(i + 0.5) − Normalize(i − 0.5)
+    /// (见 CoordinateExtensions.ProjectDomainToScreen / ProjectDomainSlotWidth)。K 线实体、成交量柱、十字线都只按这两个量画,
+    /// 所以自定义不等间距的 scale(按真实时间轴、跳过停牌等)只要把 Normalize 写对,图层不用改。
+    /// </para>
     /// </summary>
     public interface IScale
     {

@@ -65,17 +65,18 @@ namespace Hevo.Charting.Layers
             double zeroPy = area.Bottom - (area.Height * zeroNorm);
             double clampedZeroPy = Math.Clamp(zeroPy, area.Top, area.Bottom);
 
-            double unitNormDelta = scale.DomainScale.Normalize(1, xAxis.Viewport) - scale.DomainScale.Normalize(0, xAxis.Viewport);
-            double unitPxWidth = area.Width * Math.Abs(unitNormDelta);
-            double pxHalfWidth = unitPxWidth * bData.WidthRatio * 0.5;
+            // 柱宽取整数设备像素:渲染器按像素中心规则排,整数宽每根一样宽;±1px 内优先奇数,跟 1px 十字线 / 影线同轴
+            double k = PixelsPerDip;
 
             for (int i = startIndex; i <= endIndex; i++)
             {
                 double val = span[i];
                 if (double.IsNaN(val)) continue;
 
-                double xNorm = scale.DomainScale.Normalize(i, xAxis.Viewport);
-                double pxCenter = area.Left + (area.Width * xNorm);
+                double pxCenter = CoordinateExtensions.ProjectDomainToScreen(area, xAxis.Viewport, scale, i);
+                // 格宽逐根问 scale,不等间距的 scale 也成立
+                double slot = CoordinateExtensions.ProjectDomainSlotWidth(area, xAxis.Viewport, scale, i);
+                double pxHalfWidth = ColumnWidth.Of(slot, bData.WidthRatio, k, 0) / (2.0 * k);
 
                 double valNorm = scale.ValueScale.Normalize(val, yAxis.Viewport);
                 double valPy = area.Bottom - (area.Height * valNorm);

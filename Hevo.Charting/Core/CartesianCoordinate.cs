@@ -145,6 +145,30 @@ namespace Hevo.Charting.Core
             );
         }
         /// <summary>
+        /// 仅投射自变量（Domain）到屏幕水平坐标。K 线、成交量柱、十字线的中心都从这里来,
+        /// 渲染器再按同一条像素规则落列,所以同一个索引上的它们天然同列。
+        /// </summary>
+        public static float ProjectDomainToScreen(HevoRect area, RealRange rangeDomain, ScaleStrategyTrait axis, double logicDomain)
+        {
+            if (area.Width <= 0) return 0f;
+            double dNorm = axis.DomainScale.Normalize(logicDomain, rangeDomain);
+            return (float)(area.Left + (dNorm * area.Width));
+        }
+
+        /// <summary>
+        /// 自变量一格在屏幕上的宽度(DIP):<paramref name="logicDomain"/> ± 0.5 两点投影之差。
+        /// 柱状元素(K 线实体、成交量柱)的宽度都从这里来;scale 不等间距(按真实时间轴、跳过停牌等)时每格自然不同,
+        /// 只需 scale 本身正确,用到它的图层不用改。
+        /// </summary>
+        public static double ProjectDomainSlotWidth(HevoRect area, RealRange rangeDomain, ScaleStrategyTrait axis, double logicDomain)
+        {
+            if (area.Width <= 0) return 0;
+            double a = axis.DomainScale.Normalize(logicDomain - 0.5, rangeDomain);
+            double b = axis.DomainScale.Normalize(logicDomain + 0.5, rangeDomain);
+            return area.Width * Math.Abs(b - a);
+        }
+
+        /// <summary>
         /// 仅投射因变量（Value）到屏幕高度坐标
         /// </summary>
         public static float ProjectValueToScreen(HevoRect area, RealRange rangeValue, ScaleStrategyTrait axis, double logicValue)

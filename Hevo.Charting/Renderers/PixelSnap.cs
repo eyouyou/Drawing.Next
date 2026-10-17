@@ -5,6 +5,13 @@ namespace Hevo.Charting.Renderers
     // 顶点对齐 helper：让 stroke 中心精确落在像素整数 / 半像素位置。
     // 配合 IsAntialias=true 的 stroke paint，AA scanline 算法对 H/V 线给出精确 1 像素覆盖，
     // 对斜线段给出平滑边缘。业务侧不可见——所有像素算术只在 renderer 命令分发循环里发生。
+    //
+    // 横平竖直的图元只有一条覆盖规则:每条边四舍五入到最近的像素边界 floor(v + 0.5)
+    // (= 像素中心落在 (a, b] 内就涂,恰好压在中心上的边归右 / 下;位图后端的光栅规则同此)。
+    // 宽 n 的竖线 = 矩形 [x − n/2, x + n/2],跟填充矩形用同一个取整。
+    // 平局归右 / 下:100% 下整数坐标上的 1px 线(鼠标位置、布局边界)落在 [x, x+1) 这一列,跟以前一样。
+    // 以前竖线按 round(x) + half 落列,奇数线宽时跟填充矩形差半格:同一个中心上的 1px 影线 / 十字线
+    // 和奇数宽 K 线实体有一半小数位置会错开一列。
     internal static class PixelSnap
     {
         // 把 stroke 中心放在使其覆盖最少像素的位置：
@@ -19,9 +26,15 @@ namespace Hevo.Charting.Renderers
             return (n % 2 != 0) ? 0.5f : 0f;
         }
 
+        // 线中心:覆盖范围 [v − n/2, v + n/2] 两边四舍五入后的中点。奇数线宽(halfPx = 0.5)= floor(v) + 0.5,
+        // 偶数线宽(halfPx = 0)= floor(v + 0.5);只跟奇偶有关,跟 n 本身无关
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float Vertex(double v, float halfPx)
-            => MathF.Round((float)v) + halfPx;
+            => MathF.Floor((float)v + 0.5f - halfPx) + halfPx;
+
+        // 线端(沿线方向)同填充矩形的边
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float End(float v) => MathF.Floor(v + 0.5f);
 
         // 单线段端点 snap：H/V 时**非对称** snap，斜线段两轴都 .5。
         //
@@ -29,7 +42,7 @@ namespace Hevo.Charting.Renderers
         // Skia stroke 几何 X∈[0.5, 600.5]，AA scanline 给端点列各 50% 覆盖率。淡色 grid 在低对比背景下
         // 端点几乎不可见 → 视觉上"线没画全"。
         //
-        // 正解：parallel 轴（线方向）走整数 round，端点像素列 100% 覆盖；perpendicular 轴走 .5 snap，
+        // 正解：parallel 轴（线方向）取整到像素边界，端点像素列 100% 覆盖；perpendicular 轴按线宽奇偶落在像素中心 / 边界，
         // stroke 中心落像素中心 → 整条线全长 100% 覆盖、无端点羽化。
         public static void SnapEndpoints(HevoPoint p1, HevoPoint p2, float halfPx,
             out HevoPoint a, out HevoPoint b)
@@ -37,17 +50,17 @@ namespace Hevo.Charting.Renderers
             // 水平
             if (p1.Y == p2.Y)
             {
-                float y = MathF.Round(p1.Y) + halfPx;
-                a = new HevoPoint(MathF.Round(p1.X), y);
-                b = new HevoPoint(MathF.Round(p2.X), y);
+                float y = Vertex(p1.Y, halfPx);
+                a = new HevoPoint(End(p1.X), y);
+                b = new HevoPoint(End(p2.X), y);
                 return;
             }
             // 垂直
             if (p1.X == p2.X)
             {
-                float x = MathF.Round(p1.X) + halfPx;
-                a = new HevoPoint(x, MathF.Round(p1.Y));
-                b = new HevoPoint(x, MathF.Round(p2.Y));
+                float x = Vertex(p1.X, halfPx);
+                a = new HevoPoint(x, End(p1.Y));
+                b = new HevoPoint(x, End(p2.Y));
                 return;
             }
             // 斜线段：两轴都 .5（标准 vertex snap）
@@ -56,9 +69,9 @@ namespace Hevo.Charting.Renderers
         }
 
         // 填充矩形 / 裁剪框四边取整到**设备像素**边界。全图抗锯齿,小数边会变成半透明的边(K 线实体两侧发虚),
-        // 取整后边缘全是实心像素。规则用像素中心 ceil(v·k - 0.5) / k(k = PixelsPerDip):覆盖的设备像素跟
-        // 位图后端(RasterSurface.FillRect,无抗锯齿、像素中心采样)画原矩形完全一样。
-        // 不用 MathF.Round:它对 .5 取偶,会跟像素中心规则差一列。
+        // 取整后边缘全是实心像素。规则 floor(v·k + 0.5) / k(k = PixelsPerDip):覆盖的设备像素跟
+        // 位图后端(RasterSurface.FillRect,无抗锯齿)画原矩形完全一样。
+        // 不用 MathF.Round:它对 .5 取偶,平局时一会儿归左一会儿归右。
         public static HevoRect FillRect(HevoRect r, double pixelsPerDip)
         {
             float k = pixelsPerDip > 0 ? (float)pixelsPerDip : 1f;
@@ -70,7 +83,7 @@ namespace Hevo.Charting.Renderers
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float CenterEdge(float v, float k) => MathF.Ceiling(v * k - 0.5f) / k;
+        private static float CenterEdge(float v, float k) => MathF.Floor(v * k + 0.5f) / k;
 
         // ==========================================
         // 设备像素版(k = PixelsPerDip)。规则同 Skia 后端:先乘 k 在设备像素上取整,再除回 DIP。
@@ -91,7 +104,7 @@ namespace Hevo.Charting.Renderers
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float Vertex(double v, float halfPx, float k)
-            => k == 1f ? Vertex(v, halfPx) : (MathF.Round((float)v * k) + halfPx) / k;
+            => k == 1f ? Vertex(v, halfPx) : (MathF.Floor((float)v * k + 0.5f - halfPx) + halfPx) / k;
 
         public static void SnapEndpoints(HevoPoint p1, HevoPoint p2, float halfPx, float k,
             out HevoPoint a, out HevoPoint b)
@@ -119,10 +132,10 @@ namespace Hevo.Charting.Renderers
         public static HevoRect InsideStroke(HevoRect r, double deviceThickness, float k)
         {
             if (k == 1f) return InsideStroke(r, deviceThickness);
-            float left = MathF.Round(r.X * k);
-            float top = MathF.Round(r.Y * k);
-            float right = MathF.Round(r.Right * k);
-            float bottom = MathF.Round(r.Bottom * k);
+            float left = MathF.Floor(r.X * k + 0.5f);
+            float top = MathF.Floor(r.Y * k + 0.5f);
+            float right = MathF.Floor(r.Right * k + 0.5f);
+            float bottom = MathF.Floor(r.Bottom * k + 0.5f);
             float h = (float)(deviceThickness / 2.0);
             return new HevoRect(
                 (left + h) / k,
@@ -132,15 +145,15 @@ namespace Hevo.Charting.Renderers
         }
 
         // stroke 中心从外边界向内收缩 halfT，等价于其它 GFX 的 "inside stroke alignment"。
-        // 关键：必须先把外边界 round 到设备像素整数（layout 的浮点 rect 直接 +halfT 会让
+        // 关键：必须先把外边界取整到设备像素整数(同填充矩形的 floor(v + 0.5))（layout 的浮点 rect 直接 +halfT 会让
         // stroke 中心落在浮点位置，AA 横跨 2 像素羽化）。round 之后再 inside-shrink，
         // 奇数 thickness → 中心在半像素 (X.5)；偶数 thickness → 中心在整像素 (X.0)。
         public static HevoRect InsideStroke(HevoRect r, double thickness)
         {
-            float left = MathF.Round(r.X);
-            float top = MathF.Round(r.Y);
-            float right = MathF.Round(r.Right);
-            float bottom = MathF.Round(r.Bottom);
+            float left = End(r.X);
+            float top = End(r.Y);
+            float right = End(r.Right);
+            float bottom = End(r.Bottom);
             float h = (float)(thickness / 2.0);
             return new HevoRect(
                 left + h,
