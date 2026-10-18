@@ -70,7 +70,6 @@ namespace Hevo.Charting.Features
         // 不能直接写 LogicalLengthPort(init 限制),也不该用 set 让蓝图反射误覆写(HEVO007)。
         // 协议占位符 `null!`:框架时序保证 OnCompose 必先于 OnProject 跑过,使用窗口内非 null。
         // 跟 init port 的 `= null!` 同语义 —— 不是撒谎,是"装配阶段写过"的承诺。
-        // OnProject 顶层无条件 UsePort 即可,符合 Hook 铁律(00.架构协议 §158)。
         private DataPort<int> _effectiveLengthPort = null!;
 
         // 头部容器(WrapPanel),由 Decorate 在挂载阶段一次性创建并贴在外层 DockPanel 顶部。
@@ -111,7 +110,7 @@ namespace Hevo.Charting.Features
 
         protected override void OnProject(FeatureContext ctx)
         {
-            // Hook 铁律:UsePort 顶层无条件;_headerContainer / _effectiveLengthPort 由
+            // _headerContainer / _effectiveLengthPort 由
             // Decorate / OnCompose 时序保证非 null,无需 guard。
             var (hitState, hitChanged) = ctx.UsePort(HitStatePort);
             var (totalLen, lenChanged) = ctx.UsePort(_effectiveLengthPort);

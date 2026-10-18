@@ -18,7 +18,7 @@
 ## 硬约束速记
 
 - `Hevo.Charting` / `Hevo.Charting.CodeAnalysis` / 业务工程及其依赖(`Hevo.Charting.PythonNet`、`Hevo.Trade.*`)必须能用 .NET 5 SDK 5.0.408 重编(`scripts/check-net5.ps1`,CI 的 net5-compat job):不用 `required`、集合表达式 `[]`、`ArgumentNullException.ThrowIfNull` 等 .NET 6+ / C# 11+ 特性;业务工程(`Hevo.Drawing.LowCodeDemo`、`DocSamples`)锁 `LangVersion 9`。这些工程不开 `ImplicitUsings`(.NET 5 SDK 不认),用 `Globals.cs` / `GlobalUsings.cs`。测试 / 基准 / MCP 工程不受限。
-- `OnProject` 里 `UsePort` / `UseMemo` 顶层、无条件、固定顺序;不写黑板;不 `new` 集合 / 数组 / 闭包(工作集合做成跨帧复用字段;每帧发布的不可变 Trait 记录除外)。
+- Hook(`UsePort` / `UseMemo` / `UseState`)只在 `OnProject` 帧路径里调;不在 Hook 的 factory 里嵌套调 Hook(HEVO004);循环里调 `UseMemo` / `UseState` 传 `discriminator`(HEVO005)。`UsePort` 可以放进分支或 `return` 之后(语义见 01 号文档 §4)。`OnProject` 里不写黑板;不 `new` 集合 / 数组 / 闭包(工作集合做成跨帧复用字段;每帧发布的不可变 Trait 记录除外)。
 - 坐标只走 `IScale.Normalize` / `CoordinateExtensions`(`ProjectToScreen` / `ProjectDomainToScreen` / `ProjectDomainSlotWidth`),不手写 `(x - min) / span * width`。柱宽取整数设备像素用 `ColumnWidth`(见 06 §4.6),其余像素取整留给渲染器。
 - Layer 用 `partial class`,`IConsumes<T>` 交给生成器,不手写。
 - 往端口发布的列每次一块新缓冲(`ColumnPublisher<T>` / `ResultBufferPool`),不原地改已发布数组。唯一例外:K 线类数据块的**最后一根**可以原地改再 `ForceWrite`(实时 tick);历史段(除最后一根)要改先换新数组(写时复制)。`CandleFeature` 按列的引用版本(`DataBlackboard.GetIdentityVersion`,底层引用换了才变)判断历史变没变,原地改历史会让静态层停在旧值。

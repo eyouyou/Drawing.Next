@@ -184,7 +184,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer.Wrappers
     ///     ["AxisStyle"] = AxisStyleTrait.Create(AxisPlacement.Bottom, ...),
     ///     ["GridStyle"] = GridStyleTrait.Create(GridOrientation.Vertical, ...),
     ///   },
-    ///   PortBindings = { ["RangePort"] = "VP_ActiveRange" },
+    ///   InputBindings = { ["RangePort"] = "VP_ActiveRange" },
     /// };
     /// </code>
     /// </summary>

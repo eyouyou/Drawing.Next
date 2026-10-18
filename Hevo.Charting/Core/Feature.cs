@@ -217,14 +217,12 @@ namespace Hevo.Charting.Core
             // 脏检查机制彻底失效,每帧触发全量重绘。
             //
             // 正确做法:只刷新帧级可变的调度字段,让 _portTokens 跨帧存活。
-            // BeginProject 已负责重置 _hookCursor(Hook 游标),无需担心重入问题。
             _context._registry = registry;
             _context._currentFeature = this;
             _context._isFullPass = isFullPass;
 
             _context.BeginProject(ctx, board);
             OnProject(_context);
-            _context.EndProject();
 
 #if DEBUG
             // 把这一帧 OnProject 耗时喂回 tracer,UI 显示 "x.x ms" perf 徽章用。

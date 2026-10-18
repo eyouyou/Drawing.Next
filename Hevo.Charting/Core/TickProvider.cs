@@ -157,7 +157,7 @@ namespace Hevo.Charting.Core
         private readonly RefBox<RealRange> _hintsBox = new() { Value = RealRange.Empty };
 
         /// <summary>
-        /// 锚点感知 Y 轴 Provider。两个端口均必填以满足 HEVO003 (UsePort 必须无条件调用)；
+        /// 锚点感知 Y 轴 Provider。两个端口均必填(UsePort 不接受 null 端口)；
         /// 如果业务只要其中一种锚点，把另一个端口写一个永远 NaN/Empty 的常量即可。
         /// </summary>
         /// <param name="baselineTextBrush">
@@ -187,7 +187,7 @@ namespace Hevo.Charting.Core
 
         public ITickStrategy GetStrategy(FeatureContext ctx)
         {
-            // 1. 同步喂盒子（每帧；UsePort 顺序固定，符合 HEVO003）
+            // 1. 同步喂盒子（每帧）
             var (anchor, _) = ctx.UsePort(_anchorPort);
             _anchorBox.Value = anchor;
 

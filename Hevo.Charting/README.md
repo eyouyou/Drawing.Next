@@ -33,7 +33,7 @@
    - `Task.WaitAsync(CancellationToken)` → 手写 `CancellationTokenRegistration` + TCS 等价模式
    - `DateOnly` / `TimeOnly` / `PriorityQueue` / `Random.Shared` / `TimeProvider` / `SearchValues` / `FrozenDictionary` 等
 4. **Roslyn 红线 — Generator 不得使用 `IIncrementalGenerator`**。所有 generator 必须实现 `ISourceGenerator + ISyntaxContextReceiver`(失去增量缓存的代价)。`Hevo.Charting.CodeAnalysis` 的 NuGet 引用 **钉死 Microsoft.CodeAnalysis.CSharp 3.11.0**。
-5. **WPF 编译 quirk** — 业务工程(如 `Hevo.Drawing.LowCodeDemo.csproj`)用 `<Analyzer Include="...dll" />` 直接注册 generator,而 `<ProjectReference>` 不带 `OutputItemType=Analyzer`。**这是为了绕过 .NET 5 SDK 的 `_wpftmp` 编译不继承 Analyzer 类型 ProjectReference 的 bug**。net8 已修但保留此写法以维持双向可切。
+5. **WPF 编译 quirk** — 业务工程(如 `Hevo.Drawing.LowCodeDemo.csproj`)用 `<Analyzer Include="...dll" />` 直接注册 generator,而 `<ProjectReference>` 不带 `OutputItemType=Analyzer`。**这是为了绕过 .NET 5 SDK 的 `_wpftmp` 编译不继承 Analyzer 类型 ProjectReference 的 bug**。net10 已修但保留此写法以维持双向可切。
 6. **包版本** — 例如 `System.Text.Encoding.CodePages` 钉 5.0.0;若升级请同步评估 net5 是否仍能解析。
 7. **类型选型** — `IVisualTrait`(进 blackboard)用 `record class`;value payload(`HevoPoint` / `FieldMeta` / `PointerHitState` 等)用 `record struct` 或 `record class`(具体见 `00.架构协议与开发规范`)。**`record struct` 的 `with` 表达式是 C# 10 特性**,若调用方在 `LangVersion=9` 下,必须提供 `WithXxx(...)` helper 替代。
 
@@ -88,7 +88,7 @@ dotnet test "Hevo.Charting.Tests/Hevo.Charting.Tests.csproj" -nologo
 
 - 不引入 `System.Reactive`,只用自研 `IWorkflow<T>`。
 - 数据进黑板后只通过 `DataPort<T>` 通信,业务实体泛型 `TItem` 仅停留在数据接入侧。
-- `OnProject` 内 **顶层、无条件、稳定顺序** 调用 `UsePort(...)`;严禁在 `OnProject` 内写 `DataBlackboard`,严禁跨帧缓存 `UsePort` 返回的 memory。
+- Hook(`UsePort` / `UseMemo` / `UseState`)只在 `OnProject` 帧路径里调;factory 里不嵌套调 Hook(HEVO004),循环里调 `UseMemo` / `UseState` 传 `discriminator`(HEVO005);严禁在 `OnProject` 内写 `DataBlackboard`,严禁跨帧缓存 `UsePort` 返回的 memory。
 - Feature 执行顺序由 `FeaturePhase` 控制,严禁靠 `List.Add` 顺序硬编码。
 - 物理坐标必须经 `IScale.Normalize`,严禁手写 `(x - min) / span * width` 之类反推公式。
 - 运行时增删 Feature 必须走 `Transact(...)`,不要散装 `Add/Remove`。
@@ -134,11 +134,11 @@ double padding = maxDiff * (1 + PaddingRatio);
 
 ### 准则三:标明"架构红线"与"物理约束"
 
-违背常规直觉的写法(为遵守 Hooks 铁律 / 绕系统 bug / 极致优化)必须用 `// 💥` 醒目标记。
+违背常规直觉的写法(为遵守 Hook 规则 / 绕系统 bug / 极致优化)必须用 `// 💥` 醒目标记。
 
 ```csharp
-// 💥 铁律:必须在顶层无条件解包 UsePort!严禁放入分支,防止触发 HEVO003 游标错乱
-var (range, _) = ctx.UsePort(RangePort);
+// 💥 同一帧同一端口只 UsePort 一次:第二次拿到的 IsChanged 恒为 false,要多处用就把这次的结果传下去
+var (range, rangeChanged) = ctx.UsePort(RangePort);
 ```
 
 ### 准则四:解释"响应式依赖"的触发边界
@@ -155,7 +155,7 @@ var (ticks, ticksChanged) = ctx.UseMemo((range, plotArea), static deps => { ... 
 - [ ] 是否有"翻译"语法?(有则删)
 - [ ] 魔法数字是否标注了物理含义?
 - [ ] 复杂的 `if` 是否有业务理由?
-- [ ] Hooks 调用位置(`UsePort` / `UseMemo` 等)是否加了"铁律"警示?
+- [ ] Hook 是否只在 `OnProject` 帧路径里调?循环里的 `UseMemo` / `UseState` 是否传了 `discriminator`?
 - [ ] 生命周期敏感代码(`OnSuspend / OnResume / Dispose`)是否说明了为何需要手动处理(见 00 号文档 §14 可暂停生命周期)?
 
 ---
