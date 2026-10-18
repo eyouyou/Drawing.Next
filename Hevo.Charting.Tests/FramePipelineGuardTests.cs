@@ -41,7 +41,9 @@ namespace Hevo.Charting.Tests
                 // 刚退役的缓冲:本帧的读者登记在场时不能被回收
                 long retiredAt = ColumnReadScope.Retire();
                 ReclaimableDuringUpdate = ColumnReadScope.IsReclaimable(retiredAt);
-                Thread.SpinWait(2000); // 让 Parallel.ForEach 真的把任务摊到多个线程上
+                // 每个图层占一点时间,Parallel.ForEach 才会真的把任务摊到多个线程上;
+                // 只自旋几微秒的话,2 核机器上调用线程常常一口气全做完,下面的对照断言就测不到 Parallel 路径
+                Thread.Sleep(2);
             }
         }
 
@@ -97,14 +99,13 @@ namespace Hevo.Charting.Tests
             var cell = NewCell();
             var any = Add(cell, 8, uiOnly: false);
             var ui = Add(cell, 8, uiOnly: true);
-            int uiThread = Environment.CurrentManagedThreadId;
             for (int round = 0; round < 5; round++)
             {
                 Frame(cell, any.Concat(ui), PlotMode.Parallel);
                 foreach (var l in ui) Assert.False(l.EverRanOffUiThread, $"{l.Name} 进了线程池");
             }
-            // 对照:普通图层确实被摊到了线程池(否则这条测试测不到 Parallel 路径)
-            Assert.Contains(any, l => l.ThreadId != uiThread);
+            // 对照:普通图层确实被摊到了线程池(否则这条测试测不到 Parallel 路径)。看 5 轮里有没有进过线程池,不只看最后一轮
+            Assert.Contains(any, l => l.EverRanOffUiThread);
         });
     }
 
