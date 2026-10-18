@@ -36,6 +36,7 @@ namespace Hevo.Charting.PythonNet
         private IntPtr _gilState;
         private PythonSandboxOptions _options = new();
         private ITradeService? _trade;
+        private readonly PythonInteropCache _cache = new();
 
         /// <param name="pythonDllPath">显式指定 Python DLL 路径(优先级高于 env vars)。null = 走 <see cref="PythonHomeResolver.Resolve"/>。</param>
         public PythonNetRuntime(string? pythonDllPath = null)
@@ -148,7 +149,8 @@ namespace Hevo.Charting.PythonNet
             EnsureInitialized();
             using (Py.GIL())
             {
-                // 文件父目录加 sys.path,防 ModuleNotFoundError
+                // 模块本身按路径加载;父目录加进 sys.path 末尾只是为了让它 import 同目录的辅助模块
+                // (加在末尾,同名时标准库优先)
                 var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
                 if (!string.IsNullOrEmpty(dir))
                 {
@@ -157,30 +159,71 @@ namespace Hevo.Charting.PythonNet
 
                 try
                 {
-                    PyObject mod;
-                    using (var sysModules = PyModule.SysModules)
-                    {
-                        if (sysModules.HasKey(moduleName))
-                        {
-                            // 热重载语义:importlib.reload(existing) —— 蓝图侧改 .py 后 PythonHotReloader
-                            // 调过来时,模块对象保持同一性、cached refs 仍然有效,只是函数体被重新绑定。
-                            using var importlib = Py.Import("importlib");
-                            using var existing = sysModules[moduleName];
-                            mod = importlib.InvokeMethod("reload", new PyObject[] { existing });
-                        }
-                        else
-                        {
-                            mod = Py.Import(moduleName);
-                        }
-                    }
-
-                    return new PythonNetModule(mod, moduleName, filePath, _options.PerCallTimeoutMs);
+                    var mod = ExecModuleFromFile(Path.GetFullPath(filePath));
+                    return new PythonNetModule(mod, moduleName, filePath, _options.PerCallTimeoutMs, _cache);
                 }
                 catch (PythonException pex)
                 {
                     throw TranslateException(pex, filePath, functionName: null);
                 }
             }
+        }
+
+        // 按文件路径加载,不经 sys.path 按名字查找:文件名跟标准库 / 第三方包同名(statistics.py、signal.py)
+        // 或两个目录里有同名文件时,按名字 import 会拿到别人的模块。sys.modules 键由完整路径派生,互不覆盖。
+        // 每次调用都执行出一个新模块对象:热重载时旧委托继续指向旧模块直到被新委托替换,
+        // 执行失败(语法错 / import 错)时 sys.modules 恢复原值,旧模块不受影响。
+        // 调用前必须已持 GIL。
+        private static PyObject ExecModuleFromFile(string fullPath)
+        {
+            var uniqueName = UniqueModuleName(fullPath);
+            using var util = Py.Import("importlib.util");
+            using var pyName = new PyString(uniqueName);
+            using var pyPath = new PyString(fullPath);
+            using var spec = util.InvokeMethod("spec_from_file_location", pyName, pyPath);
+            if (spec.IsNone())
+                throw new InvalidOperationException($"无法为 '{fullPath}' 创建模块规格(扩展名应为 .py)。");
+
+            var mod = util.InvokeMethod("module_from_spec", spec);
+            using var sysModules = PyModule.SysModules;
+            PyObject? previous = sysModules.HasKey(uniqueName) ? sysModules[uniqueName] : null;
+            try
+            {
+                // 先放进 sys.modules 再执行,跟 import 语义一致(模块内 dataclass / pickle 会按 __name__ 回查)
+                sysModules[uniqueName] = mod;
+                using var loader = spec.GetAttr("loader");
+                using var _ = loader.InvokeMethod("exec_module", mod);
+                return mod;
+            }
+            catch
+            {
+                if (previous != null) sysModules[uniqueName] = previous;
+                else sysModules.DelItem(uniqueName);
+                mod.Dispose();
+                throw;
+            }
+            finally
+            {
+                previous?.Dispose();
+            }
+        }
+
+        internal static string UniqueModuleName(string fullPath)
+        {
+            var stem = Path.GetFileNameWithoutExtension(fullPath);
+            var sb = new System.Text.StringBuilder("_hevo_py_", stem.Length + 20);
+            foreach (var c in stem)
+                sb.Append(c < 128 && (char.IsLetterOrDigit(c) || c == '_') ? c : '_');
+
+            // FNV-1a over 规范化路径;Windows 路径大小写不敏感
+            uint hash = 2166136261;
+            foreach (var c in fullPath.ToUpperInvariant())
+            {
+                hash ^= c;
+                hash *= 16777619;
+            }
+            sb.Append('_').Append(hash.ToString("x8"));
+            return sb.ToString();
         }
 
         /// <summary>
@@ -349,6 +392,7 @@ namespace Hevo.Charting.PythonNet
                 try
                 {
                     PythonEngine.EndAllowThreads(_gilState);
+                    _cache.Dispose();   // 已持 GIL(EndAllowThreads 恢复了主线程状态)
                     PythonEngine.Shutdown();
                 }
                 catch

@@ -51,7 +51,7 @@ namespace Hevo.Charting.PythonNet
             return null;
         }
 
-        private static string? ProbeInDirectory(string dir)
+        internal static string? ProbeInDirectory(string dir)
         {
             if (!Directory.Exists(dir)) return null;
 
@@ -77,8 +77,8 @@ namespace Hevo.Charting.PythonNet
                             if (name.Equals("python3", StringComparison.OrdinalIgnoreCase)) return false;
                             return TryParseMinorVersion(name, out var minor) && SupportedMinorVersions.Contains(minor);
                         })
-                        // 在支持范围内尽量选最新版本(字典序对 python37..python312 单调递增正确)。
-                        .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase)
+                        // 在支持范围内选最新版本:按解析出的 minor 数值比,字典序会把 python39 排在 python312 前面
+                        .OrderByDescending(p => TryParseMinorVersion(Path.GetFileNameWithoutExtension(p), out var m) ? m : -1)
                         .FirstOrDefault();
                     if (hit != null) return hit;
                 }
@@ -88,17 +88,6 @@ namespace Hevo.Charting.PythonNet
                 }
             }
             return null;
-        }
-
-        /// <summary>从 startDir 起向上枚举若干层祖先目录(包含 startDir 自身)。</summary>
-        private static System.Collections.Generic.IEnumerable<string> EnumerateAncestors(string startDir, int maxDepth)
-        {
-            var current = Path.TrimEndingDirectorySeparator(startDir);
-            for (int i = 0; i < maxDepth && !string.IsNullOrEmpty(current); i++)
-            {
-                yield return current;
-                current = Path.GetDirectoryName(current) ?? string.Empty;
-            }
         }
 
         /// <summary>枚举 dir 下匹配 pattern 的子目录,目录访问异常吞掉。</summary>
@@ -144,32 +133,43 @@ namespace Hevo.Charting.PythonNet
             return int.TryParse(tail, out minor);
         }
 
+        /// <summary>portable 探测范围:只有 <paramref name="baseDir"/> 下的 Python3* 子目录,新版本优先。</summary>
+        internal static System.Collections.Generic.IEnumerable<string> EnumeratePortableDirs(string baseDir)
+            => OrderInstallDirsByVersion(EnumerateSubDirsSafe(baseDir, "Python3*"));
+
+        /// <summary>按目录名里的版本(Python312 / Python311-32)降序;解析不出版本的排最后。</summary>
+        internal static System.Collections.Generic.IEnumerable<string> OrderInstallDirsByVersion(System.Collections.Generic.IEnumerable<string> dirs)
+            => dirs.OrderByDescending(d => ParseDirMinorVersion(Path.GetFileName(Path.TrimEndingDirectorySeparator(d))));
+
+        // "Python312" → 12,"Python39" → 9,"Python311-32"(32 位安装)→ 11
+        private static int ParseDirMinorVersion(string name)
+        {
+            const string prefix = "Python3";
+            if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return -1;
+            int i = prefix.Length, start = i;
+            while (i < name.Length && char.IsDigit(name[i])) i++;
+            return i > start && int.TryParse(name.Substring(start, i - start), out var minor) ? minor : -1;
+        }
+
         private static System.Collections.Generic.IEnumerable<string> EnumerateDefaultInstallDirs()
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                // 0. Portable 部署:应用同目录或上级目录的 Python3* 子目录(典型仓库自带运行时,
-                //    bin\Debug\net10.0-windows10.0.19041.0\Python312\python312.dll 这种布局)。优先级最高 —— portable
-                //    部署的意图明确:"用我携带的 Python,别去探测系统装的"。
-                //    maxDepth=8 覆盖最深布局:仓库根/Project/bin/Debug/<TFM>/<RID>/  共 5 层;
-                //    再加 dotnet publish 的 publish/ 子目录、单体打包等场景,留 8 层余量。
-                var baseDir = AppContext.BaseDirectory;
-                foreach (var ancestor in EnumerateAncestors(baseDir, maxDepth: 8))
-                {
-                    foreach (var sub in EnumerateSubDirsSafe(ancestor, "Python3*"))
-                        yield return sub;
-                }
+                // 0. Portable 部署:应用目录下的 Python3* 子目录(bin\Debug\<TFM>\Python312\python312.dll,
+                //    Directory.Build.targets 会把仓库的 Python312 同步到输出目录)。优先级最高 ——
+                //    portable 部署的意图明确:"用我携带的 Python,别去探测系统装的"。
+                //    只看应用目录本身:向上扫祖先目录时,任何能往上层目录(下载目录、共享盘)放文件的人
+                //    都能放一个 Python3*\python3X.dll 让进程加载。
+                foreach (var sub in EnumeratePortableDirs(AppContext.BaseDirectory))
+                    yield return sub;
 
                 var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 var programs = Path.Combine(localAppData, "Programs", "Python");
-                if (Directory.Exists(programs))
-                {
-                    // %LOCALAPPDATA%\Programs\Python\Python310\, Python311\, ...
-                    foreach (var sub in Directory.EnumerateDirectories(programs, "Python3*"))
-                        yield return sub;
-                }
+                // %LOCALAPPDATA%\Programs\Python\Python310\, Python311\, ... 新版本优先
+                foreach (var sub in OrderInstallDirsByVersion(EnumerateSubDirsSafe(programs, "Python3*")))
+                    yield return sub;
                 // 系统级安装(管理员)
-                foreach (var p in new[] { @"C:\Python311", @"C:\Python310", @"C:\Python39", @"C:\Python38" })
+                foreach (var p in new[] { @"C:\Python312", @"C:\Python311", @"C:\Python310", @"C:\Python39", @"C:\Python38" })
                     if (Directory.Exists(p)) yield return p;
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))

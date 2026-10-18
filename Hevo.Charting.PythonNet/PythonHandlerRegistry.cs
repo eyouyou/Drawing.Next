@@ -34,13 +34,18 @@ namespace Hevo.Charting.PythonNet
     public sealed class PythonHandlerRegistry : BlueprintHandlerRegistry
     {
         private IPythonRuntime _runtime = NullPythonRuntime.Instance;
-        private readonly Dictionary<string, IPythonModule> _loadedModules = new(StringComparer.Ordinal);
+        // 键是规范化后的完整路径(Windows 大小写不敏感)
+        private readonly Dictionary<string, IPythonModule> _loadedModules = new(StringComparer.OrdinalIgnoreCase);
         private bool _initialized;
         private PythonSandboxOptions _options = new();
 
         // §D2.3: tracks which handler names were registered from which source file,
         // so UnregisterBySourceFile can remove the right handlers on deletion.
         private readonly Dictionary<string, string> _handlerSourceFile = new(StringComparer.Ordinal);
+
+        // 热重载在线程池上改注册表,宿主线程同时可能在注册 / 摘除:两张本地表和"导入 + 登记"这一组动作都在这把锁里。
+        // 查询走基类的并发字典,不进锁。锁内会抢 GIL,所以 Python 代码不能回调本类的注册方法。
+        private readonly object _gate = new();
 
         /// <summary>
         /// 注入实际的 Python 运行时实现。可在任何注册前调一次;<see cref="Initialize"/> / 注册之后调会 throw。
@@ -82,26 +87,29 @@ namespace Hevo.Charting.PythonNet
             if (string.IsNullOrEmpty(functionName)) throw new ArgumentNullException(nameof(functionName));
             if (string.IsNullOrEmpty(signature)) throw new ArgumentNullException(nameof(signature));
 
-            EnsureInitialized();
-
-            // AllowedRootDirectory 守护:filePath 必须落在允许根下(防业务侧拼到 OS 任意路径)。
-            EnforceAllowedRoot(filePath);
-
-            var delegateType = PythonTypeMapper.ResolveDelegateType(signature)
-                ?? throw new InvalidOperationException(
-                    $"Python handler '{handlerName}' signature='{signature}' 无法映射到 .NET 委托类型。");
-
-            var module = LoadOrReuseModule(filePath);
-            if (!module.HasFunction(functionName))
+            lock (_gate)
             {
-                throw new InvalidOperationException(
-                    $"Python module '{module.Name}' 不含函数 '{functionName}'。");
-            }
+                EnsureInitialized();
 
-            var del = BuildPythonInvokerDelegate(delegateType, module, functionName);
-            RegisterDelegate(handlerName, del, inputs);
-            _handlerSourceFile[handlerName] = System.IO.Path.GetFullPath(filePath);
-            return this;
+                // AllowedRootDirectory 守护:filePath 必须落在允许根下(防业务侧拼到 OS 任意路径)。
+                var abs = EnforceAllowedRoot(filePath);
+
+                var delegateType = PythonTypeMapper.ResolveDelegateType(signature)
+                    ?? throw new InvalidOperationException(
+                        $"Python handler '{handlerName}' signature='{signature}' 无法映射到 .NET 委托类型。");
+
+                var module = LoadOrReuseModule(abs);
+                if (!module.HasFunction(functionName))
+                {
+                    throw new InvalidOperationException(
+                        $"Python module '{module.Name}' 不含函数 '{functionName}'。");
+                }
+
+                var del = BuildPythonInvokerDelegate(delegateType, module, functionName);
+                RegisterDelegate(handlerName, del, inputs);
+                _handlerSourceFile[handlerName] = abs;
+                return this;
+            }
         }
 
         /// <summary>
@@ -156,17 +164,20 @@ namespace Hevo.Charting.PythonNet
             if (string.IsNullOrEmpty(filePath)) throw new ArgumentNullException(nameof(filePath));
             if (string.IsNullOrEmpty(functionName)) throw new ArgumentNullException(nameof(functionName));
 
-            EnsureInitialized();
-            EnforceAllowedRoot(filePath);
+            lock (_gate)
+            {
+                EnsureInitialized();
+                var abs = EnforceAllowedRoot(filePath);
 
-            var module = LoadOrReuseModule(filePath);
-            if (!module.HasFunction(functionName))
-                throw new InvalidOperationException($"Python module '{module.Name}' 不含函数 '{functionName}'。");
+                var module = LoadOrReuseModule(abs);
+                if (!module.HasFunction(functionName))
+                    throw new InvalidOperationException($"Python module '{module.Name}' 不含函数 '{functionName}'。");
 
-            Func<object?[], object?> del = args => module.Invoke(functionName, args);
-            RegisterDelegate(handlerName, del, inputs);
-            _handlerSourceFile[handlerName] = System.IO.Path.GetFullPath(filePath);
-            return this;
+                Func<object?[], object?> del = args => module.Invoke(functionName, args);
+                RegisterDelegate(handlerName, del, inputs);
+                _handlerSourceFile[handlerName] = abs;
+                return this;
+            }
         }
 
         /// <summary>
@@ -174,10 +185,13 @@ namespace Hevo.Charting.PythonNet
         /// </summary>
         public void Shutdown()
         {
-            _loadedModules.Clear();
-            _handlerSourceFile.Clear();
-            _runtime.Shutdown();
-            _initialized = false;
+            lock (_gate)
+            {
+                _loadedModules.Clear();
+                _handlerSourceFile.Clear();
+                _runtime.Shutdown();
+                _initialized = false;
+            }
         }
 
         /// <summary>
@@ -186,17 +200,71 @@ namespace Hevo.Charting.PythonNet
         public void UnregisterBySourceFile(string filePath)
         {
             var abs = System.IO.Path.GetFullPath(filePath);
-            var toRemove = _handlerSourceFile
+            lock (_gate)
+            {
+                foreach (var name in HandlersFromFile(abs))
+                {
+                    Unregister(name);
+                    _handlerSourceFile.Remove(name);
+                }
+                _loadedModules.Remove(abs);
+            }
+        }
+
+        /// <summary>
+        /// 热重载一个文件:重新执行一次模块,按文件里当前的 <c>@register</c> 声明逐个走 <see cref="RegisterModule"/>
+        /// (登记源文件和 inputs),文件里已经删掉的 handler 摘除。
+        /// <para>
+        /// 导入失败(语法错等)直接抛,注册表不变,旧 handler 继续服务;单个 handler 失败记进
+        /// <see cref="PythonReloadResult.Errors"/>,它的旧版本保留,其余 handler 照常更新。
+        /// </para>
+        /// </summary>
+        internal PythonReloadResult ReloadFile(string filePath)
+        {
+            lock (_gate)
+            {
+                EnsureInitialized();
+                var abs = EnforceAllowedRoot(filePath);
+                var descriptors = PythonRegisterScanner.ScanText(System.IO.File.ReadAllText(abs));
+
+                // 先导入:失败就整体放弃,不碰已注册的 handler
+                var module = _runtime.ImportModule(System.IO.Path.GetFileNameWithoutExtension(abs), abs);
+                _loadedModules[abs] = module;
+
+                var previous = HandlersFromFile(abs);
+                var keep = new HashSet<string>(StringComparer.Ordinal);
+                var errors = new List<Exception>();
+                int registered = 0;
+                foreach (var d in descriptors)
+                {
+                    if (string.IsNullOrEmpty(d.Signature)) continue;   // 没声明签名的不注册(同 AutoDiscoverDirectory)
+                    keep.Add(d.Name);
+                    try
+                    {
+                        RegisterModule(d.Name, abs, d.FunctionName, d.Signature!, d.Inputs);
+                        registered++;
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Add(ex);
+                    }
+                }
+
+                foreach (var name in previous)
+                {
+                    if (keep.Contains(name)) continue;
+                    Unregister(name);
+                    _handlerSourceFile.Remove(name);
+                }
+                return new PythonReloadResult(registered, errors);
+            }
+        }
+
+        private List<string> HandlersFromFile(string abs)
+            => _handlerSourceFile
                 .Where(kv => string.Equals(kv.Value, abs, StringComparison.OrdinalIgnoreCase))
                 .Select(kv => kv.Key)
                 .ToList();
-            foreach (var name in toRemove)
-            {
-                Unregister(name);
-                _handlerSourceFile.Remove(name);
-            }
-            _loadedModules.Remove(filePath);
-        }
 
         /// <summary>
         /// §D2.3: 热重载时强制重新 import 模块（等价于 Python importlib.reload）。
@@ -206,14 +274,15 @@ namespace Hevo.Charting.PythonNet
         /// </summary>
         internal IPythonModule InternalImportModule(string filePath)
         {
-            EnsureInitialized();
-            EnforceAllowedRoot(filePath);
-            var moduleName = System.IO.Path.GetFileNameWithoutExtension(filePath);
-            // 强制 reload: 删掉旧缓存，重新 import（IPythonRuntime.ImportModule 热重载语义）
-            _loadedModules.Remove(filePath);
-            var module = _runtime.ImportModule(moduleName, filePath);   // may throw PythonDiagnosticsException
-            _loadedModules[filePath] = module;
-            return module;
+            lock (_gate)
+            {
+                EnsureInitialized();
+                var abs = EnforceAllowedRoot(filePath);
+                // 强制重新执行(IPythonRuntime.ImportModule 热重载语义);失败时保留旧缓存
+                var module = _runtime.ImportModule(System.IO.Path.GetFileNameWithoutExtension(abs), abs);   // may throw PythonDiagnosticsException
+                _loadedModules[abs] = module;
+                return module;
+            }
         }
 
         /// <summary>
@@ -239,9 +308,8 @@ namespace Hevo.Charting.PythonNet
 
                 try
                 {
-                    EnforceAllowedRoot(file);
-                    var moduleName = System.IO.Path.GetFileNameWithoutExtension(file);
-                    _runtime.ImportModule(moduleName, file);   // dry-import: may throw
+                    var abs = EnforceAllowedRoot(file);
+                    _runtime.ImportModule(System.IO.Path.GetFileNameWithoutExtension(abs), abs);   // dry-import: may throw
 
                     result.Add(new PythonImportDiagnostic
                     {
@@ -297,28 +365,35 @@ namespace Hevo.Charting.PythonNet
             if (!_initialized) Initialize(_options);
         }
 
-        private void EnforceAllowedRoot(string path)
+        // 返回规范化后的完整路径。根目录比较要带分隔符:只比前缀时 root = C:\ind 会放行 C:\ind_evil\x.py。
+        // 不解析符号链接 / junction —— 这是防误用的守护,不是安全边界(见 PYTHON_HANDLER_GUIDE.md)。
+        private string EnforceAllowedRoot(string path)
         {
-            var root = _options.AllowedRootDirectory;
-            if (string.IsNullOrEmpty(root)) return;
-            // 简化版守护:绝对路径形态,确保 path 以 root 开头(已规范化)。
-            // 真实生产应走 Path.GetFullPath + StartsWith + 大小写策略;这里 PoC 够用。
             var abs = System.IO.Path.GetFullPath(path);
+            var root = _options.AllowedRootDirectory;
+            if (string.IsNullOrEmpty(root)) return abs;
+
             var rootAbs = System.IO.Path.GetFullPath(root);
-            if (!abs.StartsWith(rootAbs, StringComparison.OrdinalIgnoreCase))
+            var sep = System.IO.Path.DirectorySeparatorChar;
+            var prefix = rootAbs[rootAbs.Length - 1] == sep ? rootAbs : rootAbs + sep;
+            var rootNoSep = prefix.Length > 1 && prefix != System.IO.Path.GetPathRoot(prefix)
+                ? prefix.Substring(0, prefix.Length - 1)
+                : prefix;
+            if (!string.Equals(abs, rootNoSep, StringComparison.OrdinalIgnoreCase)
+                && !abs.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 throw new UnauthorizedAccessException(
-                    $"Python 路径 '{abs}' 越出沙箱允许根 '{rootAbs}'。");
+                    $"Python 路径 '{abs}' 越出沙箱允许根 '{rootNoSep}'。");
             }
+            return abs;
         }
 
-        private IPythonModule LoadOrReuseModule(string filePath)
+        private IPythonModule LoadOrReuseModule(string abs)
         {
-            // 同一 filePath 复用一份 module 实例;reload 走 Shutdown + 新 Initialize 重新装。
-            if (_loadedModules.TryGetValue(filePath, out var cached)) return cached;
-            var moduleName = System.IO.Path.GetFileNameWithoutExtension(filePath);
-            var module = _runtime.ImportModule(moduleName, filePath);
-            _loadedModules[filePath] = module;
+            // 同一文件复用一份 module 实例;重新执行走 ReloadFile / InternalImportModule
+            if (_loadedModules.TryGetValue(abs, out var cached)) return cached;
+            var module = _runtime.ImportModule(System.IO.Path.GetFileNameWithoutExtension(abs), abs);
+            _loadedModules[abs] = module;
             return module;
         }
 
@@ -339,6 +414,19 @@ namespace Hevo.Charting.PythonNet
             var del = (Delegate)makeMethod.Invoke(null, new object[] { module, functionName })!;
             return del;
         }
+    }
+
+    /// <summary><see cref="PythonHandlerRegistry.ReloadFile"/> 的结果:成功(重新)注册的 handler 数,和单个 handler 的失败。</summary>
+    internal sealed class PythonReloadResult
+    {
+        public PythonReloadResult(int registered, IReadOnlyList<Exception> errors)
+        {
+            Registered = registered;
+            Errors = errors;
+        }
+
+        public int Registered { get; }
+        public IReadOnlyList<Exception> Errors { get; }
     }
 
     /// <summary>
@@ -393,7 +481,11 @@ namespace Hevo.Charting.PythonNet
             }
             else
             {
-                body = System.Linq.Expressions.Expression.Convert(callExpr, ret);
+                // 按声明的返回类型放宽(Python int → double、np.int64 → int 等),不直接拆箱
+                var coerce = typeof(PythonInvokerShim)
+                    .GetMethod(nameof(CoerceReturn), BindingFlags.NonPublic | BindingFlags.Static)!
+                    .MakeGenericMethod(ret);
+                body = System.Linq.Expressions.Expression.Call(coerce, callExpr);
             }
 
             var lambda = System.Linq.Expressions.Expression.Lambda<TDel>(body, paramExprs);
@@ -432,6 +524,7 @@ namespace Hevo.Charting.PythonNet
                 return module.Invoke(functionName, args);   // may throw PythonDiagnosticsException
 
             double[]?[] copies = new double[]?[args.Length];
+            bool orphaned = false;
             try
             {
                 for (int i = 0; i < args.Length; i++)
@@ -447,10 +540,17 @@ namespace Hevo.Charting.PythonNet
                 using (Hevo.Charting.LowCode.ColumnReadScope.ReleaseForLongCall())
                     return module.Invoke(functionName, args);
             }
+            catch (TimeoutException ex) when (!(ex is PythonCallRejectedException))
+            {
+                // 超时的调用还在后台跑(可能还没轮到 GIL、还没把入参拷进 numpy),副本不能还池,交给 GC
+                orphaned = true;
+                throw;
+            }
             finally
             {
-                foreach (var c in copies)
-                    if (c != null) System.Buffers.ArrayPool<double>.Shared.Return(c);
+                if (!orphaned)
+                    foreach (var c in copies)
+                        if (c != null) System.Buffers.ArrayPool<double>.Shared.Return(c);
             }
         }
 
@@ -487,8 +587,14 @@ namespace Hevo.Charting.PythonNet
 
             var ctor = typeof(TR).GetConstructor(elemTypes)
                        ?? throw new InvalidOperationException($"ValueTuple ctor for {typeof(TR)} 找不到 — 这不应发生。");
-            return (TR)ctor.Invoke(arr);
+            var elems = new object?[arr.Length];
+            for (int i = 0; i < arr.Length; i++)
+                elems[i] = PythonReturnCoercion.Coerce(arr[i], elemTypes[i]);
+            return (TR)ctor.Invoke(elems);
         }
+
+        // 类型已经对上(最常见:float64 ndarray → ROM<double>)时直接拆箱,不走反射式的放宽
+        private static TR CoerceReturn<TR>(object? raw) => raw is TR typed ? typed : (TR)PythonReturnCoercion.Coerce(raw, typeof(TR))!;
 
         private static bool IsValueTupleDef(Type genericTypeDef)
             => genericTypeDef == typeof(ValueTuple<,>) ||

@@ -21,18 +21,20 @@ namespace Hevo.Charting.PythonNet
         private readonly PyObject _module;
         private readonly string _filePath;
         private readonly int _perCallTimeoutMs;
+        private readonly PythonInteropCache _cache;
+
+        // 每个函数一份熔断状态;模块重载会建新实例,熔断随之复位
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, PythonCallBreaker> _breakers = new(StringComparer.Ordinal);
 
         public string Name { get; }
 
-        internal PythonNetModule(PyObject module, string name, string filePath)
-            : this(module, name, filePath, perCallTimeoutMs: 0) { }
-
-        internal PythonNetModule(PyObject module, string name, string filePath, int perCallTimeoutMs)
+        internal PythonNetModule(PyObject module, string name, string filePath, int perCallTimeoutMs, PythonInteropCache cache)
         {
             _module           = module ?? throw new ArgumentNullException(nameof(module));
             Name              = name   ?? throw new ArgumentNullException(nameof(name));
             _filePath         = filePath ?? "";
             _perCallTimeoutMs = perCallTimeoutMs;
+            _cache            = cache ?? throw new ArgumentNullException(nameof(cache));
         }
 
         public bool HasFunction(string functionName)
@@ -50,7 +52,7 @@ namespace Hevo.Charting.PythonNet
         /// 调用模块上 <paramref name="functionName"/> 函数。
         /// 参数按位置 <see cref="PythonMarshaller.Box"/> 装箱,返回值反向用调用方期望类型 unbox。
         /// 调用方拿到的 <c>object?</c> 可能是标量 / <see cref="ReadOnlyMemory{T}"/> / 字符串 / null;
-        /// PythonInvokerShim 会再次 Convert 到强类型委托返回值。
+        /// PythonInvokerShim 再按强类型委托的返回类型做数值放宽(<see cref="PythonReturnCoercion"/>)。
         /// </summary>
         public object? Invoke(string functionName, params object?[] args)
         {
@@ -58,9 +60,17 @@ namespace Hevo.Charting.PythonNet
                 throw new ArgumentNullException(nameof(functionName));
 
             // §D2.5.5 超时硬切:_perCallTimeoutMs > 0 时整个 Python 调用包在 Task.Run 里;
-            // 调用方 Wait 超时 → 抛 TimeoutException 放出来,Python 线程继续跑(orphan,详见 PerCallTimeoutWatchdog 注释)。
+            // 调用方 Wait 超时 → 抛 TimeoutException 放出来,并请求中断那次调用(详见 PerCallTimeoutWatchdog 注释)。
             // <= 0 = inline 跑。
-            return PerCallTimeoutWatchdog.RunWithTimeout(_perCallTimeoutMs, () => InvokeCore(functionName, args));
+            return RunGuarded(functionName, ticket => InvokeCore(functionName, args, ticket));
+        }
+
+        private object? RunGuarded(string functionName, Func<CallTicket?, object?> core)
+        {
+            if (_perCallTimeoutMs <= 0) return core(null);
+            var ticket = new CallTicket();
+            var breaker = _breakers.GetOrAdd(functionName, _ => new PythonCallBreaker());
+            return PerCallTimeoutWatchdog.RunWithTimeout(_perCallTimeoutMs, () => core(ticket), breaker, ticket.RequestInterrupt);
         }
 
         /// <summary>
@@ -75,16 +85,16 @@ namespace Hevo.Charting.PythonNet
                 throw new ArgumentNullException(nameof(functionName));
             try
             {
-                return PerCallTimeoutWatchdog.RunWithTimeout(_perCallTimeoutMs, () => InvokeCore(functionName, args, outputs, inputs));
+                return RunGuarded(functionName, ticket => InvokeCore(functionName, args, ticket, outputs, inputs));
             }
-            catch (TimeoutException)
+            catch (TimeoutException ex) when (!(ex is PythonCallRejectedException))   // 熔断拒绝没跑 Python,缓冲没被占用
             {
                 outputs.Abandon();
                 throw;
             }
         }
 
-        private object? InvokeCore(string functionName, object?[] args,
+        private object? InvokeCore(string functionName, object?[] args, CallTicket? ticket,
             Hevo.Charting.LowCode.ResultBufferPool? outputs = null, PythonInputBuffers? inputs = null)
         {
             using (Py.GIL())
@@ -108,9 +118,10 @@ namespace Hevo.Charting.PythonNet
                     for (int i = 0; i < args.Length; i++)
                         pyArgs[i] = args[i] is PinnedArg pinned && inputs != null
                             ? inputs.View(pinned.Index, pinned.Length)
-                            : PythonMarshaller.Box(args[i]);
+                            : PythonMarshaller.Box(args[i], _cache);
 
                     PyObject result;
+                    ticket?.Enter(_cache);
                     try
                     {
                         result = fn.Invoke(pyArgs);
@@ -118,6 +129,10 @@ namespace Hevo.Charting.PythonNet
                     catch (PythonException pex)
                     {
                         throw PythonNetRuntime.TranslateException(pex, _filePath, functionName);
+                    }
+                    finally
+                    {
+                        ticket?.Exit();
                     }
 
                     using (result)
@@ -155,32 +170,51 @@ namespace Hevo.Charting.PythonNet
         //   所以**任何返回的 PyObject 引用都是 use-after-dispose**。本方法必须把所有需要的数据
         //   提前转成纯 .NET 对象(数组 / 字典 / 标量),不能裸返 PyObject。
         //
-        //   - ndarray → ReadOnlyMemory&lt;T&gt;(memcpy 出来)
+        //   - ndarray → ReadOnlyMemory&lt;T&gt;(memcpy 出来);numpy 标量 / 0 维数组 → .item() 后按 Python 标量
         //   - dict → Dictionary&lt;string, object?&gt;(递归 unbox 每个 value)
         //   - 标量 → As&lt;T&gt;()
         //   - 兜底:返 null,调用方按缺省值兜底
-        private static object? UnboxBestEffort(PyObject py, Hevo.Charting.LowCode.ResultBufferPool? outputs = null)
+        private object? UnboxBestEffort(PyObject py, Hevo.Charting.LowCode.ResultBufferPool? outputs = null)
         {
             if (py == null || py.IsNone()) return null;
 
-            // numpy ndarray 探测:dtype + size 同时存在 → 视为 ndarray。
-            if (py.HasAttr("dtype") && py.HasAttr("size"))
+            // numpy:只有带 dtype 属性的对象才做 isinstance(类型对象由运行时缓存,不每次 import)。
+            // np.float64 / np.int64 等标量(np.generic)同样带 dtype 和 size,不能按"有 dtype 就是数组"判断,
+            // 否则标量会被解成长度 1 的列;标量和 0 维数组都走 .item() 转成 Python 原生标量再解包。
+            if (py.HasAttr("dtype") && _cache.TryGetNumpyTypes(out var ndarrayType, out var genericType))
             {
-                string dtName = "";
-                try
+                if (py.IsInstance(genericType))
                 {
-                    using var dtype = py.GetAttr("dtype");
-                    using var dtypeName = dtype.GetAttr("name");
-                    dtName = dtypeName.As<string>() ?? "";
+                    using var item = py.InvokeMethod("item");
+                    return UnboxBestEffort(item, outputs);
                 }
-                catch { /* 不是真 ndarray,fall through */ }
-
-                switch (dtName)
+                if (py.IsInstance(ndarrayType))
                 {
-                    case "float64": return outputs != null ? ReadOnlyMemoryFromNumpyInto(py, outputs) : ReadOnlyMemoryFromNumpy<double>(py);
-                    case "float32": return ReadOnlyMemoryFromNumpy<float>(py);
-                    case "int32":   return ReadOnlyMemoryFromNumpy<int>(py);
-                    case "int64":   return ReadOnlyMemoryFromNumpy<long>(py);
+                    // 0 维数组没有长度(len() 抛 TypeError)。用 Length() 探测而不是 GetAttr("ndim"):
+                    // 常见的一维数组走这里不产生托管对象,只有罕见的 0 维数组付异常的代价
+                    bool zeroDim = false;
+                    try { py.Length(); }
+                    catch (PythonException) { zeroDim = true; }
+                    if (zeroDim)
+                    {
+                        using var item = py.InvokeMethod("item");
+                        return UnboxBestEffort(item, outputs);
+                    }
+
+                    string dtName;
+                    using (var dtype = py.GetAttr("dtype"))
+                    using (var dtypeName = dtype.GetAttr("name"))
+                        dtName = dtypeName.As<string>() ?? "";
+
+                    switch (dtName)
+                    {
+                        case "float64": return outputs != null ? ReadOnlyMemoryFromNumpyInto(py, outputs) : ReadOnlyMemoryFromNumpy<double>(py);
+                        case "float32": return ReadOnlyMemoryFromNumpy<float>(py);
+                        case "int32":   return ReadOnlyMemoryFromNumpy<int>(py);
+                        case "int64":   return ReadOnlyMemoryFromNumpy<long>(py);
+                    }
+                    // 其它 dtype(bool / uint8 / object …)没有对应的列类型,按不识别处理
+                    return null;
                 }
             }
 
@@ -189,8 +223,7 @@ namespace Hevo.Charting.PythonNet
             // 纯 .NET 对象数组,shim 层的 ConstructValueTuple<TR> 再装到 ValueTuple<...>。
             // 必须排除字符串(也有 __getitem__)—— class.__name__ 显式校验。
             if (py.HasAttr("__getitem__") && py.HasAttr("__len__")
-                && !py.HasAttr("items") /* not dict */
-                && !py.HasAttr("dtype") /* not ndarray */)
+                && !py.HasAttr("items") /* not dict */)
             {
                 try
                 {
@@ -266,11 +299,46 @@ namespace Hevo.Charting.PythonNet
             return null;
         }
 
-        // float64 结果拷进调用点租来的缓冲(只用前 n 个),发布 / 退役由调用点按列读者纪元管理。
-        private static unsafe ReadOnlyMemory<double> ReadOnlyMemoryFromNumpyInto(PyObject ndarray, Hevo.Charting.LowCode.ResultBufferPool outputs)
+        // 一次带超时的调用:记下执行它的 Python 线程,超时后向该线程投递 KeyboardInterrupt。
+        // 字段只在持 GIL 时读写,所以"还在跑才中断"的判断和调用结束不会交错;
+        // 中断请求落空(调用刚好结束)时,挂起的异步异常随 Py.GIL() 释放时销毁的线程状态一起丢弃。
+        private sealed class CallTicket
         {
-            using var np = Py.Import("numpy");
-            using var contig = np.InvokeMethod("ascontiguousarray", new PyObject[] { ndarray });
+            private ulong _threadId;
+            private bool _running;
+
+            public void Enter(PythonInteropCache cache)
+            {
+                _threadId = cache.GetPythonThreadId();
+                _running = true;
+            }
+
+            public void Exit() => _running = false;
+
+            // 在调用方线程上触发:只投递,抢 GIL 和中断放到线程池(孤儿在原生代码里时 GIL 可能一时拿不到)
+            public void RequestInterrupt()
+            {
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    try
+                    {
+                        using (Py.GIL())
+                        {
+                            if (_running) PythonEngine.Interrupt(_threadId);
+                        }
+                    }
+                    catch
+                    {
+                        // 解释器已关闭等:中断是尽力而为,熔断仍然兜底
+                    }
+                });
+            }
+        }
+
+        // float64 结果拷进调用点租来的缓冲(只用前 n 个),发布 / 退役由调用点按列读者纪元管理。
+        private unsafe ReadOnlyMemory<double> ReadOnlyMemoryFromNumpyInto(PyObject ndarray, Hevo.Charting.LowCode.ResultBufferPool outputs)
+        {
+            using var contig = _cache.NumpyAscontiguousarray.Invoke(ndarray);
             using var sizeAttr = contig.GetAttr("size");
             int n = sizeAttr.As<int>();
             if (n == 0) return ReadOnlyMemory<double>.Empty;
@@ -288,10 +356,9 @@ namespace Hevo.Charting.PythonNet
             return new ReadOnlyMemory<double>(arr, 0, n);
         }
 
-        private static unsafe ReadOnlyMemory<T> ReadOnlyMemoryFromNumpy<T>(PyObject ndarray) where T : unmanaged
+        private unsafe ReadOnlyMemory<T> ReadOnlyMemoryFromNumpy<T>(PyObject ndarray) where T : unmanaged
         {
-            using var np = Py.Import("numpy");
-            using var contig = np.InvokeMethod("ascontiguousarray", new PyObject[] { ndarray });
+            using var contig = _cache.NumpyAscontiguousarray.Invoke(ndarray);
             using var sizeAttr = contig.GetAttr("size");
             int n = sizeAttr.As<int>();
 

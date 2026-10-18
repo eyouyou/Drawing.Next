@@ -409,7 +409,7 @@ namespace Hevo.Charting.Tests
             public IPythonModule ImportModule(string moduleName, string filePath)
             {
                 var mod = new MockPythonModule(moduleName, filePath);
-                Modules[filePath] = mod;
+                Modules[System.IO.Path.GetFileName(filePath)] = mod;   // 注册表传进来的是规范化后的完整路径
                 return mod;
             }
             public void Shutdown() { }
