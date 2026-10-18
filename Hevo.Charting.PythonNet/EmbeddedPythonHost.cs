@@ -260,7 +260,7 @@ namespace Hevo.Charting.PythonNet
                 {
                     Directory.CreateDirectory(_indicatorsDir);
 
-                    // PythonHomeResolver 自带 portable 探测(AppContext.BaseDirectory + 祖先 / Python3*),
+                    // PythonHomeResolver 自带 portable 探测(AppContext.BaseDirectory 下的 Python3*,不看祖先目录),
                     // 业务侧只要 Python312/ 跟着 .exe 走就 0 配置。
                     var dll = PythonHomeResolver.Resolve();
                     _runtime = new PythonNetRuntime(dll);

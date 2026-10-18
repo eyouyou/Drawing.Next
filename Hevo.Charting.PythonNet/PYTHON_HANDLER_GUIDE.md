@@ -64,7 +64,7 @@ def change_pct(latest, prev_close):
 |---|---|---|
 | `name`(位置参数) | ✅ | 蓝图节点引用的 handler 名,**全进程唯一** |
 | `inputs` | 多输入 handler 必填 | 形参名列表,**顺序跟函数 signature 一致**;蓝图节点用 nested PortBindings(`Inputs.latest` / `Inputs.prev_close`)按形参名 wire |
-| `signature` | 强类型 handler 必填 | 类型签名串(如 `"(ReadOnlyMemory[double]) -> ReadOnlyMemory[double]"`);C# 端按此推断 .NET delegate 类型;**返回 list[dict] 的 plot handler 留空** |
+| `signature` | 强类型 handler 必填 | 类型签名串(如 `"(ReadOnlyMemory[double]) -> ReadOnlyMemory[double]"`);C# 端按此推断 .NET delegate 类型;**返回 list[dict] 的 plot handler 留空**。类型写全名:只认 `ReadOnlyMemory[...]`,写成 `ROM[double]` 解析失败,handler 不注册;`float` 映射到 .NET `float`(单精度),要 double 写 `double` |
 | `incremental` | 可选 | `True` 标记增量协议 handler(§D2.6.4);蓝图侧据此决定每帧是否重算还是只算尾部 |
 
 **name 跟 fn 名解耦:**
@@ -101,6 +101,8 @@ _hevo_handlers["market_health_index"] = ("my_internal_calculation", signature, i
 | fn 名必须是合法 Python identifier | 字母 / 下划线开头,不能空格 / 特殊字符 |
 | 同 .py 文件内 fn 名必须唯一 | Python module attribute lookup |
 | inputs 仍要跟形参名对齐 | fn 名能改,但 `inputs=[...]` 跟函数 `def fn(arg1, arg2)` 形参名顺序必须一致(蓝图 PortBindings nested key 按形参名 wire) |
+| name 写成位置参数 | regex 只认 `@register("name", ...)`;`@register(name="x")` 扫不到(Python 在线时 §9.4 的 dict 路径还能补上) |
+| 注释掉的装饰器也会被扫到 | regex 不锚定行首,`# @register("x")` 紧贴 `def` 时照样登记;不要的 handler 直接删掉装饰器 |
 
 **实践约定:`name = fn 名 = .py 文件名` 三者一致**,debug 友好:
 - Python traceback 报错 `in ma_dual at line 5` → 直接对上蓝图节点 `Indicator: "ma_dual"`
@@ -504,6 +506,36 @@ for n in [5, 10, 20, 60]:
 #### 实现细节
 
 `hevo_indicators/__init__.py` 的 `register` 装饰器存 (fn_name, signature, inputs, **source_file**)。`source_file` 由 `inspect.getfile(fn)` 自动捕获,framework C# 端用它 filter "哪些 dict entry 来自我们 sandbox 内的文件",避免误把 framework 自带的 `ta.*` handler 重复注册。
+
+### 9.5 返回值类型
+
+声明了 `signature` 的强类型 handler,返回值先按 Python 里的实际类型解包,再按签名的返回类型转换:
+
+| Python 返回 | 解包成 | 签名声明 → 结果 |
+|---|---|---|
+| `int` / `np.int64` / `np.int32` / `np.bool_` | `long` | `-> double` 得 double;`-> int` 得 int |
+| `float` / `np.float64` / `np.float32` / 0 维数组 | `double` | `-> int`:整数值可以,带小数抛 `InvalidCastException` |
+| `None` | null | `-> double` 得 `NaN`(缺失值);`-> int` 抛 `InvalidCastException` |
+| float64 / float32 / int64 / int32 ndarray | `ROM<double>` / `ROM<float>` / `ROM<long>` / `ROM<int>` | `-> ReadOnlyMemory[double]` 时其它元素类型逐个转成 double |
+| `tuple` / `list` | `object?[]` | `-> Tuple[...]` 逐元素按上面规则转换 |
+
+其它 dtype(bool / uint8 / object)的 ndarray 不识别,返回 null。
+
+### 9.6 模块按路径加载
+
+.py 按文件完整路径加载(`importlib.util.spec_from_file_location`),不经 `sys.path` 按名字找:文件名跟标准库或第三方包同名(`statistics.py`、`signal.py`)、两个目录里有同名文件,各自绑到自己的代码。文件所在目录加在 `sys.path` 末尾,只为 import 同目录的辅助模块(同名时标准库优先)。模块在 `sys.modules` 里的名字是 `_hevo_py_<文件名>_<路径哈希>`,不要按文件名 `import` 别的指标文件。
+
+热重载(`EnableHotReload`)每次重新执行整个文件,得到新模块;文件里删掉的 `@register` 对应的 handler 被摘除。语法错 / import 失败时整个文件放弃,旧 handler 继续服务。
+
+### 9.7 超时
+
+`PythonSandboxOptions.PerCallTimeoutMs > 0` 时每次调用超时就抛 `TimeoutException`,同时向那次调用的 Python 线程投递 `KeyboardInterrupt`:纯 Python 循环很快停下;卡在 numpy 等原生运算里时要等它返回 Python。别用裸 `except:` 吞异常,否则中断不掉。
+
+同一函数上一次超时的调用还没停时,新调用直接抛 `PythonCallRejectedException`(继承 `TimeoutException`),不再派生新的后台调用;连续 3 次超时后一直拒绝,改好 .py 重载后恢复。
+
+### 9.8 沙箱不是安全边界
+
+`BlockedImports` 默认为空,即默认不拦任何 import。配置后也只替换了 `builtins.__import__`,`importlib.import_module("os")`、`sys.modules["os"]`、已加载模块里引用的 `os`、`ctypes`、`open()` 都能绕过,完整清单见 [低代码.md "D2 沙箱安全模型"](../Hevo.Charting/LowCode/Designer/低代码.md)。`AllowedRootDirectory` 只检查交给注册表的 .py 路径。它们是防误用的护栏,能写 .py 的人等同于能在宿主进程里执行任意代码,靠代码评审把关。
 
 ---
 

@@ -27,7 +27,8 @@ namespace Hevo.Charting.PythonNet
         void Initialize(PythonSandboxOptions options);
 
         /// <summary>
-        /// 加载一个 .py 文件作为命名 Python 模块。同名 module 重新加载等价于 Python <c>importlib.reload</c>(热重载语义)。
+        /// 按 <paramref name="filePath"/> 加载一个 .py 文件,每次调用都重新执行文件、返回新模块(热重载语义)。
+        /// 模块按路径定位,不经 sys.path 按名字查找;<paramref name="moduleName"/> 只用于诊断信息里的显示名。
         /// </summary>
         IPythonModule ImportModule(string moduleName, string filePath);
 

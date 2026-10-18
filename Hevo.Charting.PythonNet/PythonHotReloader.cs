@@ -11,7 +11,7 @@ namespace Hevo.Charting.PythonNet
     /// <b>优雅切换（graceful swap）协议</b>：
     /// <list type="bullet">
     ///   <item>变更发生时先在后台线程完成新模块 import + 委托构造，期间旧委托继续服务。</item>
-    ///   <item>新委托就绪后，调用 <see cref="PythonHandlerRegistry.RegisterDelegate"/> 原子覆写同名 handler。</item>
+    ///   <item>新委托就绪后，经 <see cref="PythonHandlerRegistry.RegisterModule"/> 覆写同名 handler（连同源文件和 inputs），文件里删掉的 handler 摘除。</item>
     ///   <item>覆写后 <see cref="HotReloadOccurred"/> 事件通知宿主（典型：UI 刷新 / schema 触发重画）。</item>
     ///   <item>删除的 .py → 对应 handler 调用 <see cref="PythonHandlerRegistry.Unregister"/> 摘除。</item>
     /// </list>
@@ -135,34 +135,21 @@ namespace Hevo.Charting.PythonNet
             // serialize concurrent reloads of the same file
             lock (_reloadLock)
             {
+                PythonReloadResult result;
                 try
                 {
-                    var text        = File.ReadAllText(filePath);
-                    var descriptors = PythonRegisterScanner.ScanText(text);
-                    int registered  = 0;
-
-                    foreach (var d in descriptors)
-                    {
-                        if (string.IsNullOrEmpty(d.Signature)) continue;   // no signature → skip
-
-                        var delegateType = PythonTypeMapper.ResolveDelegateType(d.Signature);
-                        if (delegateType == null) continue;
-
-                        // Re-import module (IPythonRuntime.ImportModule is idempotent = hot-reload semantics)
-                        var module = _registry.InternalImportModule(filePath);
-                        if (!module.HasFunction(d.FunctionName)) continue;
-
-                        var del = _registry.BuildPythonInvokerDelegate(delegateType, module, d.FunctionName);
-                        _registry.RegisterDelegate(d.Name, del);   // atomic overwrite of old handler
-                        registered++;
-                    }
-
-                    HotReloadOccurred?.Invoke(filePath, registered);
+                    // 跟 RegisterModule 同一条路径:登记源文件和 inputs,文件里删掉的 handler 一并摘除
+                    result = _registry.ReloadFile(filePath);
                 }
                 catch (Exception ex)
                 {
                     HotReloadFailed?.Invoke(filePath, ex);
+                    return;
                 }
+
+                HotReloadOccurred?.Invoke(filePath, result.Registered);
+                foreach (var error in result.Errors)
+                    HotReloadFailed?.Invoke(filePath, error);
             }
         }
 

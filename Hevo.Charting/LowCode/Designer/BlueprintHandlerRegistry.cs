@@ -79,11 +79,12 @@ namespace Hevo.Charting.LowCode.Designer
         // 统一存储:Pre-bound delegate(旧路径:RegisterDelegate / AutoDiscover / AutoDiscoverStatic)
         //          + Lifecycle-aware entry(新路径:AutoDiscoverType,framework 按 scope 创建宿主实例)。
         // 同名后注册覆盖,跟旧 _handlers 行为对齐。
-        private readonly Dictionary<string, HandlerEntry> _entries = new(StringComparer.Ordinal);
+        // 并发字典:Python 热重载在线程池上覆写 / 摘除 handler,同时 UI / 计算线程在查表。
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, HandlerEntry> _entries = new(StringComparer.Ordinal);
 
         // §D2.X 多输入指标:可选 input 形参名列表(跟委托的位置参数顺序一致)。
         // 单输入 handler 不登记,GetInputNames 返回 null,Feature 走旧 InputPort 兼容路径。
-        private readonly Dictionary<string, IReadOnlyList<string>> _handlerInputs = new(StringComparer.Ordinal);
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<string>> _handlerInputs = new(StringComparer.Ordinal);
 
         // TryGet 兜底用的内部默认 ScopeContext —— Lifecycle-aware 但不传 scope 的旧调用路径
         // 退化成 Singleton 解析(framework Phase 1 唯一可能的形态)。
@@ -117,12 +118,14 @@ namespace Hevo.Charting.LowCode.Designer
         /// <summary>
         /// §D2.X 注册带 input 形参名列表的 handler(典型用于多输入 Python 指标)。
         /// 单输入或不需要 nested PortBindings 的 handler 走 <see cref="RegisterDelegate(string, Delegate)"/> 即可。
-        /// inputs 为 null / 空时等价 RegisterDelegate(name, handler)。
+        /// inputs 为 null / 空时同时清掉这个名字之前登记的 inputs(重新注册时元数据跟着新版本走)。
         /// </summary>
         public BlueprintHandlerRegistry RegisterDelegate(string name, Delegate handler, IReadOnlyList<string>? inputs)
         {
             RegisterDelegate(name, handler);
+            // 重新注册同名 handler 时 inputs 一起替换:新版本不再声明 inputs 就清掉旧的
             if (inputs != null && inputs.Count > 0) _handlerInputs[name] = inputs;
+            else _handlerInputs.TryRemove(name, out _);
             return this;
         }
 
@@ -214,8 +217,8 @@ namespace Hevo.Charting.LowCode.Designer
         /// <summary>§D2.3: 摘除已注册 handler。handler 不存在时静默忽略。</summary>
         public void Unregister(string name)
         {
-            _entries.Remove(name);
-            _handlerInputs.Remove(name);
+            _entries.TryRemove(name, out _);
+            _handlerInputs.TryRemove(name, out _);
         }
 
         /// <summary>

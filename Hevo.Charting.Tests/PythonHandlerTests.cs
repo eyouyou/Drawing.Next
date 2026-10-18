@@ -421,7 +421,7 @@ namespace Hevo.Charting.Tests
             {
                 // always creates a NEW instance (simulates hot-reload semantic: re-import = fresh module)
                 var mod = new MockPythonModule(moduleName, filePath);
-                Modules[filePath] = mod;
+                Modules[System.IO.Path.GetFileName(filePath)] = mod;   // 注册表传进来的是规范化后的完整路径
                 return mod;
             }
 
