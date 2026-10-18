@@ -34,7 +34,7 @@ namespace Hevo.Charting.LowCode
 
         /// <summary>
         /// 获取一个全局唯一的、类型为 T 的空壳引脚 (Dummy Port)。
-        /// 专门用于在可选参数场景下，垫付给 ctx.UsePort() 以保证底层 Hook 游标的绝对对齐！
+        /// 用于可选端口:业务没接线时垫一个永远不写入的端口,OnProject 照常 UsePort,不用到处判 null(UsePort 不接受 null 端口)。
         /// </summary>
         public static DataPort<T> Empty => EmptyPortCache.Instance;
 

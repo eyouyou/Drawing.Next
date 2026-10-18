@@ -78,7 +78,8 @@ namespace Hevo.Charting.CodeAnalysis
                 a.IsKind(SyntaxKind.WhileStatement) ||
                 a.IsKind(SyntaxKind.DoStatement));
 
-            if (isInsideLoop)
+            // UsePort / UsePorts 按端口对象存令牌,没有 discriminator 参数,循环里调不会撞状态。
+            if (isInsideLoop && !IsPortHook(methodSymbol!))
             {
                 // 检查是否传入了名为 discriminator 的参数
                 bool hasDiscriminator = invocation.ArgumentList.Arguments.Any(arg =>
@@ -127,6 +128,10 @@ namespace Hevo.Charting.CodeAnalysis
             if (methodSymbol.IsExtensionMethod && methodSymbol.Parameters.Length > 0 && methodSymbol.Parameters[0].Type.Name == "FeatureContext") return true;
             return false;
         }
+
+        private static bool IsPortHook(IMethodSymbol methodSymbol) =>
+            methodSymbol.ContainingType.Name == "FeatureContext"
+            && (methodSymbol.Name == "UsePort" || methodSymbol.Name == "UsePorts");
 
         private bool IsMappedToParameter(SyntaxNodeAnalysisContext context, ArgumentSyntax arg, string parameterName)
         {

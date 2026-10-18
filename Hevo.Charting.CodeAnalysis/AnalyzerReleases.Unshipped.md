@@ -7,7 +7,6 @@ Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
 HEVO001 | Category | Error | NoPortDataCachingAnalyzer
 HEVO002 | Category | Error | ReadOnlyProjectPhaseAnalyzer
-HEVO003 | Architecture | Error | UsePortAnalyzer
 HEVO004 | Architecture | Error | HevoHookNestingAnalyzer
 HEVO005 | Architecture | Error | HevoHookSafetyAnalyzer
 HEVO006 | Architecture | Error | HevoHookSafetyAnalyzer

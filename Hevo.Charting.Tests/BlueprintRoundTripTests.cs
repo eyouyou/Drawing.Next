@@ -483,8 +483,8 @@ namespace Hevo.Charting.Tests
             //
             // 具体踩点:default_kline_dashboard.json strategy cell 里 UniversalAutoScaleFeature(features[3])
             // 排在 PlotFeature(features[5])之前;AutoScale.ValuePorts 引用 PlotFeature.SeriesOutputs.upper —
-            //   PlotFeature.PortBindings["SeriesOutputs.upper"] = "s_BB_Upper"   (显式 globalId)
-            //   AutoScale.PortBindings["ValuePorts"]            = ["s_BB_Upper"]
+            //   PlotFeature.OutputBindings["SeriesOutputs.upper"] = "s_BB_Upper"   (显式 globalId)
+            //   AutoScale.InputBindings["ValuePorts"]             = ["s_BB_Upper"]
             // round-trip 后理应保持 "s_BB_Upper",但旧逻辑下 AutoScale.ValuePorts 变成了
             // "{plotNodeId}_SeriesOutputs.upper",两端各拿不同 globalId,运行期 _portRegistry 注册成两根独立
             // port,AutoScale 读不到 PlotFeature 的 Watch 写入,bb_breakout 的 upper/middle/lower 不进 Y 量程。

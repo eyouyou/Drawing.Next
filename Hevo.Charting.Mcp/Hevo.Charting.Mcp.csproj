@@ -11,7 +11,7 @@
         - <OutputType>Exe</OutputType> → 控制台 stdio 进程,不是 WinExe
         - 业务上仍是 Windows-only 二进制(继承自 Hevo.Charting 约束)
 
-      与原任务"net8.0 跨平台跑"目标的 gap:
+      与"MCP server 跨平台跑"目标的 gap:
       要彻底跨平台需先把 Hevo.Charting 的 WPF 渲染层从核心 schema/blueprint 模型切出去
       —— 这是单独的工程改造,不在本次 MCP server 的最小可用范围。
     -->

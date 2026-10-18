@@ -70,7 +70,6 @@ namespace Hevo.Charting.Features
 
         protected override void OnProject(FeatureContext ctx)
         {
-            // 必须在函数最顶层无条件执行 Hook！按固定顺序排列，不得条件化。
             var (dataCol, _) = ctx.UsePort(DataPort);
             var (yRange, _) = ctx.UsePort(YRangePort);
             var (xRange, _) = ctx.UsePort(Viewport.ActiveRange);

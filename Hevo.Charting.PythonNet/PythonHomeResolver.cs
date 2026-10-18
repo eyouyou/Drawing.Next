@@ -149,7 +149,7 @@ namespace Hevo.Charting.PythonNet
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 // 0. Portable 部署:应用同目录或上级目录的 Python3* 子目录(典型仓库自带运行时,
-                //    bin\Debug\net8.0\Python312\python312.dll 这种布局)。优先级最高 —— portable
+                //    bin\Debug\net10.0-windows10.0.19041.0\Python312\python312.dll 这种布局)。优先级最高 —— portable
                 //    部署的意图明确:"用我携带的 Python,别去探测系统装的"。
                 //    maxDepth=8 覆盖最深布局:仓库根/Project/bin/Debug/<TFM>/<RID>/  共 5 层;
                 //    再加 dotnet publish 的 publish/ 子目录、单体打包等场景,留 8 层余量。

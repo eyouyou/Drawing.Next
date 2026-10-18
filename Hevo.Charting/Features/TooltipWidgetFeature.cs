@@ -78,7 +78,6 @@ namespace Hevo.Charting.Features
 
         protected override void OnProject(FeatureContext ctx)
         {
-            // 铁律：无条件解包(HEVO003:UsePort 顺序/次数必须跨帧一致,不能在 if 里调)
             var (hitState, _) = ctx.UsePort(HitStatePort);
             var (xData, _) = ctx.UsePort(XAxisDataPort);
 

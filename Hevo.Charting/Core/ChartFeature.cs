@@ -45,20 +45,12 @@ namespace Hevo.Charting.Core
         // 代表环境纪元是否发生了改变(如 SizeChanged)
         internal bool _isFullPass;
 
-        internal int _hookCursor = 0;
-        internal int _expectedHookCount = -1;
         internal readonly Dictionary<string, object> _dynamicStatePocket = new();
 
         // 💥 终极修复:彻底废弃易溢出的 _portTicks,换成 0-GC 的无限版本令牌!
         internal readonly Dictionary<object, VersionToken> _portTokens = new();
 
-        internal void BeginProject(RenderContext render, DataBlackboard board) { _renderCtx = render; _board = board; _hookCursor = 0; }
-        internal void EndProject()
-        {
-            if (_expectedHookCount == -1) _expectedHookCount = _hookCursor;
-            else if (_hookCursor != _expectedHookCount)
-                throw new InvalidOperationException("[Hevo 致命错误] Hook 游标错位!");
-        }
+        internal void BeginProject(RenderContext render, DataBlackboard board) { _renderCtx = render; _board = board; }
 
         // 修复 H1 配套:Decompose 时清空跨帧状态。
         // 同一 Feature 实例可能被 Transact 重新装配(hot-plug),残留的 _portTokens / _hookPocket 会
@@ -68,8 +60,6 @@ namespace Hevo.Charting.Core
             _portTokens.Clear();
             _hookPocket.Clear();
             _dynamicStatePocket.Clear();
-            _expectedHookCount = -1;
-            _hookCursor = 0;
             _isInsideHookFactory = false;
             _renderCtx = null!;
             _board = null!;
@@ -93,6 +83,10 @@ namespace Hevo.Charting.Core
 
         /// <summary>
         /// 💥 隐式查脏核心:值类型防抖,不生成任何对象,仅返回 struct Tuple
+        /// <para>
+        /// 版本令牌按端口对象存,不依赖调用顺序,可以放进分支:某帧没读的端口不更新令牌,下次读到时 IsChanged 跟本 Feature 上次读到它时比。
+        /// 端口第一次被读到才订阅;同一帧对同一端口读两次,只有第一次能看到 IsChanged = true。
+        /// </para>
         /// </summary>
         // ⚠️ 已知脏追踪盲区:
         //   本方法只追踪 DataPort 的 VersionToken,不覆盖:
@@ -151,7 +145,7 @@ namespace Hevo.Charting.Core
         public VersionToken PortIdentity<T>(DataPort<ReadOnlyMemory<T>> port) => _board.GetIdentityVersion(port);
 
         /// <summary>
-        /// 💥 动态批量引脚订阅 (专治 HEVO003 循环拦截)
+        /// 动态批量引脚订阅:端口个数运行期才知道时,一次读一组,任一端口变了就返回 true。
         /// 允许安全地订阅一组引脚,数据直接写入 buffer,全程 0-GC。
         /// </summary>
         public bool UsePorts<T>(

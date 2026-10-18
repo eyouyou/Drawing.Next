@@ -145,42 +145,118 @@ namespace Hevo.Charting.Tests
             Assert.True(_registry.NotifyPortUpdated(_a));
         }
 
-        [Fact]
-        public void KnownBoundary_ConditionalUsePort_MissesSubscriptionUntilBranchRuns()
+        // 一帧:总是读 A,readB 为 true 时才读 B;返回 B 的读取结果(没读则 null)。
+        private (double Value, bool IsChanged)? ProjectFrame(bool readB)
         {
-            // ⚠ 已知边界(不是期望行为,是对现状的记录):
-            // 订阅在"首次读取"时登记。UsePort 放进条件分支、且分支还没走到过时,该端口的写入唤不醒 Feature。
-            // 这就是 HEVO003 要求 UsePort 顶层无条件调用的真正原因(跟调用顺序无关)。
-            // 图层侧 VisualDependencyTracker 每帧重建依赖,没有这个边界,见 LayerDependencyTrackingTests。
-            // 如果将来改成"每帧重建订阅",这个测试应当翻转并改名。
-            bool readB = false;
-            void ProjectFrame()
+            _ctx._isFullPass = false;
+            _ctx.BeginProject(IncrementalTestKit.NewRenderContext(), _board);
+            using (_board.AcquireReadLock())
             {
-                _ctx._isFullPass = false;
-                _ctx.BeginProject(IncrementalTestKit.NewRenderContext(), _board);
-                using (_board.AcquireReadLock())
-                {
-                    _ctx.UsePort(_a);
-                    if (readB) _ctx.UsePort(_b);
-                }
+                _ctx.UsePort(_a);
+                if (readB) return _ctx.UsePort(_b);
+                return null;
             }
+        }
 
+        [Fact]
+        public void ConditionalUsePort_PortWritesDoNotWakeFeature_UntilFirstRead()
+        {
+            // 订阅在"首次读取"时登记:分支没走到过,这个 Feature 还用不到 B,B 的写入不唤醒它是对的。
+            // 分支一旦走到(被别的端口唤醒后),B 首次读到 IsChanged = true,之后照常订阅。
             _board.OnPortUpdated += p => _registry.NotifyPortUpdated(p);
-            ProjectFrame();
+            ProjectFrame(readB: false);
             PopDirty();
 
-            // B 变了,但 Feature 从没读过 B → 没订阅 → 不会被标脏(漏重绘)
             _board.Write(_b, 1.0);
             Assert.False(PopDirty());
 
-            // 直到 A 变化让 Feature 重跑、并且走进了读 B 的分支,B 才被订阅
             _board.Write(_a, 1.0);
             Assert.True(PopDirty());
-            readB = true;
-            ProjectFrame();
+            var b = ProjectFrame(readB: true);
+            Assert.Equal(1.0, b!.Value.Value);
+            Assert.True(b.Value.IsChanged);
 
             _board.Write(_b, 2.0);
             Assert.True(PopDirty());
+        }
+
+        [Fact]
+        public void ConditionalUsePort_SkippedFrames_IsChangedComparesWithLastRead()
+        {
+            _board.Write(_b, 1.0);
+            Assert.True(ProjectFrame(readB: true)!.Value.IsChanged);
+
+            // 跳过几帧、期间 B 没变:再读到时不算变
+            ProjectFrame(readB: false);
+            ProjectFrame(readB: false);
+            Assert.False(ProjectFrame(readB: true)!.Value.IsChanged);
+
+            // 跳过的帧里 B 变了两次:再读到时只报一次变化,拿到最新值
+            ProjectFrame(readB: false);
+            _board.Write(_b, 2.0);
+            ProjectFrame(readB: false);
+            _board.Write(_b, 3.0);
+            ProjectFrame(readB: false);
+            var b = ProjectFrame(readB: true)!.Value;
+            Assert.Equal(3.0, b.Value);
+            Assert.True(b.IsChanged);
+            Assert.False(ProjectFrame(readB: true)!.Value.IsChanged);
+
+            // 写回跳过前读到的同一个值也算变:比的是版本令牌,不是值
+            ProjectFrame(readB: false);
+            _board.Write(_b, 4.0);
+            _board.Write(_b, 3.0);
+            Assert.True(ProjectFrame(readB: true)!.Value.IsChanged);
+        }
+
+        [Fact]
+        public void UsePort_CallOrderAcrossFrames_DoesNotAffectResult()
+        {
+            _board.Write(_a, 1.0);
+            _board.Write(_b, 1.0);
+            Use(_a);
+            Use(_b);
+
+            _board.Write(_b, 2.0);
+
+            // 换个顺序读:令牌按端口对象存,B 变了 A 没变
+            var b = Use(_b);
+            var a = Use(_a);
+            Assert.True(b.IsChanged);
+            Assert.Equal(2.0, b.Value);
+            Assert.False(a.IsChanged);
+        }
+
+        [Fact]
+        public void UsePort_SamePortTwiceInOneFrame_OnlyFirstSeesChange()
+        {
+            _board.Write(_a, 1.0);
+            Use(_a);
+            _board.Write(_a, 2.0);
+
+            Assert.True(Use(_a).IsChanged);
+            Assert.False(Use(_a).IsChanged);
+        }
+
+        // 各自只有一个调用位置,从不同顺序调用时仍落在同一份状态上。
+        private (int Value, bool IsChanged) MemoTwice(int dep) => _ctx.UseMemo(dep, static d => d * 2);
+        private (int Value, bool IsChanged) MemoNeg(int dep) => _ctx.UseMemo(dep, static d => -d);
+
+        [Fact]
+        public void UseMemo_CallOrderAndSkippedCalls_DoNotAffectResult()
+        {
+            Assert.Equal((2, true), MemoTwice(1));
+            Assert.Equal((-1, true), MemoNeg(1));
+
+            // 换顺序、依赖不变:都命中缓存
+            Assert.Equal((-1, false), MemoNeg(1));
+            Assert.Equal((2, false), MemoTwice(1));
+
+            // 某帧跳过 MemoNeg;再调时依赖没变仍命中,变了才重算
+            Assert.Equal((2, false), MemoTwice(1));
+            Assert.Equal((-1, false), MemoNeg(1));
+            Assert.Equal((-5, true), MemoNeg(5));
+            Assert.Equal((2, false), MemoTwice(1));
         }
     }
 }

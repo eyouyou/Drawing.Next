@@ -55,7 +55,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
 
         protected override void OnProject(FeatureContext ctx)
         {
-            // 💥 Hooks 铁律:UsePort 必须在最顶层、无条件、固定顺序,防空判断放在全部解包之后
+            // 先全部解包再统一防空只是为了读着清楚;UsePort 放进分支或 return 之后也成立(01 号文档 §4)
             var (upper, _) = ctx.UsePort(UpperPort);
             var (middle, _) = ctx.UsePort(MiddlePort);
             var (lower, _) = ctx.UsePort(LowerPort);

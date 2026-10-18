@@ -148,7 +148,7 @@ namespace Hevo.Charting.Features
             var (lows, lowsChanged) = ctx.UsePort(Ports.Low);
             var (closes, closesChanged) = ctx.UsePort(Ports.Close);
 
-            // 2. 物理尺寸查脏：缓存图表区域大小变化(💥 Hook 必须在下面的防空 return 之前)
+            // 2. 物理尺寸查脏：缓存图表区域大小变化
             HevoRect currentArea = ctx.PlotArea;
             var (_, areaChanged) = ctx.UseMemo(currentArea, area => area);
 
