@@ -410,6 +410,25 @@ namespace Hevo.Charting.LowCode.Designer
         //   - 改名 SafeChangeType → CoerceValue:旧名暗示"出错也不抛"的 silent 语义,跟 fail-fast 矛盾。
         //     现在转换失败一律抛出由 InjectProperties 上传出去;唯一保留的"silent skip" 是 SkipInjection sentinel
         //     (语义化的"这字段就是不该被注入",非"出错了悄悄忽略")。
+        /// <summary>
+        /// 编辑器等"只想看看强类型值"的调用方用:跟装配期注入走同一套转换,转不了返回 false 而不是抛。
+        /// <see cref="SkipInjection"/>(接口字段无多态 converter)也算转不了 —— 调用方应保留原始值。
+        /// </summary>
+        internal static bool TryCoerceValue(object? value, Type conversionType, out object? result)
+        {
+            try
+            {
+                result = CoerceValue(value, conversionType);
+                if (ReferenceEquals(result, SkipInjection)) { result = null; return false; }
+                return true;
+            }
+            catch
+            {
+                result = null;
+                return false;
+            }
+        }
+
         private static object? CoerceValue(object? value, Type conversionType)
         {
             // 1. null 处理 —— 显式拒绝 null → 非 Nullable 值类型,避免 setter 把 null unbox 抛 NRE 这种隐晦错误,

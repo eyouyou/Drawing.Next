@@ -150,10 +150,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             // 2. 输入端口直接点 → 移除已连线 (便利操作)
             if (hit.Node != null && hit.Port != null && hit.IsInput)
             {
-                var edges = s.Edges.Where(x => !(x.ToNodeId == hit.Node.Id && x.ToPortId == hit.Port.Id)).ToList();
-                if (edges.Count != s.Edges.Count)
+                if (s.Edges.Any(x => x.ToNodeId == hit.Node.Id && x.ToPortId == hit.Port.Id))
                 {
-                    DataSource.PushUndoAndApply(s with { Edges = edges });
+                    DataSource.PushUndoAndApply(s.DisconnectInput(hit.Node.Id, hit.Port.Id));
                 }
                 e.Handled = true;
                 return;

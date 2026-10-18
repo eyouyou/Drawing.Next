@@ -122,6 +122,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             if (blueprint == null) return new BlueprintLaunchResult { Error = "blueprint 为 null。" };
 
             var diagnostics = new List<BlueprintDiagnostic>();
+            // 旧格式字段先迁移,跟运行时装配看到同一份蓝图。
+            diagnostics.AddRange(BlueprintLegacyMigrator.Migrate(blueprint));
 
             if (blueprint.DataSources.Count == 0)
                 return new BlueprintLaunchResult { Error = "蓝图缺少 DataSource 节点。请先在画布上添加一个数据源。" };
@@ -360,22 +362,33 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         private static void CheckDelegateHandlers(
             FeatureModel f, Type featureType, BlueprintHandlerRegistry? handlers, List<BlueprintDiagnostic> diagnostics)
         {
-            foreach (var p in f.Properties)
+            // 跟运行时 ResolveHandlerReferences 共用同一判断;JSON 载入的 JsonElement 字符串也算 handler 引用。
+            foreach (var kv in f.Properties)
             {
-                if (p.Value is not string handlerName || string.IsNullOrEmpty(handlerName)) continue;
-                var pi = featureType.GetProperty(p.Key,
-                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (pi == null) continue;
-                if (!typeof(Delegate).IsAssignableFrom(pi.PropertyType)) continue;
-                if (handlers == null || !handlers.Contains(handlerName))
+                if (!BlueprintHandlerReferences.TryGet(featureType, kv.Key, kv.Value, out var handlerName, out var pi)) continue;
+                var key = kv.Key;
+                var del = handlers?.TryGet(handlerName);
+                if (del != null && !pi.PropertyType.IsAssignableFrom(del.GetType()))
+                {
+                    diagnostics.Add(new BlueprintDiagnostic
+                    {
+                        Severity = BlueprintDiagnosticSeverity.Error,
+                        Code = "BP_HANDLER_TYPE_MISMATCH",
+                        FeatureTypeName = f.TypeName,
+                        PortName = key,
+                        Message = $"handler '{handlerName}' 类型 {del.GetType().Name} 不兼容属性类型 {pi.PropertyType.Name},运行时装配会抛",
+                    });
+                    continue;
+                }
+                if (del == null)
                 {
                     diagnostics.Add(new BlueprintDiagnostic
                     {
                         Severity = BlueprintDiagnosticSeverity.Warning,
                         Code = "BP_HANDLER_NOT_REGISTERED",
                         FeatureTypeName = f.TypeName,
-                        PortName = p.Key,
-                        Message = $"Delegate 属性引用 handler '{handlerName}' 但 BlueprintHandlerRegistry 未注册,运行时该字段会被 skip",
+                        PortName = key,
+                        Message = $"Delegate 属性引用 handler '{handlerName}' 但 BlueprintHandlerRegistry 未注册,运行时装配会抛",
                     });
                 }
             }
@@ -607,7 +620,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                         Code = "BP_PYHANDLER_INPUT_ORDER_MISSING",
                         FeatureTypeName = f.TypeName,
                         PortName = pi.Name,
-                        Message = $"PortBindings 含 nested key '{pi.Name}.*' 但 Properties.InputOrder 未声明 — "
+                        Message = $"InputBindings 含 nested key '{pi.Name}.*' 但 Properties.InputOrder 未声明 — "
                                 + "运行时无法确定调 Compute 委托的形参顺序,装配会跳过。",
                     });
                     continue;
@@ -624,7 +637,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                         Code = "BP_PYHANDLER_INPUT_UNCONNECTED",
                         FeatureTypeName = f.TypeName,
                         PortName = $"{pi.Name}.{name}",
-                        Message = $"InputOrder 声明 '{name}' 但 PortBindings 缺 '{pi.Name}.{name}' 焊接 — "
+                        Message = $"InputOrder 声明 '{name}' 但 InputBindings 缺 '{pi.Name}.{name}' 焊接 — "
                                 + "运行时该输入端口为 null,装配会跳过当前节点。",
                     });
                 }

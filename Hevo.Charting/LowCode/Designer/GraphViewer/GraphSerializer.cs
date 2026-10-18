@@ -117,6 +117,16 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             foreach (var codec in EdgeKindCodecs.All)
                 codec.Encode(ctx);
 
+            // 6. 画布表达不了的内容原样写回(未登记类型的节点、Triggers、顶层不认识的字段)。
+            var pass = state.Passthrough;
+            bp.DataSources.AddRange(pass.DataSources);
+            bp.InitialTraits.AddRange(pass.Traits);
+            bp.Features.AddRange(pass.Features);
+            bp.Triggers.AddRange(pass.Triggers);
+            bp.TriggerBindings.AddRange(pass.TriggerBindings);
+            if (pass.ExtensionData != null)
+                bp.ExtensionData = new Dictionary<string, System.Text.Json.JsonElement>(pass.ExtensionData);
+
             return bp;
         }
 

@@ -25,8 +25,13 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     /// 同 cell 内两个 port 持同一 BindingId ⇔ 概念上连成一根线;
     /// 跨 cell 同 BindingId(<c>cell:</c> 例外,各 cell 独立)⇔ 走 <see cref="Linked.LinkedChartContext"/> 镜像桥跨 cell 同步。
     /// </param>
+    /// <param name="ExternalBindingIds">
+    /// 扇入端口(<see cref="IsArray"/>)上指向画布外的引用(dashboard 共享端口、未登记节点的输出等)。
+    /// 画布上没有对应的线,不记下来的话载入再保存就丢了;保存时与入边一起写出,断开该端口时一并清掉。
+    /// </param>
     public record Port(string Id, string Name, string DataTypeName, bool IsInput,
-                      string? Description = null, bool IsArray = false, string? BindingId = null);
+                      string? Description = null, bool IsArray = false, string? BindingId = null,
+                      IReadOnlyList<string>? ExternalBindingIds = null);
 
     public enum NodeKind
     {
@@ -204,6 +209,12 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             null
         );
 
+        /// <summary>
+        /// 载入时画布表达不了、保存时要原样带回的蓝图内容(未登记类型的节点、Triggers 等)。
+        /// 清空画布(<see cref="Empty"/>)时随之清掉。
+        /// </summary>
+        public BlueprintPassthrough Passthrough { get; init; } = BlueprintPassthrough.Empty;
+
         public Node? FindNode(string id)
         {
             foreach (var n in Nodes) if (n.Id == id) return n;
@@ -228,10 +239,28 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             var list = new List<Node>(Nodes.Count);
             foreach (var n in Nodes) if (n.Id != id) list.Add(n);
             var edges = new List<Edge>(Edges.Count);
-            foreach (var e in Edges) if (e.FromNodeId != id && e.ToNodeId != id) edges.Add(e);
+            foreach (var e in Edges)
+            {
+                if (e.FromNodeId != id && e.ToNodeId != id) edges.Add(e);
+                // 下游端口失去上游:载入时记下的 BindingId 指向已删节点,一并清掉,保存才跟画布一致。
+                else if (e.FromNodeId == id) ClearInputBindingId(list, e.ToNodeId, e.ToPortId);
+            }
             var sel = new HashSet<string>(SelectedNodeIds);
             sel.Remove(id);
             return this with { Nodes = list, Edges = edges, SelectedNodeIds = sel };
+        }
+
+        /// <summary>
+        /// 断开某个输入端口的全部入边,并清掉它载入时带的 <see cref="Port.BindingId"/>。
+        /// 只删边不清 BindingId 时,保存会把旧 binding 原样写回,断线等于没断。
+        /// </summary>
+        public GraphState DisconnectInput(string nodeId, string portId)
+        {
+            var edges = new List<Edge>(Edges.Count);
+            foreach (var e in Edges) if (!(e.ToNodeId == nodeId && e.ToPortId == portId)) edges.Add(e);
+            var nodes = new List<Node>(Nodes);
+            ClearInputBindingId(nodes, nodeId, portId, clearExternal: true);
+            return this with { Nodes = nodes, Edges = edges };
         }
 
         public GraphState AddEdge(Edge edge)
@@ -253,7 +282,31 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 list.Add(e);
             }
             list.Add(edge);
-            return this with { Edges = list };
+            // 新边就是这个端口的真相:载入时的 BindingId 指向旧上游,不清会在保存时盖过新边。
+            var nodes = new List<Node>(Nodes);
+            ClearInputBindingId(nodes, edge.ToNodeId, edge.ToPortId);
+            return this with { Nodes = nodes, Edges = list };
+        }
+
+        // clearExternal:扇入端口加一根线不该清掉其它画布外引用,只有显式断开整个端口才清。
+        private static void ClearInputBindingId(List<Node> nodes, string nodeId, string portId, bool clearExternal = false)
+        {
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                var n = nodes[i];
+                if (n.Id != nodeId) continue;
+                for (int j = 0; j < n.InputPorts.Count; j++)
+                {
+                    var p = n.InputPorts[j];
+                    if (p.Id != portId) continue;
+                    if (p.BindingId == null && (!clearExternal || p.ExternalBindingIds == null)) return;
+                    var ports = n.InputPorts.ToArray();
+                    ports[j] = clearExternal ? p with { BindingId = null, ExternalBindingIds = null } : p with { BindingId = null };
+                    nodes[i] = n with { InputPorts = ports };
+                    return;
+                }
+                return;
+            }
         }
     }
 

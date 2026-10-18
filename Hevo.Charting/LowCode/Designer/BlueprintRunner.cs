@@ -178,16 +178,38 @@ namespace Hevo.Charting.LowCode.Designer
         {
             if (blueprint is null) throw new ArgumentNullException(nameof(blueprint));
 
+            BlueprintLegacyMigrator.MigrateOrThrow(blueprint);
             var resolvedInstances = ResolveInstances(blueprint, instances);
-            var (_, leafInstance) = PickRenderLeaf(blueprint, resolvedInstances);
+            object schema;
+            object leafInstance;
+            try
+            {
+                DataSourceModel leafModel;
+                (leafModel, leafInstance) = PickRenderLeaf(blueprint, resolvedInstances);
 
-            InjectHandlersAware(resolvedInstances, handlers);
+                InjectHandlersAware(resolvedInstances, handlers);
 
-            var schema = BuildSchemaForLeaf(blueprint, leafInstance, handlers);
+                schema = BuildSchemaForLeaf(blueprint, leafModel, leafInstance, handlers);
 
-            // node-wrap:把每个 Composite 的 UpstreamRefs 引用的上游 DS Stream 反射 Attach 进去。
-            // Composite 本身只暴露 `Attach(IWorkflow<DataSnapshot<TItem>>)`,不知道蓝图存在;framework 这一层负责蓝图协议。
-            WireCompositeUpstreams(blueprint, resolvedInstances);
+                // 框架替蓝图 new 的其它数据源(Composite 上游、Cascade 上游)跟 schema 同生灭;
+                // 渲染叶由 schema 构造函数自己托管,调用方传入的实例归调用方。
+                foreach (var kv in resolvedInstances)
+                {
+                    if (instances != null && instances.ContainsKey(kv.Key)) continue;
+                    if (ReferenceEquals(kv.Value, leafInstance)) continue;
+                    if (kv.Value is IDisposable owned) RegisterDisposable(schema, owned);
+                }
+
+                // node-wrap:把每个 Composite 的 UpstreamRefs 引用的上游 DS Stream 反射 Attach 进去。
+                // Composite 本身只暴露 `Attach(IWorkflow<DataSnapshot<TItem>>)`,不知道蓝图存在;framework 这一层负责蓝图协议。
+                WireCompositeUpstreams(blueprint, resolvedInstances);
+            }
+            catch
+            {
+                // 装配失败时 schema 不会交给任何人,框架自建的实例只能在这里释放。
+                DisposeFrameworkCreated(resolvedInstances, instances);
+                throw;
+            }
 
             return new DeferredSchema(
                 schema,
@@ -406,6 +428,34 @@ namespace Hevo.Charting.LowCode.Designer
                 foreach (var kv in supplied) result[kv.Key] = kv.Value;
             }
 
+            try
+            {
+                CreateMissingInstances(blueprint, result);
+            }
+            catch
+            {
+                DisposeFrameworkCreated(result, supplied);
+                throw;
+            }
+            return result;
+        }
+
+        private static void DisposeFrameworkCreated(
+            IReadOnlyDictionary<string, object> resolved, IReadOnlyDictionary<string, object>? supplied)
+        {
+            foreach (var kv in resolved)
+            {
+                if (supplied != null && supplied.ContainsKey(kv.Key)) continue;
+                if (kv.Value is IDisposable d)
+                {
+                    try { d.Dispose(); }
+                    catch (Exception ex) { Console.WriteLine($"[BlueprintRunner] 装配失败后释放 '{kv.Key}' 时出错:{ex.Message}"); }
+                }
+            }
+        }
+
+        private static void CreateMissingInstances(ChartBlueprint blueprint, Dictionary<string, object> result)
+        {
             foreach (var dsm in blueprint.DataSources)
             {
                 if (string.IsNullOrEmpty(dsm.Id))
@@ -430,12 +480,11 @@ namespace Hevo.Charting.LowCode.Designer
                         $"DataSource '{dsm.Id}' (TypeName={dsm.TypeName}) 无参构造失败:{ex.Message}。" +
                         "ctor 带参 DS 业务侧需自行 new 后塞 instances 字典。", ex);
                 }
+                // 先入表再注入:注入抛出时它也在 result 里,由调用方统一释放。
+                result[dsm.Id] = instance;
                 if (dsm.Properties is { Count: > 0 } props)
                     SmartActivator.InjectProperties(instance, props);
-                result[dsm.Id] = instance;
             }
-
-            return result;
         }
 
         // -----------------------------------------------------------------
@@ -523,16 +572,16 @@ namespace Hevo.Charting.LowCode.Designer
         private static readonly ConcurrentBuilderCache _builderCache = new();
 
         private static object BuildSchemaForLeaf(
-            ChartBlueprint blueprint, object leafInstance, BlueprintHandlerRegistry? handlers)
+            ChartBlueprint blueprint, DataSourceModel leafModel, object leafInstance, BlueprintHandlerRegistry? handlers)
         {
             // wrapper 式探针:沿 BufferedDataSource<,> 继承链拿 TItem + Stream,跟接口实现等价但零基类污染。
             // 派生 DS 类零侵入(不实现任何蓝图相关接口),所有反射 + Expression 编译开销由 probe 缓存吃掉。
             var (itemType, stream) = BlueprintDataSourceProbe.Inspect(leafInstance);
             var ctor = _builderCache.GetCtor(itemType);
-            return ctor.Invoke(new[] { (object)blueprint, leafInstance, stream, (object?)handlers })!;
+            return ctor.Invoke(new[] { (object)blueprint, leafInstance, stream, (object?)handlers, leafModel })!;
         }
 
-        // 缓存 DynamicChartSchema<TItem>(blueprint, dsInstance, stream, handlers) 4 参 ctor。
+        // 缓存 DynamicChartSchema<TItem>(blueprint, dsInstance, stream, handlers, renderLeafModel) 5 参 ctor。
         // 同 TItem 多次 RunBlueprint 不重复 MakeGenericType。
         private sealed class ConcurrentBuilderCache
         {
@@ -545,10 +594,10 @@ namespace Hevo.Charting.LowCode.Designer
                 var streamType = typeof(IWorkflow<>).MakeGenericType(typeof(DataSnapshot<>).MakeGenericType(itemType));
                 var ctor = schemaType.GetConstructor(new[]
                 {
-                    typeof(ChartBlueprint), typeof(object), streamType, typeof(BlueprintHandlerRegistry),
+                    typeof(ChartBlueprint), typeof(object), streamType, typeof(BlueprintHandlerRegistry), typeof(DataSourceModel),
                 });
                 return ctor ?? throw new InvalidOperationException(
-                    $"DynamicChartSchema<{itemType.Name}> 没有 (ChartBlueprint, object, IWorkflow<DataSnapshot<T>>, BlueprintHandlerRegistry?) ctor。");
+                    $"DynamicChartSchema<{itemType.Name}> 没有 (ChartBlueprint, object, IWorkflow<DataSnapshot<T>>, BlueprintHandlerRegistry?, DataSourceModel?) ctor。");
             }
         }
 

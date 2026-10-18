@@ -47,7 +47,9 @@ namespace Hevo.Charting.LowCode.Designer
             if (blueprint.TriggerBindings.Count == 0) return Array.Empty<IDisposable>();
 
             var triggersById = BuildTriggersById(blueprint);
-            var disposables = new List<IDisposable>(blueprint.TriggerBindings.Count);
+            // 先全部校验 + 建好 action,再统一订阅:中途哪条配错抛出时,前面的 Interval 还没开跑,
+            // 不会留下调用方拿不到句柄、永远停不下来的定时器。
+            var prepared = new List<(TriggerModel trigger, Func<VersionToken, CancellationToken, Task<bool>> action)>(blueprint.TriggerBindings.Count);
             foreach (var binding in blueprint.TriggerBindings)
             {
                 if (string.IsNullOrEmpty(binding.TriggerId))
@@ -74,9 +76,19 @@ namespace Hevo.Charting.LowCode.Designer
                     throw new InvalidOperationException(
                         $"TriggerModel '{trigger.Id}'.IntervalSeconds={trigger.IntervalSeconds} 非法,必须 > 0。");
 
-                var action = BuildVerbAction(binding, ds, handlers, scope);
-                var sub = Subscribe(trigger, action);
-                disposables.Add(sub);
+                prepared.Add((trigger, BuildVerbAction(binding, ds, handlers, scope)));
+            }
+
+            var disposables = new List<IDisposable>(prepared.Count);
+            try
+            {
+                foreach (var p in prepared)
+                    disposables.Add(Subscribe(p.trigger, p.action));
+            }
+            catch
+            {
+                foreach (var d in disposables) d.Dispose();
+                throw;
             }
             return disposables;
         }

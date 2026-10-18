@@ -26,6 +26,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         private Node _node;   // §D2.X "重新配置多输入"按钮会就地 mutate(替换 InputPorts/Properties),Confirm 时一起返
         private readonly Type _runtimeType;
         private readonly Dictionary<string, Func<object?>> _readers = new();
+        // 每个 reader 在控件刚建好时读出的值。确定时只写跟它不同的字段 —— 没动的字段保留原始条目(包括"没配"),
+        // 避免编辑器把转不准的值或运行时默认值写进蓝图。
+        private readonly Dictionary<string, object?> _baselines = new();
         private StackPanel? _fieldsPanel;   // BuildUi 创建一次,§D2.X 重配后 RefreshFieldsPanel 清空 + 重建
 
         public NodeEditorWindow(Node node, BlueprintHandlerRegistry? handlers = null)
@@ -86,6 +89,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             grid.Children.Add(scroll); Grid.SetRow(scroll, 1);
 
             BuildFields(_fieldsPanel);
+            CaptureBaselines();
 
             var btnPanel = new StackPanel
             {
@@ -111,6 +115,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             _readers.Clear();
             _fieldsPanel.Children.Clear();
             BuildFields(_fieldsPanel);
+            CaptureBaselines();
         }
 
         private void BuildFields(StackPanel host)
@@ -186,8 +191,13 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             sp.Children.Add(MakeText($"§D2.X Handler 配置 — {delegateProp.Name}", 12, FontWeights.SemiBold, 0x4FC3F7u));
 
             string? currentHandler = null;
-            if (_node.Properties.TryGetValue(delegateProp.Name, out var v) && v is string s)
-                currentHandler = s;
+            if (_node.Properties.TryGetValue(delegateProp.Name, out var v))
+                currentHandler = v switch
+                {
+                    string s => s,
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } je => je.GetString(),
+                    _ => null,
+                };
 
             sp.Children.Add(MakeText(
                 currentHandler != null
@@ -441,8 +451,10 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 10.5, FontWeights.Normal, 0x8A949Cu));
 
             // 当前值 (优先 Properties 里的覆盖,缺失时 fall back 到运行时实例的默认值)
+            // 从 JSON 载入的值是 JsonElement,控件只认强类型(bool / enum / Color / record …),不转就显示成"无值",
+            // 确定时被写成默认值。转换跟装配期注入走同一函数,两边对"这个值是什么"不会有分歧。
             object? currentValue = _node.Properties.TryGetValue(prop.Name, out var v)
-                ? v
+                ? (SmartActivator.TryCoerceValue(v, prop.PropertyType, out var typed) ? typed : v)
                 : TryGetDefault(prop);
 
             FrameworkElement editor = MakeEditor(prop, currentValue, out var reader);
@@ -918,16 +930,42 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             //   新做法:Properties 干脆不带这个 key,装配期 InjectProperties 根本不 fire setter,init 默认值天然保留。
             //          跟 ComponentRegistry.InjectProperties 的 fail-fast 契约对齐 ——
             //          再有 null → 非 Nullable 值类型 出现就是真错,立刻抛。
+            Result = BuildResult();
+            DialogResult = true;
+            Close();
+        }
+
+        internal Node BuildResult()
+        {
             var newProps = new Dictionary<string, object?>(_node.Properties);
             foreach (var kv in _readers)
             {
                 var v = kv.Value();
+                if (_baselines.TryGetValue(kv.Key, out var baseline) && ValuesEquivalent(baseline, v)) continue;
                 if (v == null) newProps.Remove(kv.Key);
                 else newProps[kv.Key] = v;
             }
-            Result = _node with { Properties = newProps };
-            DialogResult = true;
-            Close();
+            return _node with { Properties = newProps };
+        }
+
+        private void CaptureBaselines()
+        {
+            _baselines.Clear();
+            foreach (var kv in _readers) _baselines[kv.Key] = kv.Value();
+        }
+
+        // 配置组 reader 每次 ctor.Invoke 出新实例、字典 reader 每次新建字典,引用必然不同;
+        // 值相等(record / 基元)或序列化结果相同都算没改。
+        private static bool ValuesEquivalent(object? a, object? b)
+        {
+            if (ReferenceEquals(a, b) || Equals(a, b)) return true;
+            if (a == null || b == null || a.GetType() != b.GetType()) return false;
+            try
+            {
+                return System.Text.Json.JsonSerializer.Serialize(a, a.GetType(), BlueprintJsonOptions.Default)
+                    == System.Text.Json.JsonSerializer.Serialize(b, b.GetType(), BlueprintJsonOptions.Default);
+            }
+            catch { return false; }
         }
 
         private static TextBlock MakeText(string text, double fontSize, FontWeight weight, uint argbRgb, bool italic = false)

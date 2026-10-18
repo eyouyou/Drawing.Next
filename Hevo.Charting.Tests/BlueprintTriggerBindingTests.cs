@@ -101,6 +101,30 @@ namespace Hevo.Charting.Tests
         }
 
         [Fact]
+        public async Task WireTriggerBindings_LaterBindingInvalid_EarlierSubscriptionDoesNotLeak()
+        {
+            // 第二条 binding 校验失败时,第一条的 Interval 已经开跑;调用方拿不到句柄,定时器永远停不下来。
+            var ds = new FakeDs();
+            var bp = new ChartBlueprint
+            {
+                Triggers = { new TriggerModel { Id = "t1", IntervalSeconds = 0.02, Exclusive = true } },
+                TriggerBindings =
+                {
+                    new TriggerBinding { TriggerId = "t1", TargetDataSourceId = "ds", Verb = "Refresh" },
+                    new TriggerBinding { TriggerId = "missing", TargetDataSourceId = "ds", Verb = "Refresh" },
+                },
+            };
+            using var scope = new ScopeContext();
+            var instances = new Dictionary<string, object> { ["ds"] = ds };
+
+            Assert.Throws<InvalidOperationException>(() =>
+                BlueprintTriggerBindingWiring.WireTriggerBindings(bp, instances, new BlueprintHandlerRegistry(), scope));
+
+            await Task.Delay(200);
+            Assert.Equal(0, ds.RefreshCalls);
+        }
+
+        [Fact]
         public async Task Verb_Suspend_Resume_CallsIPausable()
         {
             var ds = new FakeDs();
