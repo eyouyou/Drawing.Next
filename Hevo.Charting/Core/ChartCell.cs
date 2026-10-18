@@ -963,12 +963,32 @@ namespace Hevo.Charting.Core
                 using var ctx = new RenderContext(_sharedData, _localData, lifeTimeSession);
 
                 schema.ComposeAll(this, ctx);
-                var seedProxy = new ContentPresenter { Content = base.Content };
-                var decoratedUI = schema.Aspect.Decorate(seedProxy);
-                rootDecorator.Child = decoratedUI;
+                ApplyDecoration(rootDecorator, schema);
 
                 ctx.SubmitSync(ActiveLayers);
             }
+        }
+
+        // 外壳 UI 的种子:业务 Content 的承载者。重建外壳时先把 Content 从旧种子上摘下,
+        // 否则同一个元素挂到新种子上会因"已有逻辑父"抛异常。
+        private ContentPresenter? _decorationSeed;
+
+        private void ApplyDecoration(AdornerDecorator rootDecorator, ChartSchema schema)
+        {
+            if (_decorationSeed != null) _decorationSeed.Content = null;
+            rootDecorator.Child = null;
+            _decorationSeed = new ContentPresenter { Content = base.Content };
+            rootDecorator.Child = schema.Aspect.Decorate(_decorationSeed);
+        }
+
+        /// <summary>
+        /// Aspect 链变了(Transact 增删了带外壳 UI 的 Feature)后重建外壳。模板还没应用时什么也不做 ——
+        /// 之后 OnApplyTemplate 会按当时的 Aspect 链装饰。
+        /// </summary>
+        internal void RefreshDecoration()
+        {
+            if (Template is ChartSchema schema && GetTemplateChild("PART_Root") is AdornerDecorator rootDecorator)
+                ApplyDecoration(rootDecorator, schema);
         }
 
         /// <summary>

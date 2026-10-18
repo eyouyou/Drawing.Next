@@ -9,7 +9,9 @@ namespace Hevo.Charting.LowCode
     /// </summary>
     public class DataBlackboard : IDisposable
     {
-        public bool IsDisposed { get; private set; }
+        // 关门标志:Dispose 第一步就置位,之后新来的拿锁 / 订阅在碰锁之前就能看到
+        private volatile bool _isDisposed;
+        public bool IsDisposed => _isDisposed;
         private readonly TypedBucketMap _memory = new();
         private readonly Dictionary<object, Action<DataBlackboard>?> _subscriptions = new();
         private readonly StateClock _boardClock = new();
@@ -64,37 +66,92 @@ namespace Hevo.Charting.LowCode
         // 旧实现是 class 包装,Interaction / Viewport / Paging hot path 每次 mouse / scroll 事件都 new 一个
         // scope 对象;改成 struct 后稳态零 GC。所有 caller 用 `using (...)` 形式,API 调用面不变。
         // ==========================================
-        public ReadLockScope AcquireReadLock() { _rwLock.EnterReadLock(); return new ReadLockScope(this); }
-        public WriteLockScope AcquireWriteLock() { _rwLock.EnterWriteLock(); return new WriteLockScope(this); }
-        public UpgradeableReadLockScope AcquireUpgradeableReadLock() { _rwLock.EnterUpgradeableReadLock(); return new UpgradeableReadLockScope(this); }
+        public ReadLockScope AcquireReadLock() { ThrowIfDisposed(); _rwLock.EnterReadLock(); return new ReadLockScope(this); }
+        public WriteLockScope AcquireWriteLock() { ThrowIfDisposed(); _rwLock.EnterWriteLock(); return new WriteLockScope(this); }
+        public UpgradeableReadLockScope AcquireUpgradeableReadLock() { ThrowIfDisposed(); _rwLock.EnterUpgradeableReadLock(); return new UpgradeableReadLockScope(this); }
+
+        private void ThrowIfDisposed()
+        {
+            if (_isDisposed) throw new ObjectDisposedException(nameof(DataBlackboard));
+        }
 
         public readonly struct ReadLockScope : IDisposable
         {
             private readonly DataBlackboard _b;
             internal ReadLockScope(DataBlackboard b) { _b = b; }
-            public void Dispose() => _b._rwLock.ExitReadLock();
+            public void Dispose()
+            {
+                var pending = _b.TakeAfterUnlockIfLastHold();
+                _b._rwLock.ExitReadLock();
+                _b.RunAfterUnlock(pending);
+            }
         }
 
         public readonly struct WriteLockScope : IDisposable
         {
             private readonly DataBlackboard _b;
             internal WriteLockScope(DataBlackboard b) { _b = b; }
-            public void Dispose() => _b._rwLock.ExitWriteLock();
+            public void Dispose()
+            {
+                var pending = _b.TakeAfterUnlockIfLastHold();
+                _b._rwLock.ExitWriteLock();
+                _b.RunAfterUnlock(pending);
+            }
         }
 
         public readonly struct UpgradeableReadLockScope : IDisposable
         {
             private readonly DataBlackboard _b;
             internal UpgradeableReadLockScope(DataBlackboard b) { _b = b; }
-            public void Dispose() => _b._rwLock.ExitUpgradeableReadLock();
+            public void Dispose()
+            {
+                var pending = _b.TakeAfterUnlockIfLastHold();
+                _b._rwLock.ExitUpgradeableReadLock();
+                _b.RunAfterUnlock(pending);
+            }
+        }
+
+        // ==========================================
+        // 锁外回调:写锁内登记,本线程彻底退出这块板的锁之后再执行。
+        // 给联动镜像这类"要去写别的板"的订阅者用 —— 在本板锁内拿别的板的锁,
+        // 两块板在两个线程上反向镜像就互相等死。
+        // 登记只发生在写锁内、取出发生在最后一层锁退出前,所以列表始终只被持锁线程碰。
+        // ==========================================
+        private readonly List<IAfterUnlockAction> _afterUnlock = new();
+
+        internal void PostAfterUnlock(IAfterUnlockAction action)
+        {
+            if (!_rwLock.IsWriteLockHeld)
+                throw new InvalidOperationException("PostAfterUnlock 只能在写锁内调用。");
+            if (!_afterUnlock.Contains(action)) _afterUnlock.Add(action);
+        }
+
+        // 返回 null / 单个 IAfterUnlockAction / IAfterUnlockAction[]:常见情况只登记一项,不为它分配数组
+        private object? TakeAfterUnlockIfLastHold()
+        {
+            if (_afterUnlock.Count == 0) return null;
+            int holds = _rwLock.RecursiveReadCount + _rwLock.RecursiveWriteCount + _rwLock.RecursiveUpgradeCount;
+            if (holds != 1) return null;
+            object pending = _afterUnlock.Count == 1 ? _afterUnlock[0] : _afterUnlock.ToArray();
+            _afterUnlock.Clear();
+            return pending;
+        }
+
+        private void RunAfterUnlock(object? pending)
+        {
+            if (pending is IAfterUnlockAction single) single.Run(this);
+            else if (pending is IAfterUnlockAction[] many)
+                for (int i = 0; i < many.Length; i++) many[i].Run(this);
         }
 
         // ==========================================
         // 字典修改属于结构性变化，必须上排他写锁
         // ==========================================
+        // 已释放的板上订阅 / 退订静默返回:管线销毁时订阅链从上游往下游释放,
+        // pipe(连同黑板)先于下游 Watch 的清理被释放,这里抛异常会截断后面的清理。
         public void Subscribe(object port, Action<DataBlackboard> callback)
         {
-            _rwLock.EnterWriteLock();
+            if (!TryEnterWriteLockUnlessDisposed()) return;
             try
             {
                 if (_subscriptions.TryGetValue(port, out var existingAction)) _subscriptions[port] = existingAction + callback;
@@ -105,7 +162,7 @@ namespace Hevo.Charting.LowCode
 
         public void Unsubscribe(object port, Action<DataBlackboard> callback)
         {
-            _rwLock.EnterWriteLock();
+            if (!TryEnterWriteLockUnlessDisposed()) return;
             try
             {
                 if (_subscriptions.TryGetValue(port, out var existingAction))
@@ -116,6 +173,13 @@ namespace Hevo.Charting.LowCode
                 }
             }
             finally { _rwLock.ExitWriteLock(); }
+        }
+
+        private bool TryEnterWriteLockUnlessDisposed()
+        {
+            if (_isDisposed) return false;
+            try { _rwLock.EnterWriteLock(); return true; }
+            catch (ObjectDisposedException) { return false; }
         }
 
         // ==========================================
@@ -254,6 +318,7 @@ namespace Hevo.Charting.LowCode
         /// </summary>
         public IDisposable BeginTransaction()
         {
+            ThrowIfDisposed();
             _rwLock.EnterWriteLock(); // 💥 显式上排他写锁，确保事务期间绝对无人能读写
             _transactionDepth++;
             return new TransactionScope(this);
@@ -283,7 +348,12 @@ namespace Hevo.Charting.LowCode
                     OnTransactionCommitted?.Invoke(this);
                 }
             }
-            finally { _rwLock.ExitWriteLock(); } // 💥 释放排他写锁
+            finally
+            {
+                var pending = TakeAfterUnlockIfLastHold();
+                _rwLock.ExitWriteLock(); // 💥 释放排他写锁
+                RunAfterUnlock(pending);
+            }
         }
 
         private class TransactionScope : IDisposable
@@ -293,21 +363,37 @@ namespace Hevo.Charting.LowCode
             public void Dispose() => _board.EndTransaction();
         }
 
+        private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(1);
+
         public void Dispose()
         {
-            if (IsDisposed) return;
-            IsDisposed = true;
+            if (_isDisposed) return;
+            _isDisposed = true;
 
-            // 彻底释放读写锁底层句柄
-            _rwLock.Dispose();
+            // 先等在途读写者退出再拆锁:别的线程正持锁时拆掉,它退出时会撞上锁内部状态异常。
+            // 本线程自己持锁(在回调里释放自己的板)就不等,也不拆 —— 拆持有中的锁会抛,留给 GC。
+            bool heldHere = _rwLock.IsReadLockHeld || _rwLock.IsUpgradeableReadLockHeld || _rwLock.IsWriteLockHeld;
+            if (!heldHere && _rwLock.TryEnterWriteLock(DisposeDrainTimeout)) _rwLock.ExitWriteLock();
+            if (!heldHere)
+            {
+                try { _rwLock.Dispose(); }
+                catch (SynchronizationLockException) { /* 仍有线程排队等锁:不拆,留给 GC */ }
+            }
 
             _subscriptions.Clear();
+            _afterUnlock.Clear();
             _dirtyPorts.Clear();
             _portTokens.Clear();
             _identityTokens.Clear();
             OnPortUpdated = null;
             OnTransactionCommitted = null;
         }
+    }
+
+    /// <summary>见 <see cref="DataBlackboard.PostAfterUnlock"/>:登记它的板作参数,在锁外、同一线程上执行。</summary>
+    internal interface IAfterUnlockAction
+    {
+        void Run(DataBlackboard board);
     }
 
     // ==========================================
@@ -421,6 +507,8 @@ namespace Hevo.Charting.LowCode
         /// </summary>
         public DataBlackboard Process(DataSnapshot<TItem> snapshot)
         {
+            // 销毁与推送并发:板已关门就丢掉这次推送(管线正在拆,没有下游要看了)
+            if (_persistentBoard.IsDisposed) return _persistentBoard;
             using (_persistentBoard.BeginTransaction())
             {
                 // 按添加顺序执行，确保标量先写入，向量后写入

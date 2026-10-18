@@ -59,7 +59,10 @@ namespace Hevo.Charting.Linked
         // ── 端口镜像桥 ─────────────────────────────────────────────────────
         // 列表锁定哪些 port 跨 cell 镜像。默认 4 个(viewport 3 + linkedHit);业务方可通过 RegisterMirror / RegisterFromConfig 扩展。
         private readonly List<IPortMirror> _mirrors;
-        private readonly List<DataBlackboard> _boards = new();
+        // 写时复制:镜像分发可能在任意线程上遍历,AttachBoard 在 UI 线程上换新数组
+        private DataBlackboard[] _boards = Array.Empty<DataBlackboard>();
+
+        internal DataBlackboard[] AttachedBoards => Volatile.Read(ref _boards);
 
         public LinkedChartContext()
         {
@@ -85,8 +88,9 @@ namespace Hevo.Charting.Linked
             if (port is null) throw new ArgumentNullException(nameof(port));
             var mirror = PortMirror.For(port);
             _mirrors.Add(mirror);
-            for (int i = 0; i < _boards.Count; i++)
-                mirror.SubscribeOn(_boards[i], _boards);
+            var boards = AttachedBoards;
+            for (int i = 0; i < boards.Length; i++)
+                mirror.SubscribeOn(boards[i], this);
         }
 
         /// <summary>
@@ -116,8 +120,9 @@ namespace Hevo.Charting.Linked
                     .MakeGenericMethod(dataType);
                 var mirror = (IPortMirror)portMirrorForMethod.Invoke(null, new object[] { port })!;
                 _mirrors.Add(mirror);
-                for (int i = 0; i < _boards.Count; i++)
-                    mirror.SubscribeOn(_boards[i], _boards);
+                var boards = AttachedBoards;
+                for (int i = 0; i < boards.Length; i++)
+                    mirror.SubscribeOn(boards[i], this);
             }
         }
 
@@ -127,12 +132,15 @@ namespace Hevo.Charting.Linked
         /// </summary>
         internal void AttachBoard(DataBlackboard board)
         {
-            if (board is null || _boards.Contains(board)) return;
-            _boards.Add(board);
+            if (board is null || Array.IndexOf(AttachedBoards, board) >= 0) return;
+            var next = new DataBlackboard[_boards.Length + 1];
+            Array.Copy(_boards, next, _boards.Length);
+            next[_boards.Length] = board;
+            Volatile.Write(ref _boards, next);
 
             // 关键:每个被镜像 port 各订阅一次。仅这几个 port 写入触发回调,
             // 数据列(Times/Closes/Volumes 等)写入零开销——不挂全局 OnPortUpdated。
-            foreach (var m in _mirrors) m.SubscribeOn(board, _boards);
+            foreach (var m in _mirrors) m.SubscribeOn(board, this);
         }
     }
 
@@ -142,45 +150,86 @@ namespace Hevo.Charting.Linked
 
     internal interface IPortMirror
     {
-        void SubscribeOn(DataBlackboard board, IReadOnlyList<DataBlackboard> all);
+        void SubscribeOn(DataBlackboard board, LinkedChartContext owner);
     }
 
     /// <summary>
-    /// 类型安全的 per-port 镜像器。当 origin board 写入 _port 时,把值
-    /// 同步写到 all 中其它 board。<see cref="DataBlackboard.WriteIfChanged{T}"/>
-    /// 在值相等时短路,自然防回环。
+    /// 类型安全的 per-port 镜像器:某块板写入 _port 后,把值同步到其它已挂载的板。
+    /// <para>
+    /// 跨板写不在源板锁内做:订阅回调跑在源板写锁内,若在这里拿别的板的写锁,
+    /// 两块板在两个线程上同时写(A→B 与 B→A)就互相等死。回调只记下最新值并向源板登记
+    /// <see cref="DataBlackboard.PostAfterUnlock"/>,等本线程彻底退出源板的锁后再逐板写。
+    /// </para>
+    /// <para>
+    /// 收敛:分发时持目标板写锁读"最新值"再写,所以无论几路并发写怎么交错,
+    /// 最后一次真实写入的值总会被它自己那次分发铺到所有板。镜像写引发的回调按线程标记识别为回声,不再分发。
+    /// </para>
     /// </summary>
-    internal sealed class PortMirror<T> : IPortMirror
+    internal sealed class PortMirror<T> : IPortMirror, IAfterUnlockAction
     {
         private readonly DataPort<T> _port;
+        private readonly object _gate = new();
+        private LinkedChartContext? _owner;
+        private T _latest = default!;
+        private bool _hasLatest;
+
         public PortMirror(DataPort<T> port) => _port = port;
 
-        public void SubscribeOn(DataBlackboard board, IReadOnlyList<DataBlackboard> all)
+        public void SubscribeOn(DataBlackboard board, LinkedChartContext owner)
         {
-            // 仅 _port 写入时回调,与该 board 上其它 port 写入完全无关。
-            board.Subscribe(_port, origin =>
-            {
-                // 调用栈:NotifyPort ← ForceWrite/EndTransaction(均持 origin 写锁)。
-                // ReaderWriterLockSlim 配置了 SupportsRecursion,同线程递归读 OK。
-                T value;
-                using (origin.AcquireReadLock()) value = origin.Read(_port);
+            _owner = owner;
+            board.Subscribe(_port, OnOriginWritten);
+        }
 
-                for (int i = 0; i < all.Count; i++)
+        // 调用栈:NotifyPort ← ForceWrite / EndTransaction,均持源板写锁
+        private void OnOriginWritten(DataBlackboard origin)
+        {
+            if (ReferenceEquals(PortMirror.Applying, this)) return;
+
+            var value = origin.Read(_port);
+            lock (_gate)
+            {
+                if (_hasLatest && EqualityComparer<T>.Default.Equals(_latest, value)) return;
+                _latest = value;
+                _hasLatest = true;
+            }
+            origin.PostAfterUnlock(this);
+        }
+
+        // 锁外:本线程已不持有源板的任何锁
+        void IAfterUnlockAction.Run(DataBlackboard origin)
+        {
+            var boards = _owner?.AttachedBoards;
+            if (boards == null) return;
+            for (int i = 0; i < boards.Length; i++)
+            {
+                var b = boards[i];
+                if (ReferenceEquals(b, origin) || b.IsDisposed) continue;
+                try
                 {
-                    var b = all[i];
-                    if (ReferenceEquals(b, origin)) continue;
                     using (b.AcquireWriteLock())
                     {
-                        b.WriteIfChanged(_port, value);
-                        //                ↑ 值相等就短路,自动断回环
+                        T value;
+                        lock (_gate) value = _latest;
+                        var prev = PortMirror.Applying;
+                        PortMirror.Applying = this;
+                        try { b.WriteIfChanged(_port, value); }
+                        finally { PortMirror.Applying = prev; }
                     }
                 }
-            });
+                catch (ObjectDisposedException)
+                {
+                    // 目标板在检查之后被释放:它已经退出联动,跳过
+                }
+            }
         }
     }
 
     internal static class PortMirror
     {
+        // 当前线程正在执行哪个镜像器的分发写入 —— 那次写触发的回调是回声,不再分发
+        [ThreadStatic] internal static object? Applying;
+
         public static IPortMirror For<T>(DataPort<T> port) => new PortMirror<T>(port);
     }
 }

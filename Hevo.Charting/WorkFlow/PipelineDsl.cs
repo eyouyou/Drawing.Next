@@ -34,8 +34,8 @@ namespace Hevo.Charting.WorkFlow
                     System.Diagnostics.Debug.WriteLine(
                         $"[PipelineWiring.DoOnDispose] pipe=#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(pipe)} board=#{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(pipe.Board)}");
 #endif
-                    pipe.Dispose();
-                    onDispose?.Invoke();
+                    try { pipe.Dispose(); }
+                    finally { onDispose?.Invoke(); }
                 });
         }
     }

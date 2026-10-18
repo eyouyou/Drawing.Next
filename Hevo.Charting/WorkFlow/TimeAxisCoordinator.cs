@@ -58,8 +58,14 @@ namespace Hevo.Charting.WorkFlow
 
             lock (_lock) _sources.Add(entry);
 
-            // 首次补发 + 订阅后续推送；任何变化 → Feed 脉冲触发 Merge
-            entry.Subscription = src.Stream.StartWith(src.GetSnapshot()).Subscribe(_ => TriggerPulse());
+            // 首次补发 + 订阅后续推送；任何变化 → 拷进条目缓存 → Feed 脉冲触发 Merge。
+            // 回调跑在该源 Publish 的锁内:快照就在这里拷,Merge 只读缓存、不再回头拿任何源的锁 ——
+            // 否则 A 持 A 锁合并时去拿 B 锁、B 持 B 锁合并时去拿 A 锁,两路并发 Publish 就互相等死。
+            entry.Subscription = src.Stream.StartWith(src.GetSnapshot()).Subscribe(snap =>
+            {
+                entry.Capture(snap);
+                TriggerPulse();
+            });
             return this;
         }
 
@@ -277,7 +283,13 @@ namespace Hevo.Charting.WorkFlow
         {
             public readonly TSource Src;
             private readonly EmitterSlot<TItem, TSource>[] _emitters;
+            // Merge 读 _snap;订阅回调写 _pending。两块缓冲在 TakeSnapshot 时交换,只增不减。
+            // Merge 由脉冲源串行驱动,交换出去的旧 _snap 不会还有人在读。
             private TItem[] _snap = Array.Empty<TItem>();
+            private TItem[] _pending = Array.Empty<TItem>();
+            private int _pendingCount;
+            private bool _pendingDirty;
+            private readonly object _gate = new();
 
             public SourceEntry(TSource src, List<(Func<TItem, TSource, double> Selector, DataPort<ReadOnlyMemory<double>> Port)> emitters)
             {
@@ -287,13 +299,32 @@ namespace Hevo.Charting.WorkFlow
                     _emitters[i] = new EmitterSlot<TItem, TSource>(emitters[i].Selector, emitters[i].Port);
             }
 
+            // 调用方在源锁内,快照内容稳定;这里只拿条目自己的锁(叶子锁,内部不再拿别的锁)
+            public void Capture(DataSnapshot<TItem> snapshot)
+            {
+                var span = snapshot.AsSpan();
+                lock (_gate)
+                {
+                    if (_pending.Length < span.Length) _pending = new TItem[span.Length];
+                    span.CopyTo(_pending);
+                    _pendingCount = span.Length;
+                    _pendingDirty = true;
+                }
+            }
+
             public override int TakeSnapshot()
             {
-                var s = Src.GetSnapshot();
-                var span = s.AsSpan();
-                Count = span.Length;
-                if (_snap.Length < Count) _snap = new TItem[Count];
-                span.CopyTo(_snap);
+                lock (_gate)
+                {
+                    if (_pendingDirty)
+                    {
+                        var t = _snap;
+                        _snap = _pending;
+                        _pending = t;
+                        Count = _pendingCount;
+                        _pendingDirty = false;
+                    }
+                }
                 return Count;
             }
 

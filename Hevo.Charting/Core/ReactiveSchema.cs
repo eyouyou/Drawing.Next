@@ -338,6 +338,16 @@ namespace Hevo.Charting.Core
             feature.InternalCompose(chart, ctx, this, flow);
         }
 
+        private static bool AnyOverridesDecorate(List<Feature> features)
+        {
+            for (int i = 0; i < features.Count; i++)
+            {
+                var m = features[i].GetType().GetMethod(nameof(ChartAspect.Decorate), new[] { typeof(System.Windows.UIElement) });
+                if (m != null && m.DeclaringType != typeof(ChartAspect)) return true;
+            }
+            return false;
+        }
+
         public void Transact(Action<IFeatureContext> action)
         {
             // 1. 如果引擎还没启动，直接执行闭包即可，等 ComposeAll 自然装配
@@ -417,7 +427,15 @@ namespace Hevo.Charting.Core
                     }
                 }
 
-                // 8. 【原子化重绘】：拨动环境时钟，通知底层引擎画面已过期，立即刷新！
+                // 8. 新增 Feature 装配期(ComposeCore / OnCompose)发布的 trait 还在 ctx 草稿里,
+                //    ctx 释放会把草稿清掉 —— 先提交给图层,跟 OnApplyTemplate 装配完后的那次 SubmitSync 对齐。
+                ctx.SubmitSync(_attachedChart.ActiveLayers);
+
+                // 9. 增删了带外壳 UI 的 Feature:Aspect 链已在 ComposeVisualLayers 里重建,外壳也要跟着重建
+                if (AnyOverridesDecorate(removedFeatures) || AnyOverridesDecorate(addedFeatures))
+                    _attachedChart.RefreshDecoration();
+
+                // 10. 【原子化重绘】：拨动环境时钟，通知底层引擎画面已过期，立即刷新！
                 InvalidateEnvironment();
                 _attachedChart.RequestUpdate(_ => { });
             }
