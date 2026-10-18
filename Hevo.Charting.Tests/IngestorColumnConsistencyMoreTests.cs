@@ -133,8 +133,11 @@ namespace Hevo.Charting.Tests
             }
         }
 
-        /// <summary>跑 1.5 秒:后台 publish(gen, 长度 1000/1500 交替),UI 线程连续跑帧。</summary>
-        private static void Race(Func<RaceSchema2> create, Action<double, int> publish)
+        /// <summary>
+        /// 至少跑 1.5 秒:后台 publish(gen, 长度 1000/1500 交替),UI 线程连续跑帧。
+        /// 读者都没扫过就继续跑(异步 Compute 在 CI 的 2 核机器上可能 1.5s 内一次都排不上),最多 15s。
+        /// </summary>
+        private static void Race(Func<RaceSchema2> create, Action<double, int> publish, params ScanStats[] readers)
         {
             IncrementalTestKit.RunOnSta(() =>
             {
@@ -153,8 +156,10 @@ namespace Hevo.Charting.Tests
                     while (!Volatile.Read(ref stop)) { publish(gen, (int)gen % 2 == 0 ? 1000 : 1500); gen++; }
                 }) { IsBackground = true };
                 writer.Start();
-                var until = DateTime.UtcNow.AddMilliseconds(1500);
-                while (DateTime.UtcNow < until) cell.RunFrameNow(PlotMode.Sync);
+                var start = DateTime.UtcNow;
+                while (DateTime.UtcNow - start < IngestorColumnConsistencyTests.MinRace
+                       || (!IngestorColumnConsistencyTests.ReadersRan(readers) && DateTime.UtcNow - start < IngestorColumnConsistencyTests.MaxRace))
+                    cell.RunFrameNow(PlotMode.Sync);
                 Volatile.Write(ref stop, true);
                 writer.Join();
                 Thread.Sleep(200);
@@ -180,7 +185,7 @@ namespace Hevo.Charting.Tests
             Func<RaceSchema2> schema = () => new RaceSchema2(
                 chart => source.Pipe().LinkStream(cfg => cfg.Map(port, 1.0, (x, _, k) => x.Gen * k)).BindTo(chart),
                 new Feature[] { new SkipScanFeature(port, layer, 0), ScanCompute(port, compute, "state", 0) });
-            Race(schema, source.PublishGen);
+            Race(schema, source.PublishGen, layer, compute);
             AssertClean((layer, "图层/FastStateMap"), (compute, "Compute/FastStateMap"));
         }
 
@@ -193,7 +198,7 @@ namespace Hevo.Charting.Tests
             Func<RaceSchema2> schema = () => new RaceSchema2(
                 chart => source.Pipe().LinkStream(cfg => cfg.MapWindow(port, Period, (x, _) => x.Gen, (cur, _) => cur)).BindTo(chart),
                 new Feature[] { new SkipScanFeature(port, layer, Period), ScanCompute(port, compute, "window", Period) });
-            Race(schema, source.PublishGen);
+            Race(schema, source.PublishGen, layer, compute);
             AssertClean((layer, "图层/WindowMap"), (compute, "Compute/WindowMap"));
         }
 
@@ -206,7 +211,7 @@ namespace Hevo.Charting.Tests
             Func<RaceSchema2> schema = () => new RaceSchema2(
                 chart => source.Pipe().LinkStream(cfg => cfg.ApplyTransform(port, (x, _) => x.Gen, new IdentityTransform())).BindTo(chart),
                 new Feature[] { new SkipScanFeature(port, layer, 0), ScanCompute(port, compute, "transform", 0) });
-            Race(schema, source.PublishGen);
+            Race(schema, source.PublishGen, layer, compute);
             AssertClean((layer, "图层/SequenceTransform"), (compute, "Compute/SequenceTransform"));
         }
 
@@ -221,7 +226,7 @@ namespace Hevo.Charting.Tests
             Func<RaceSchema2> schema = () => new RaceSchema2(
                 chart => new TimeAxisCoordinator(timePort).AddSource(source, (Func<TimedItem, double>)(x => x.Gen), valuePort).BindTo(chart),
                 new Feature[] { new SkipScanFeature(valuePort, layer, 0), ScanCompute(valuePort, compute, "coord", 0), new TimeScanFeature(timePort, time) });
-            Race(schema, source.PublishGen);
+            Race(schema, source.PublishGen, layer, compute);
             AssertClean((layer, "图层/TimeAxisCoordinator"), (compute, "Compute/TimeAxisCoordinator"));
             Assert.True(time.Scans > 0, "时间列读者没跑起来");
             Assert.True(time.Bad == 0, $"时间列读到不完整的数据 {time.Bad}/{time.Scans}。例:{time.First}");
