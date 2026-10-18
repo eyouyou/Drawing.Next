@@ -51,6 +51,12 @@ namespace Hevo.Charting.WorkFlow
         private IDisposable? _pipelineSub;
         private bool _disposed;
 
+        // 所有还没结局的 await 请求。Suspend / Dispose 时统一取消 ——
+        // 管线拆掉后 FetchLatest 不再往下游发结果,不在这里收尾的请求 Task 永远不完成。
+        // _gate 同时守 _pipelineSub / _disposed,保证"判断能否入队 + 登记"与 Suspend 互斥。
+        private readonly object _gate = new();
+        private readonly HashSet<TaskCompletionSource<TResult>> _inFlight = new();
+
         public RequestBus(Func<TRequest, CancellationToken, Task<TResult>> handler)
         {
             _handler = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -59,6 +65,8 @@ namespace Hevo.Charting.WorkFlow
 
         private IDisposable BuildPipeline()
         {
+            // 结局在 fetcher 里直接定:FetchLatest 对被顶掉 / 被拆管线的那次调用不往下游发,
+            // 留到 Subscribe 里再 SetResult 的话,这些请求就没人收尾。
             return _trigger
                 .FetchLatest(async (env, busToken) =>
                 {
@@ -66,24 +74,27 @@ namespace Hevo.Charting.WorkFlow
                     {
                         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(busToken, env.Token);
                         var result = await _handler(env.Request, linkedCts.Token).ConfigureAwait(false);
-                        return (Env: env, Result: result, Error: (Exception?)null);
+                        // 被新请求顶掉(或管线已拆):结果作废,不让晚到的结果写穿调用方业务态
+                        if (busToken.IsCancellationRequested) env.Tcs?.TrySetCanceled(busToken);
+                        // 丧尸拦截:user 已取消时不让 TCS 误置 Success
+                        else if (env.Token.IsCancellationRequested) env.Tcs?.TrySetCanceled(env.Token);
+                        else env.Tcs?.TrySetResult(result);
+                    }
+                    catch (OperationCanceledException) when (busToken.IsCancellationRequested || env.Token.IsCancellationRequested)
+                    {
+                        env.Tcs?.TrySetCanceled(env.Token.IsCancellationRequested ? env.Token : busToken);
                     }
                     catch (Exception ex)
                     {
-                        return (Env: env, Result: default(TResult)!, Error: ex);
+                        env.Tcs?.TrySetException(ex);
                     }
+                    return Unit.Default;
                 })
-                .Subscribe(res =>
-                {
-                    if (res.Error != null) { res.Env.Tcs?.TrySetException(res.Error); return; }
-                    // 丧尸拦截:user 已取消时不让 TCS 误置 Success
-                    if (res.Env.Token.IsCancellationRequested) { res.Env.Tcs?.TrySetCanceled(res.Env.Token); return; }
-                    res.Env.Tcs?.TrySetResult(res.Result);
-                });
+                .Subscribe(_ => { });
         }
 
         /// <summary>fire-and-forget 入队。失败异常被吞,只在 await 路径回传 ——
-        /// 心跳类调用方典型 try/catch 包外层 log 即可。</summary>
+        /// 心跳类调用方典型 try/catch 包外层 log 即可。Suspend 期间静默丢弃。</summary>
         public void Push(TRequest request)
         {
             if (_disposed) return;
@@ -93,39 +104,81 @@ namespace Hevo.Charting.WorkFlow
         /// <summary>
         /// 可 await 的请求。Task 在 handler 完成时 setresult;handler 抛异常 setexception;
         /// <paramref name="token"/> 取消 setcanceled(handler token 也会被 linked-cancel)。
+        /// 被后来的请求顶掉、Suspend 期间发出、或 Suspend / Dispose 时还在途,都以取消结束。
         /// </summary>
         public async Task<TResult> RequestAsync(TRequest request, CancellationToken token = default)
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(RequestBus<TRequest, TResult>));
-
             var tcs = new TaskCompletionSource<TResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-            await using var registration = token.CanBeCanceled
-                ? token.Register(() => tcs.TrySetCanceled(token))
-                : default;
+            lock (_gate)
+            {
+                if (_disposed) throw new ObjectDisposedException(nameof(RequestBus<TRequest, TResult>));
+                if (_pipelineSub == null) tcs.TrySetCanceled();
+                else _inFlight.Add(tcs);
+            }
+            if (tcs.Task.IsCompleted) return await tcs.Task.ConfigureAwait(false);
 
-            _trigger.Push(new Envelope(request, tcs, token));
-            return await tcs.Task.ConfigureAwait(false);
+            try
+            {
+                await using var registration = token.CanBeCanceled
+                    ? token.Register(() => tcs.TrySetCanceled(token))
+                    : default;
+
+                _trigger.Push(new Envelope(request, tcs, token));
+                return await tcs.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_gate) _inFlight.Remove(tcs);
+            }
         }
 
         // 重建管线 —— DataSource Suspend/Resume 可调,跟 ReactiveDataSource 5 参版的 _pipelineSub 同款语义。
         public void Suspend()
         {
-            _pipelineSub?.Dispose();
-            _pipelineSub = null;
+            IDisposable? sub;
+            lock (_gate)
+            {
+                sub = _pipelineSub;
+                _pipelineSub = null;
+            }
+            sub?.Dispose();
+            CancelInFlight();
         }
 
         public void Resume()
         {
-            if (_disposed) return;
-            _pipelineSub ??= BuildPipeline();
+            lock (_gate)
+            {
+                if (_disposed) return;
+                _pipelineSub ??= BuildPipeline();
+            }
         }
 
         public void Dispose()
         {
-            if (_disposed) return;
-            _disposed = true;
-            _pipelineSub?.Dispose();
-            _pipelineSub = null;
+            IDisposable? sub;
+            lock (_gate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                sub = _pipelineSub;
+                _pipelineSub = null;
+            }
+            sub?.Dispose();
+            CancelInFlight();
+        }
+
+        private void CancelInFlight()
+        {
+            TaskCompletionSource<TResult>[] pending;
+            lock (_gate)
+            {
+                if (_inFlight.Count == 0) return;
+                pending = new TaskCompletionSource<TResult>[_inFlight.Count];
+                _inFlight.CopyTo(pending);
+                _inFlight.Clear();
+            }
+            for (int i = 0; i < pending.Length; i++) pending[i].TrySetCanceled();
         }
     }
 }

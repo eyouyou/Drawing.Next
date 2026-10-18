@@ -168,12 +168,17 @@ namespace Hevo.Charting.Core
         /// Feature 装配入口。<see cref="ReactiveSchema.BuildAndActivatePipeline"/> 按 Phase 序逐个调本方法,
         /// 把 mainFlow 灌进每个 Feature。Feature 在 OnCompose 里调 <c>flow.Watch(...)</c> 订阅 port 变化。
         /// </summary>
+        // 本次装配周期的存活令牌,见 FeatureLifetime
+        private FeatureLifetime? _lifetime;
+
         internal IRenderFlow<DataBlackboard> InternalCompose(ChartCell chart, RenderContext ctx, ReactiveSchema schema, IRenderFlow<DataBlackboard> flow)
         {
             // AttachToHost 已由 ReactiveSchema.Add(chart 就位时)/ InitializeRegistry(补 ctor 阶段 add)
             // 调用,本方法只负责 ComposeCore + OnCompose。Chart/Schema 字段在此之前必非 null。
             ComposeCore(chart, ctx);
-            using var composeScope = FeatureComposeScope.Enter(flow);
+            _lifetime?.End();
+            _lifetime = new FeatureLifetime();
+            using var composeScope = FeatureComposeScope.Enter(flow, _lifetime);
             OnCompose(chart, ctx, flow);
             return FeatureComposeScope.Current!.Build();
         }
@@ -299,6 +304,9 @@ namespace Hevo.Charting.Core
             _managedLayers.Clear();
 
             // 2. 💥 彻底斩断流式订阅,防止内存泄漏!
+            //    装配期 Watch 串在 schema 主管线里摘不掉,先关掉本周期令牌让它们不再执行
+            _lifetime?.End();
+            _lifetime = null;
             foreach (var d in _disposables)
             {
                 d.Dispose();

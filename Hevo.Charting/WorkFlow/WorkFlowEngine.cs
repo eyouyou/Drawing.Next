@@ -180,8 +180,15 @@ namespace Hevo.Charting
             {
                 if (_isDisposed) return;
                 _isDisposed = true;
-                foreach (var d in _disposables) d.Dispose();
+                // 一个抛异常不能让后面的清理被跳过(订阅泄漏、pipe 不释放);全部释放完再把第一个异常抛出去
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo? first = null;
+                foreach (var d in _disposables)
+                {
+                    try { d.Dispose(); }
+                    catch (Exception ex) { first ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex); }
+                }
                 _disposables.Clear();
+                first?.Throw();
             }
         }
     }

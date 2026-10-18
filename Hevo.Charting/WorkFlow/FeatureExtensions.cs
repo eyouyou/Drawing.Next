@@ -11,17 +11,21 @@ namespace Hevo.Charting.WorkFlow
         private readonly IRenderFlow<DataBlackboard> _baseFlow;
         private readonly List<Func<IRenderFlow<DataBlackboard>, IRenderFlow<DataBlackboard>>> _transforms = new();
 
-        private FeatureComposeScope(IRenderFlow<DataBlackboard> baseFlow)
+        private FeatureComposeScope(IRenderFlow<DataBlackboard> baseFlow, FeatureLifetime? lifetime)
         {
             _baseFlow = baseFlow;
+            Lifetime = lifetime;
         }
 
         public static FeatureComposeScope? Current => CurrentSlot.Value;
 
-        public static IDisposable Enter(IRenderFlow<DataBlackboard> baseFlow)
+        /// <summary>正在装配的 Feature 本次装配周期的存活令牌;不在 Feature 装配内时为 null。</summary>
+        public FeatureLifetime? Lifetime { get; }
+
+        public static IDisposable Enter(IRenderFlow<DataBlackboard> baseFlow, FeatureLifetime? lifetime = null)
         {
             var previous = CurrentSlot.Value;
-            CurrentSlot.Value = new FeatureComposeScope(baseFlow);
+            CurrentSlot.Value = new FeatureComposeScope(baseFlow, lifetime);
             return new DisposableAction(() => CurrentSlot.Value = previous);
         }
 
@@ -41,8 +45,28 @@ namespace Hevo.Charting.WorkFlow
         }
     }
 
+    /// <summary>
+    /// Feature 一个装配周期(InternalCompose → Decompose)的存活令牌。
+    /// 装配期 Watch 是串进 schema 主管线的变换,Decompose 时摘不下来;回调经令牌放行,
+    /// 周期结束后即使管线还在推送也不再执行。同一实例再次装配拿新令牌,旧链上的回调保持关闭。
+    /// </summary>
+    internal sealed class FeatureLifetime
+    {
+        private volatile bool _ended;
+        public bool IsAlive => !_ended;
+        public void End() => _ended = true;
+    }
+
     public static class FeatureExtensions
     {
+        // 把副作用绑到正在装配的 Feature 的存活令牌上(不在 Feature 装配内就原样返回)
+        private static Action<DataBlackboard> BindToComposingFeature(Action<DataBlackboard> sideEffect)
+        {
+            var life = FeatureComposeScope.Current?.Lifetime;
+            if (life == null) return sideEffect;
+            return b => { if (life.IsAlive) sideEffect(b); };
+        }
+
         // ==========================================
         // ⚡ 算子 1：同步 Watch (排版、切片专用)
         // 语义：在当前线程立刻执行，绝不切后台！
@@ -170,6 +194,7 @@ namespace Hevo.Charting.WorkFlow
             object[] listenPorts,
             Action<DataBlackboard> sideEffect)
         {
+            sideEffect = BindToComposingFeature(sideEffect);
             IWorkflow<DataBlackboard> safeBaseFlow = ((IWorkflow<DataBlackboard>)flow).Watch(listenPorts, sideEffect);
             var wrapped = flow.Wrap(safeBaseFlow);
             FeatureComposeScope.Current?.AddTransform(current => current.Wrap(((IWorkflow<DataBlackboard>)current).Watch(listenPorts, sideEffect)));
@@ -184,6 +209,7 @@ namespace Hevo.Charting.WorkFlow
             object[] listenPorts,
             Action<DataBlackboard> sideEffect)
         {
+            sideEffect = BindToComposingFeature(sideEffect);
             IWorkflow<DataBlackboard> safeBaseFlow = ((IWorkflow<DataBlackboard>)flow).WatchAsync(listenPorts, sideEffect);
             var wrapped = flow.Wrap(safeBaseFlow);
             FeatureComposeScope.Current?.AddTransform(current => current.Wrap(((IWorkflow<DataBlackboard>)current).WatchAsync(listenPorts, sideEffect)));
@@ -272,6 +298,7 @@ namespace Hevo.Charting.WorkFlow
             object[] requiredPorts,
             Action<DataBlackboard> sideEffect)
         {
+            sideEffect = BindToComposingFeature(sideEffect);
             IWorkflow<DataBlackboard> baseFlow = ((IWorkflow<DataBlackboard>)flow).WatchAsync(requiredPorts, b =>
             {
                 for (int i = 0; i < requiredPorts.Length; i++)

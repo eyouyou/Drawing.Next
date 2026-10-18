@@ -616,6 +616,29 @@ BDN 微基准不经过 WPF 渲染线程,跟远程桌面 / RenderTier 无关。�
 - 整帧 OneDirty vs AllDirty 在 128 层时差 24×,这是增量机制在核心路径上的收益上限。
 - ProjectAll 8 Feature / AllPorts 误差偏大(±781 ns),要用这个数时加大 `--iterationCount` 重测。
 
+## 并发与生命周期修复前后 ([ConcurrencyPathBenchmarks](ConcurrencyPathBenchmarks.cs))
+
+修复(f322ecc..5b6be19 及其后的镜像分配优化)改到的热路径:联动镜像、黑板事务 commit、TimeAxisCoordinator 合并、RequestBus。
+前 = `2c229e7`,后 = 本次提交;两边跑同一份基准代码(只用修复前后都有的 API),同机先后跑,`--job short`,Release,本机直显(非远程桌面)。
+
+```bash
+dotnet run -c Release -- --filter "*PortMirror*" "*TimeAxisMerge*" "*RequestBusRoundTrip*" "*BlackboardTransaction*" --job short
+```
+
+| 基准 | 前 | 后 | 说明 |
+|---|---:|---:|---|
+| PortMirror / MirroredWrite,2 板 | 348 ns (96 B) | 291 ns (96 B) | 镜像改在源板锁外分发;只登记一项时不分配 |
+| PortMirror / MirroredWrite,4 板 | 935 ns (192 B) | 544 ns (192 B) | 不再在源板写锁内逐板拿锁 |
+| PortMirror / UnmirroredWrite | 86 ns (48 B) | 88 ns (48 B) | 锁作用域退出多一次空列表判断,噪声内 |
+| BlackboardTransaction / Changed,1 / 8 / 32 端口 | 123 / 803 / 3,460 ns | 126 / 826 / 3,556 ns | 分配一致(48 / 384 / 1,536 B);差异 ≤3%,在误差内 |
+| BlackboardTransaction / ReadUnderLock,1 / 8 / 32 | 13.7 / 32.0 / 107 ns | 13.6 / 31.4 / 109 ns | 持平 |
+| TimeAxisMerge / TickAndMerge,2 千根 | 22.3 µs (62.8 KB) | 19.9 µs (288 B) | 回调里缓存快照,合并不再对每路源 GetSnapshot 整列拷贝 |
+| TimeAxisMerge / TickAndMerge,2 万根 | 295 µs (625 KB,每次进 LOH 触发 Gen2) | 227 µs (288 B,无 GC) | 同上 |
+| RequestBusRoundTrip / RequestAsync | 103 ns (488 B) | 124 ns (384 B) | **慢约 21 ns**:在途请求登记(一次加锁 + HashSet 增删),换来 Suspend / Dispose 能取消在途请求。RequestBus 每次对应一次数据拉取(网络 / IO 级),不在帧路径上 |
+
+整帧 `--render-probe`(300 帧 × 5 轮,2000 根 × 1 图,增量默认模式)前后:Hover / Pan / Zoom / Tick / Append / Resize 帧耗时中位
+0.025→0.025、0.048→0.044、0.097→0.091、0.002→0.002、0.047→0.046、0.060→0.058 ms,每帧分配逐字节一致;`--ci` 计数门槛通过。
+
 ## CI 回归门槛 ([.github/workflows/perf-regression.yml](../.github/workflows/perf-regression.yml))
 
 每次 push main / PR:构建 → 单测 → `--render-probe --ci --baseline=render-probe-baseline.json` → 微基准 Dry 冒烟。
