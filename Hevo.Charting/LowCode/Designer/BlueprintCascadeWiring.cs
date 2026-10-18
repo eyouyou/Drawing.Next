@@ -50,7 +50,9 @@ namespace Hevo.Charting.LowCode.Designer
 
             if (blueprint.Cascades.Count == 0) return Array.Empty<IDisposable>();
 
-            var disposables = new List<IDisposable>(blueprint.Cascades.Count);
+            // 先把每条 cascade 校验 + 解析完,再统一订阅:中途哪条配错抛出时,前面的还没订阅,不会留下
+            // 调用方拿不到句柄、永远退不掉的订阅。
+            var prepared = new List<(object fromDs, object toDs, Delegate driver, CascadeEdge cascade)>(blueprint.Cascades.Count);
             foreach (var cascade in blueprint.Cascades)
             {
                 if (string.IsNullOrEmpty(cascade.FromDataSourceId) || string.IsNullOrEmpty(cascade.ToDataSourceId))
@@ -87,8 +89,19 @@ namespace Hevo.Charting.LowCode.Designer
                 // 装配期类型校验 —— driver 返回类型必须匹配下游 TContext。
                 ValidateDriverReturnType(driver, fromDs, toDs, cascade);
 
-                var sub = SubscribeStreamToContext(fromDs, toDs, driver, cascade);
-                disposables.Add(sub);
+                prepared.Add((fromDs, toDs, driver, cascade));
+            }
+
+            var disposables = new List<IDisposable>(prepared.Count);
+            try
+            {
+                foreach (var p in prepared)
+                    disposables.Add(SubscribeStreamToContext(p.fromDs, p.toDs, p.driver, p.cascade));
+            }
+            catch
+            {
+                foreach (var d in disposables) d.Dispose();
+                throw;
             }
             return disposables;
         }

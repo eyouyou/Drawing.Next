@@ -134,6 +134,33 @@ namespace Hevo.Charting.Tests
         }
 
         [Fact]
+        public async Task WireCascades_LaterCascadeInvalid_EarlierSubscriptionDoesNotLeak()
+        {
+            // 第二条 cascade 校验失败时,第一条已经订阅上了;调用方拿不到返回值,没法 Dispose → 泄漏且继续推下游。
+            var upstream = new UpstreamDs();
+            var downstream = new DownstreamDs();
+            var downstream2 = new DownstreamDs();
+
+            var registry = new BlueprintHandlerRegistry().AutoDiscoverStatic(typeof(CascadeDrivers));
+            var bp = new ChartBlueprint
+            {
+                Cascades =
+                {
+                    new CascadeEdge { FromDataSourceId = "up", ToDataSourceId = "down",  ContextDriver = "upstream_to_downstream", Trigger = "Stream" },
+                    new CascadeEdge { FromDataSourceId = "up", ToDataSourceId = "down2", ContextDriver = "wrong_return_type",      Trigger = "Stream" },
+                },
+            };
+            using var scope = new ScopeContext();
+            var instances = new Dictionary<string, object> { ["up"] = upstream, ["down"] = downstream, ["down2"] = downstream2 };
+
+            Assert.Throws<InvalidOperationException>(() => BlueprintCascadeWiring.WireCascades(bp, instances, registry, scope));
+
+            await upstream.LoadAsync(new UpstreamContext("HELLO"), CancellationToken.None);
+            await Task.Delay(200);
+            Assert.Empty(downstream.SwitchedContexts);
+        }
+
+        [Fact]
         public void WireCascades_DriverReturnTypeMismatch_FailsAtAssembly()
         {
             var upstream = new UpstreamDs();

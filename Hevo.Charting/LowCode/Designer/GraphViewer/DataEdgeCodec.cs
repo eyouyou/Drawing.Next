@@ -75,8 +75,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         ///         消费 —— 否则 init=null! 的端口在 OnCompose 走到 WriteIfChanged(null,...) 触发 NRE 静默吞,
         ///         整个 cell 黑屏。</item>
         ///   <item><b>InputPort</b>:
-        ///         (a) 非数组 + 有 BindingId → verbatim 写出(scope-qualified <c>dashboard:*</c> / <c>cell:*</c>
-        ///             round-trip 保留);
+        ///         (a) 非数组 + 有 BindingId 且没有指向别处的入边 → verbatim 写出(scope-qualified
+        ///             <c>dashboard:*</c> / <c>cell:*</c> round-trip 保留);
         ///         (b) 否则从 state.Edges 入边反推 globalId(<see cref="EdgeKind.Cascade"/> + Upstreams 端口
         ///             由其他 codec 认领,这里 filter 掉)。
         ///         单端口写 string,扇入数组写 <c>List&lt;string&gt;</c>。</item>
@@ -107,22 +107,34 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
                 foreach (var inputPort in n.InputPorts)
                 {
-                    // (a) 非数组 + 有显式 BindingId → 直接 verbatim
+                    edgesByTargetPort.TryGetValue(inputPort.Id, out var incomingEdges);
+                    var ids = incomingEdges == null
+                        ? new List<string>()
+                        : incomingEdges.Select(edge =>
+                        {
+                            var key = (edge.FromNodeId, edge.FromPortId);
+                            return ctx.OutputPortGlobalId.TryGetValue(key, out var gid)
+                                ? gid
+                                : $"{edge.FromNodeId}_{edge.FromPortId}";
+                        }).Distinct().ToList();
+                    // 扇入端口上画布外的引用(载入时解析不到源头)跟入边一起写出。
+                    if (inputPort.IsArray && inputPort.ExternalBindingIds != null)
+                        ids = ids.Concat(inputPort.ExternalBindingIds).Distinct().ToList();
+
+                    // (a) 非数组 + 有显式 BindingId:没有入边(画布外引用)或入边仍指向它时 verbatim 写出;
+                    //     入边换了上游就以边为准 —— 画布上看到的线才是用户意图。
                     if (!inputPort.IsArray && !string.IsNullOrEmpty(inputPort.BindingId))
                     {
-                        fm.InputBindings[inputPort.Id] = inputPort.BindingId!;
-                        continue;
+                        var bound = BindingIdMigrator.Migrate(inputPort.BindingId!);
+                        if (ids.Count == 0 || ids.Any(id => BindingIdMigrator.Migrate(id) == bound))
+                        {
+                            fm.InputBindings[inputPort.Id] = inputPort.BindingId!;
+                            continue;
+                        }
                     }
 
                     // (b) 入边反推
-                    if (!edgesByTargetPort.TryGetValue(inputPort.Id, out var incomingEdges)) continue;
-                    var ids = incomingEdges.Select(edge =>
-                    {
-                        var key = (edge.FromNodeId, edge.FromPortId);
-                        return ctx.OutputPortGlobalId.TryGetValue(key, out var gid)
-                            ? gid
-                            : $"{edge.FromNodeId}_{edge.FromPortId}";
-                    }).Distinct().ToList();
+                    if (ids.Count == 0) continue;
 
                     // 单端口 string vs 扇入数组 List<string>:PortBindingValue.ExtractSingle/List 反序列化都能识别。
                     fm.InputBindings[inputPort.Id] = inputPort.IsArray

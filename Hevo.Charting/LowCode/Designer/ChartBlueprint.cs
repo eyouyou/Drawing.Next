@@ -27,6 +27,13 @@ namespace Hevo.Charting.LowCode.Designer
     public class ChartBlueprint
     {
         /// <summary>
+        /// JSON 里本模型不认识的字段(旧格式字段、拼错的字段、未来版本的字段)。接住而不是丢掉:
+        /// <see cref="BlueprintLegacyMigrator"/> 据此迁移旧字段或报诊断,再序列化时原样写回。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
+
+        /// <summary>
         /// 多数据源协议(Phase 4 节点化形态) —— 蓝图内 DS 集合,跟 <see cref="Features"/> 平级,
         /// 不再有"主从 / 单 DS 中心"概念。Cascade / TriggerBinding 通过 <see cref="DataSourceModel.Id"/> 引用。
         /// <para>
@@ -86,6 +93,13 @@ namespace Hevo.Charting.LowCode.Designer
     public class TriggerModel
     {
         /// <summary>
+        /// JSON 里本模型不认识的字段(旧格式字段、拼错的字段、未来版本的字段)。接住而不是丢掉:
+        /// <see cref="BlueprintLegacyMigrator"/> 据此迁移旧字段或报诊断,再序列化时原样写回。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
+
+        /// <summary>
         /// Phase 3 蓝图内唯一 Id —— <see cref="TriggerBinding.TriggerId"/> 通过此字段引用。
         /// 留空时 framework 用复合 Id "trigger:{IntervalSeconds}s" 兜底,但同蓝图多 trigger 时
         /// 必须显式 set 避免冲突。
@@ -128,6 +142,13 @@ namespace Hevo.Charting.LowCode.Designer
     /// </summary>
     public sealed class TriggerBinding
     {
+        /// <summary>
+        /// JSON 里本模型不认识的字段(旧格式字段、拼错的字段、未来版本的字段)。接住而不是丢掉:
+        /// <see cref="BlueprintLegacyMigrator"/> 据此迁移旧字段或报诊断,再序列化时原样写回。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
+
         /// <summary>对应 <see cref="TriggerModel.Id"/>。</summary>
         public string TriggerId { get; set; } = "";
 
@@ -157,6 +178,13 @@ namespace Hevo.Charting.LowCode.Designer
     /// </summary>
     public class DataSourceModel
     {
+        /// <summary>
+        /// JSON 里本模型不认识的字段(旧格式字段、拼错的字段、未来版本的字段)。接住而不是丢掉:
+        /// <see cref="BlueprintLegacyMigrator"/> 据此迁移旧字段或报诊断,再序列化时原样写回。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
+
         public string Id { get; set; } = string.Empty;
         public string TypeName { get; set; } = string.Empty;
 
@@ -247,6 +275,13 @@ namespace Hevo.Charting.LowCode.Designer
     /// </summary>
     public sealed class CascadeEdge
     {
+        /// <summary>
+        /// JSON 里本模型不认识的字段(旧格式字段、拼错的字段、未来版本的字段)。接住而不是丢掉:
+        /// <see cref="BlueprintLegacyMigrator"/> 据此迁移旧字段或报诊断,再序列化时原样写回。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
+
         /// <summary>上游 DS 的 <see cref="DataSourceModel.Id"/>。</summary>
         public string FromDataSourceId { get; set; } = string.Empty;
 
@@ -275,6 +310,13 @@ namespace Hevo.Charting.LowCode.Designer
 
     public class StyleModel
     {
+        /// <summary>
+        /// JSON 里本模型不认识的字段(旧格式字段、拼错的字段、未来版本的字段)。接住而不是丢掉:
+        /// <see cref="BlueprintLegacyMigrator"/> 据此迁移旧字段或报诊断,再序列化时原样写回。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
+
         public string TraitTypeName { get; set; } = string.Empty;
 
         /// <summary>
@@ -290,6 +332,13 @@ namespace Hevo.Charting.LowCode.Designer
 
     public class FeatureModel
     {
+        /// <summary>
+        /// JSON 里本模型不认识的字段(旧格式字段、拼错的字段、未来版本的字段)。接住而不是丢掉:
+        /// <see cref="BlueprintLegacyMigrator"/> 据此迁移旧字段或报诊断,再序列化时原样写回。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
+
         public string TypeName { get; set; } = string.Empty;
 
         // 1. 普通属性配置 (如 LineColor, Period 等)
@@ -399,6 +448,21 @@ namespace Hevo.Charting.LowCode.Designer
             object dataSourceInstance,
             IWorkflow<DataSnapshot<TItem>> sourceStream,
             BlueprintHandlerRegistry? handlers = null)
+            : this(blueprint, dataSourceInstance, sourceStream, handlers, renderLeafModel: null)
+        {
+        }
+
+        /// <param name="renderLeafModel">
+        /// 渲染叶对应的 <see cref="DataSourceModel"/>。蓝图装配由 BlueprintRunner 传入它选中的那一个;
+        /// 按运行时类型反查在 Composite(运行时名带泛型后缀)和同类型多数据源时会查空或查错。
+        /// null 时退回反查,只用于手工 new 的单数据源场景。
+        /// </param>
+        public DynamicChartSchema(
+            ChartBlueprint blueprint,
+            object dataSourceInstance,
+            IWorkflow<DataSnapshot<TItem>> sourceStream,
+            BlueprintHandlerRegistry? handlers,
+            DataSourceModel? renderLeafModel)
         {
             _blueprint = blueprint ?? throw new ArgumentNullException(nameof(blueprint));
             _dataSourceInstance = dataSourceInstance ?? throw new ArgumentNullException(nameof(dataSourceInstance));
@@ -418,7 +482,7 @@ namespace Hevo.Charting.LowCode.Designer
             // Phase 4:从 DataSources 拿"render-leaf DS 的 model"(类型匹配 _dataSourceInstance),
             // 多 DS 蓝图(Cascade)里只有渲染那个 DS 的 mappings/properties 进 schema;
             // 上游 stocklist 之类的 DS 由 canvas 管,不进 schema。
-            var renderLeafModel = ResolveRenderLeafModel();
+            renderLeafModel ??= ResolveRenderLeafModel();
             if (renderLeafModel?.Properties is { Count: > 0 } props)
             {
                 SmartActivator.InjectProperties(_dataSourceInstance, props);
@@ -737,25 +801,12 @@ namespace Hevo.Charting.LowCode.Designer
         {
             if (props == null || props.Count == 0) return new Dictionary<string, object?>();
             var resolved = new Dictionary<string, object?>(props);
+            // 哪些属性算 handler 引用(string 或 JSON 字符串、目标是 Delegate 属性)由 BlueprintHandlerReferences 统一判断,
+            // DryRun 用同一函数,两边对同一份蓝图不会给出不同结论。
             foreach (var kv in props)
             {
-                // JSON 持久化路径下 STJ 默认对 Dictionary<string, object?> 不展开 JSON 字符串成 string —— 拿到的是
-                // JsonElement(Kind=String)。这里得把两种形态都规整成 string,否则 silent skip 会让 Delegate 字段
-                // 上的字符串原样溜进 SmartActivator → setter "Unable to cast 'System.String' to 'System.Delegate'"
-                // → handler 永远 null → flow.Watch 早退 → 蓝图编辑器路径下从 JSON 加载的图全黑屏。
-                string? handlerName = kv.Value switch
-                {
-                    string s => s,
-                    System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
-                        => je.GetString(),
-                    _ => null,
-                };
-                if (string.IsNullOrEmpty(handlerName)) continue;
-                var pi = featureType.GetProperty(kv.Key,
-                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (pi == null) continue;
-                if (!typeof(Delegate).IsAssignableFrom(pi.PropertyType)) continue;
-
+                if (!BlueprintHandlerReferences.TryGet(featureType, kv.Key, kv.Value, out var handlerName, out var pi)) continue;
+                var key = kv.Key;
                 // 该属性是 Delegate 类型且 Properties 里给的是字符串 → 必走 handler 注册表查表。
                 // 三种失败场景全是配置错误(蓝图作者引用了不存在/类型不对的 handler),fail fast。
                 // 之前 silent remove 让 PlotFeature.Indicator / ComputeFeature.Compute 留 null,
@@ -766,10 +817,10 @@ namespace Hevo.Charting.LowCode.Designer
 #if DEBUG
                     DevTools.TracerRegistry.Get(this)?.RecordKeyEvent(
                         DevTools.TopologyTracer.EventKind.HandlerMissing, handlerName,
-                        $"{featureType.Name}.{kv.Key}: handlers registry 为 null");
+                        $"{featureType.Name}.{key}: handlers registry 为 null");
 #endif
                     throw new InvalidOperationException(
-                        $"Feature {featureType.Name}.{kv.Key} 引用 handler '{handlerName}' 但 BlueprintHandlerRegistry 未注册到 schema。" +
+                        $"Feature {featureType.Name}.{key} 引用 handler '{handlerName}' 但 BlueprintHandlerRegistry 未注册到 schema。" +
                         "业务侧需通过 BlueprintRunner.Run / IBlueprintRunnable.RunBlueprint 的 handlers 参数传 registry。");
                 }
                 var del = _handlers.TryGet(handlerName);
@@ -778,10 +829,10 @@ namespace Hevo.Charting.LowCode.Designer
 #if DEBUG
                     DevTools.TracerRegistry.Get(this)?.RecordKeyEvent(
                         DevTools.TopologyTracer.EventKind.HandlerMissing, handlerName,
-                        $"{featureType.Name}.{kv.Key} 未注册");
+                        $"{featureType.Name}.{key} 未注册");
 #endif
                     throw new InvalidOperationException(
-                        $"Feature {featureType.Name}.{kv.Key} 引用 handler '{handlerName}' 未注册。" +
+                        $"Feature {featureType.Name}.{key} 引用 handler '{handlerName}' 未注册。" +
                         $"已注册 handlers: [{string.Join(", ", _handlers.EnumerateNames())}]。" +
                         "业务侧 RegisterDelegate / RegisterPythonFunction 是否成功(看上游 host init log)?名字是否拼写正确?");
                 }
@@ -790,13 +841,13 @@ namespace Hevo.Charting.LowCode.Designer
 #if DEBUG
                     DevTools.TracerRegistry.Get(this)?.RecordKeyEvent(
                         DevTools.TopologyTracer.EventKind.HandlerMissing, handlerName,
-                        $"{featureType.Name}.{kv.Key}: 类型 {del.GetType().Name} 不兼容 {pi.PropertyType.Name}");
+                        $"{featureType.Name}.{key}: 类型 {del.GetType().Name} 不兼容 {pi.PropertyType.Name}");
 #endif
                     throw new InvalidOperationException(
-                        $"Feature {featureType.Name}.{kv.Key}: handler '{handlerName}' 类型 {del.GetType().Name} " +
+                        $"Feature {featureType.Name}.{key}: handler '{handlerName}' 类型 {del.GetType().Name} " +
                         $"不兼容目标属性类型 {pi.PropertyType.Name}。检查 RegisterDelegate 的委托签名是否跟 feature 字段匹配。");
                 }
-                resolved[kv.Key] = del;
+                resolved[key] = del;
             }
             return resolved;
         }
@@ -804,8 +855,8 @@ namespace Hevo.Charting.LowCode.Designer
         /// <summary>
         /// 从 <see cref="ChartBlueprint.DataSources"/> 选 render-leaf DS 的 model ——
         /// TypeName 匹配 <see cref="_dataSourceInstance"/> 运行时类型(继承链兜底)。
-        /// 单 DS 蓝图唯一项即结果;多 DS 蓝图框架装配期已挑好 leaf 实例传进来,这里按运行时类型反查 model。
-        /// 找不到匹配时返回 null,装配走 customPolicy / 空管线。
+        /// 只给手工 new schema、没传 renderLeafModel 的调用方兜底;蓝图装配由 BlueprintRunner 直接传入选中的 model。
+        /// 找不到匹配时返回 null,装配走 customPolicy / 空管线;同类型匹配到多个时无法判断哪个是叶,直接抛。
         /// </summary>
         private DataSourceModel? ResolveRenderLeafModel()
         {
@@ -815,10 +866,12 @@ namespace Hevo.Charting.LowCode.Designer
 
             // 精确匹配 + 继承链兜底(prefix 形态如 "kline:KLineDataSource" 走 ComponentRegistry.IsRegistered prefix-strip,
             // 这里直接按 short name 比对即可,蓝图侧 TypeName 是 ComponentRegistry alias)。
-            foreach (var m in ds)
-            {
-                if (string.Equals(m.TypeName, dsType.Name, StringComparison.Ordinal)) return m;
-            }
+            var exact = ds.Where(m => string.Equals(m.TypeName, dsType.Name, StringComparison.Ordinal)).ToList();
+            if (exact.Count > 1)
+                throw new InvalidOperationException(
+                    $"蓝图里有 {exact.Count} 个 {dsType.Name} 数据源,按类型分不出哪个是渲染叶。" +
+                    "请经 BlueprintRunner 装配,或构造 DynamicChartSchema 时显式传 renderLeafModel。");
+            if (exact.Count == 1) return exact[0];
             foreach (var m in ds)
             {
                 // 兜底:派生类匹配父类名 / 蓝图侧用 prefix alias 的场景。

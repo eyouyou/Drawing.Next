@@ -19,7 +19,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             foreach (var e in ctx.State.Edges)
             {
                 if (e.Kind != EdgeKind.Cascade) continue;
-                if (!ctx.DataSourceModelByNodeId.ContainsKey(e.FromNodeId) || !ctx.DataSourceModelByNodeId.ContainsKey(e.ToNodeId))
+                if (!IsDataSource(ctx, e.FromNodeId) || !IsDataSource(ctx, e.ToNodeId))
                 {
                     Console.WriteLine($"[Hevo 蓝图警告] Cascade 边 {e.FromNodeId}->{e.ToNodeId} 端节点不是 DataSource,序列化跳过。");
                     continue;
@@ -33,6 +33,10 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 });
             }
         }
+
+        // 未登记类型的数据源画不出节点,但仍是 DataSource:连着它的 cascade 照样写回。
+        private static bool IsDataSource(IEdgeEncodeContext ctx, string id)
+            => ctx.DataSourceModelByNodeId.ContainsKey(id) || ctx.State.Passthrough.DataSources.Any(d => d.Id == id);
 
         public void Decode(IEdgeDecodeContext ctx)
         {

@@ -42,11 +42,20 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         {
             if (blueprint == null) throw new ArgumentNullException(nameof(blueprint));
 
+            // 旧格式字段先迁移,否则画布上看不到它们表达的连线,保存后就真丢了。
+            foreach (var d in BlueprintLegacyMigrator.Migrate(blueprint))
+                Console.WriteLine($"[Graph 反序列化] {d}");
+
             var nodes = new List<Node>();
             // globalId → (nodeId, outputPortId) 反查表:边重建时把 PortBindings 里的 globalId 翻成源端坐标。
             var globalIdToOutput = new Dictionary<string, (string nodeId, string portId)>();
 
             // 1. DataSource 节点(节点化协议:多 DS 平等,跟 Feature 走同款 Properties + PortBindings)
+            // 画不出来的模型(类型未登记等)收进 passthrough,保存时原样写回,不替用户删配置。
+            var passDs = new List<DataSourceModel>();
+            var passTraits = new List<StyleModel>();
+            var passFeatures = new List<FeatureModel>();
+
             var dsModelByNodeId = new Dictionary<string, DataSourceModel>(StringComparer.Ordinal);
             foreach (var dsm in blueprint.DataSources)
             {
@@ -57,6 +66,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                     nodes.Add(n);
                     dsModelByNodeId[n.Id] = dsm;
                 }
+                else passDs.Add(dsm);
             }
 
             // 2. Trait 节点(InitialTraits)
@@ -64,6 +74,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             {
                 var n = TryCreateTraitNode(sm);
                 if (n != null) nodes.Add(n);
+                else passTraits.Add(sm);
             }
 
             // 3. Feature 节点 —— 同时构建 featureModelByNodeId 字典(避免旧 Zip 顺序 bug:
@@ -77,6 +88,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                     nodes.Add(n);
                     featureModelByNodeId[n.Id] = fm;
                 }
+                else passFeatures.Add(fm);
             }
 
             // 4. Viewport 节点 —— 蓝图里只要任何一处引用了 VP_* well-known id,就孵化一个 Viewport 节点。
@@ -103,6 +115,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             foreach (var codec in EdgeKindCodecs.All)
                 codec.Decode(ctx);
 
+            // 扇入端口上解析不到画布内源头的引用(dashboard 共享端口、未登记节点的输出)记到端口上,保存时写回。
+            ApplyExternalFanInIds(nodes, featureModelByNodeId, globalIdToOutput);
+
             // 6. 自动布局:DataSource 在最左,然后按 FeatureCategory 分列(Environment / Axes / Series / Interaction)。
             AutoLayout.Apply(nodes, edges);
 
@@ -112,7 +127,38 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 SelectedNodeIds: new HashSet<string>(),
                 Transform: CanvasTransform.Identity,
                 RubberBand: null,
-                BoxSelection: null);
+                BoxSelection: null)
+            {
+                Passthrough = new BlueprintPassthrough(
+                    passDs, passTraits, passFeatures,
+                    blueprint.Triggers.ToList(), blueprint.TriggerBindings.ToList(),
+                    blueprint.ExtensionData == null ? null : new Dictionary<string, System.Text.Json.JsonElement>(blueprint.ExtensionData)),
+            };
+        }
+
+        private static void ApplyExternalFanInIds(
+            List<Node> nodes,
+            Dictionary<string, FeatureModel> featureModelByNodeId,
+            Dictionary<string, (string nodeId, string portId)> globalIdToOutput)
+        {
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                var node = nodes[i];
+                if (!featureModelByNodeId.TryGetValue(node.Id, out var fm)) continue;
+                Port[]? ports = null;
+                for (int j = 0; j < node.InputPorts.Count; j++)
+                {
+                    var p = node.InputPorts[j];
+                    if (!p.IsArray || !fm.InputBindings.TryGetValue(p.Id, out var raw)) continue;
+                    var external = PortBindingValue.ExtractList(raw)
+                        .Where(id => !string.IsNullOrEmpty(id) && !globalIdToOutput.ContainsKey(id))
+                        .ToList();
+                    if (external.Count == 0) continue;
+                    ports ??= node.InputPorts.ToArray();
+                    ports[j] = p with { ExternalBindingIds = external };
+                }
+                if (ports != null) nodes[i] = node with { InputPorts = ports };
+            }
         }
 
         // ==========================================
