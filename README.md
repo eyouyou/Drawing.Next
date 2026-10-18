@@ -38,7 +38,7 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 | 项目 | 角色 | 说明 |
 |------|------|------|
 | [Hevo.Charting](./Hevo.Charting) | 引擎核心 | 抽象层、Feature 库、Layer / Renderer、低代码蓝图、Designer。 |
-| [Hevo.Charting.CodeAnalysis](./Hevo.Charting.CodeAnalysis) | 编译期 | Roslyn 分析器与源生成器：Hook 校验（嵌套、循环 discriminator）、跨帧缓存检测、Trait Consumer / Required 校验、Port Generator。 |
+| [Hevo.Charting.CodeAnalysis](./Hevo.Charting.CodeAnalysis) | 编译期 | Roslyn 分析器与源生成器：`UseMemo` 位置校验、跨帧缓存检测、Trait Consumer / Required 校验、Port Generator。 |
 | [Hevo.Drawing.LowCodeDemo](./Hevo.Drawing.LowCodeDemo) | 示例宿主 | 低代码蓝图运行时 + Node Editor + Python 编辑器 + Mock 撮合的 WPF 演示工程。 |
 | [Hevo.Charting.PythonNet](./Hevo.Charting.PythonNet) | 集成层 | Python 集成：`IPythonRuntime` + `PythonHandlerRegistry` + 蓝图层 `PyFeature` 节点。详见 [PYTHON_HANDLER_GUIDE](./Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md)。 |
 | [Hevo.Charting.Mcp](./Hevo.Charting.Mcp) | LLM 工具链 | MCP 服务进程，向 LLM 暴露 ComponentRegistry 与 DryRun 校验器，闭合"see → describe → validate"循环。详见 [README](./Hevo.Charting.Mcp/README.md)。 |
@@ -102,7 +102,7 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 完整列表与判例见 [00 号文档](./Hevo.Charting/00.Hevo.Charting%20架构协议与开发规范.md)，下面是最常踩的几条：
 
 - **0-GC**：`Project` 帧不 `new` 集合 / 数组 / 闭包（工作集合做成跨帧复用字段；每帧发布的不可变 Trait 记录除外），昂贵计算只走 `ctx.UseMemo`(factory 写成 `static` lambda)。
-- **Hook 规则**：Hook 只在 `OnProject` 帧路径里调；factory 里不嵌套调 Hook（HEVO004）；循环里调 `UseMemo` / `UseState` 传 `discriminator`（HEVO005）。`UsePort` 可以放进分支：没读的帧不更新版本，下次读到时 `IsChanged` 跟上次读到时比。
+- **Hook 规则**：Hook 只在 `OnProject` 帧路径里调；`UseMemo` 直接写在 `OnProject` 里，不写进 helper / 循环 / lambda / 本地函数（HEVO008，Debug 构建下运行时也会拦）。`UsePort` 可以放进分支：没读的帧不更新版本，下次读到时 `IsChanged` 跟上次读到时比。
 - **物理坐标隔离**：禁止手写 `(x - min) / span * width`，一律走 `IScale.Normalize`。
 - **Feature 不持有 DataSource**：业务 Feature 只认 `DataPort<T>` 引脚，所有数据装配统一走 `Schema.DefineDataFlow`。
 - **禁用 `System.Reactive`**：全盘走自研 `IWorkflow<T>`。

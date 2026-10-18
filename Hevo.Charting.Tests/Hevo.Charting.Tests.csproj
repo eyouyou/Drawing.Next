@@ -19,6 +19,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- 分析器单测(HookAnalyzerTests)用 Roslyn 现编一段源码跑 UseMemoPlacementAnalyzer。 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,6 +29,8 @@
     <ProjectReference Include="..\Hevo.Charting.PythonNet\Hevo.Charting.PythonNet.csproj" />
     <ProjectReference Include="..\Hevo.Trade.Abstractions\Hevo.Trade.Abstractions.csproj" />
     <ProjectReference Include="..\Hevo.Trade.Mock\Hevo.Trade.Mock.csproj" />
+    <!-- 当普通程序集引用(不是挂成分析器),测试里直接实例化分析器。 -->
+    <ProjectReference Include="..\Hevo.Charting.CodeAnalysis\Hevo.Charting.CodeAnalysis.csproj" />
     <!-- 文档示例(开发规范 / 15 分钟上手引用的代码)单独成一个工程,按业务侧红线编译(LangVersion 9 + 生成器),
          随测试工程一起编译;测试在 DocSampleTests.cs 里跑它们。 -->
     <ProjectReference Include="DocSamples\Hevo.Charting.DocSamples.csproj" />

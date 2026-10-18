@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Hevo.Charting.Buildin;
 using Hevo.Charting.Core;
 using Hevo.Charting.LowCode;
 using Xunit;
@@ -238,25 +239,175 @@ namespace Hevo.Charting.Tests
             Assert.False(Use(_a).IsChanged);
         }
 
-        // 各自只有一个调用位置,从不同顺序调用时仍落在同一份状态上。
-        private (int Value, bool IsChanged) MemoTwice(int dep) => _ctx.UseMemo(dep, static d => d * 2);
-        private (int Value, bool IsChanged) MemoNeg(int dep) => _ctx.UseMemo(dep, static d => -d);
+        // 模拟 Feature.OnProject 里的 UseMemo 调用位置。方法名必须是 OnProject:Debug 下 UseMemo 按 [CallerMemberName] 查调用方。
+        private static class MemoSites
+        {
+            // 两个固定调用位置,dep 为 null 表示这一帧走了另一条分支、没调到它。
+            public static ((int, bool)? Twice, (int, bool)? Neg) OnProject(FeatureContext ctx, int? twiceDep, int? negDep)
+            {
+                (int, bool)? twice = null, neg = null;
+                if (twiceDep.HasValue) twice = ctx.UseMemo(twiceDep.Value, static d => d * 2);
+                if (negDep.HasValue) neg = ctx.UseMemo(negDep.Value, static d => -d);
+                return (twice, neg);
+            }
+
+            // 循环里一个调用位置跑 n 轮:第二轮落在同一 key 上。
+            public static void OnProject(FeatureContext ctx, int rounds)
+            {
+                for (int i = 0; i < rounds; i++)
+                    ctx.UseMemo(i, static d => d);
+            }
+        }
+
+        // Feature 里的 helper:调用方类型是 Feature,但方法不是 OnProject。
+        private abstract class HelperFeature : Feature
+        {
+            public static int Calc(FeatureContext ctx) => ctx.UseMemo(1, static d => d).Value;
+        }
+
+        // 不在 Feature 里的对象借 ctx 存缓存。
+        private sealed class LabelProvider
+        {
+            public string GetFormat(FeatureContext ctx) => ctx.UseMemo(2, static d => "F" + d).Value;
+        }
+
+        private void NextFrame() => _ctx.BeginProject(IncrementalTestKit.NewRenderContext(), _board);
 
         [Fact]
-        public void UseMemo_CallOrderAndSkippedCalls_DoNotAffectResult()
+        public void UseMemo_SkippedInSomeFrames_KeepsItsOwnState()
         {
-            Assert.Equal((2, true), MemoTwice(1));
-            Assert.Equal((-1, true), MemoNeg(1));
+            NextFrame();
+            var r0 = MemoSites.OnProject(_ctx, 1, 1);
+            Assert.Equal((2, true), r0.Twice);
+            Assert.Equal((-1, true), r0.Neg);
 
-            // 换顺序、依赖不变:都命中缓存
-            Assert.Equal((-1, false), MemoNeg(1));
-            Assert.Equal((2, false), MemoTwice(1));
+            // 依赖不变:都命中缓存
+            NextFrame();
+            var r1 = MemoSites.OnProject(_ctx, 1, 1);
+            Assert.Equal((2, false), r1.Twice);
+            Assert.Equal((-1, false), r1.Neg);
 
-            // 某帧跳过 MemoNeg;再调时依赖没变仍命中,变了才重算
-            Assert.Equal((2, false), MemoTwice(1));
-            Assert.Equal((-1, false), MemoNeg(1));
-            Assert.Equal((-5, true), MemoNeg(5));
-            Assert.Equal((2, false), MemoTwice(1));
+            // 某帧跳过 Neg;再调时依赖没变仍命中,变了才重算
+            NextFrame();
+            var r2 = MemoSites.OnProject(_ctx, 1, null);
+            Assert.Equal((2, false), r2.Twice);
+            Assert.Null(r2.Neg);
+            NextFrame();
+            var r3 = MemoSites.OnProject(_ctx, 1, 1);
+            Assert.Equal((2, false), r3.Twice);
+            Assert.Equal((-1, false), r3.Neg);
+            NextFrame();
+            var r4 = MemoSites.OnProject(_ctx, 1, 5);
+            Assert.Equal((2, false), r4.Twice);
+            Assert.Equal((-5, true), r4.Neg);
         }
+
+        // 同一 Feature 的 ctx 驱动两个同类 tick provider(例如一个 Feature 同时管左右两根轴):
+        // provider 的缓存若放在 ctx.UseMemo 里,key 是 provider 源文件行号,两个实例会撞成一份,
+        // 依赖每次交替 → 每帧重建策略。缓存在 provider 自己身上才各管各的。
+        [Fact]
+        public void TwoTickProvidersOfSameType_OnOneContext_DoNotShareState()
+        {
+            _ctx.BeginProject(IncrementalTestKit.NewRenderContext(), _board);
+            var left = new NumericTickProvider("F2");
+            var right = new NumericTickProvider("F0");
+            var schedLeft = new ScheduleTickProvider(() => 10, i => System.DateTime.MinValue.AddMinutes(i));
+            var schedRight = new ScheduleTickProvider(() => 20, i => System.DateTime.MinValue.AddHours(i));
+
+            var leftStrategy = left.GetStrategy(_ctx);
+            var leftStyle = left.GetStyle(_ctx);
+            var schedStrategy = schedLeft.GetStrategy(_ctx);
+            for (int frame = 0; frame < 3; frame++)
+            {
+                Assert.NotSame(leftStrategy, right.GetStrategy(_ctx));
+                Assert.Same(leftStrategy, left.GetStrategy(_ctx));
+                Assert.Equal("2", right.GetStyle(_ctx).FormatLabel(1.5));
+                Assert.Same(leftStyle, left.GetStyle(_ctx));
+                Assert.NotSame(schedStrategy, schedRight.GetStrategy(_ctx));
+                Assert.Same(schedStrategy, schedLeft.GetStrategy(_ctx));
+            }
+            Assert.Equal("1.50", leftStyle.FormatLabel(1.5));
+        }
+
+#if DEBUG
+        [Fact]
+        public void UseMemo_InFeatureHelper_ThrowsHelperCaseInDebug()
+        {
+            NextFrame();
+            var ex = Assert.Throws<System.InvalidOperationException>(() => HelperFeature.Calc(_ctx));
+            Assert.StartsWith("[UseMemo 写在 helper 里] ProbeFeature.Calc", ex.Message);
+            Assert.Contains($"UsePortDirtyTrackingTests.cs 第 {LineOf("Calc(FeatureContext ctx)")} 行", ex.Message);
+            Assert.Contains("static d => Calc(d)", ex.Message);
+            Assert.Contains("「UseMemo 报错怎么改」", ex.Message);
+        }
+
+        [Fact]
+        public void UseMemo_OutsideFeature_ThrowsNotInFeatureCaseInDebug()
+        {
+            NextFrame();
+            var ex = Assert.Throws<System.InvalidOperationException>(() => new LabelProvider().GetFormat(_ctx));
+            Assert.StartsWith("[UseMemo 不在 Feature 里] LabelProvider.GetFormat", ex.Message);
+            Assert.Contains($"第 {LineOf("GetFormat(FeatureContext ctx)")} 行", ex.Message);
+            Assert.Contains("当前帧属于 ProbeFeature", ex.Message);
+            Assert.Contains("_strategy ??=", ex.Message);
+        }
+
+        [Fact]
+        public void UseMemo_SameCallSiteTwiceInOneFrame_ThrowsWithBothDepsInDebug()
+        {
+            NextFrame();
+            MemoSites.OnProject(_ctx, rounds: 1);
+            NextFrame();
+            var ex = Assert.Throws<System.InvalidOperationException>(() => MemoSites.OnProject(_ctx, rounds: 2));
+            Assert.StartsWith("[UseMemo 同一帧执行了两次] ProbeFeature", ex.Message);
+            Assert.Contains($"第 {LineOf("ctx.UseMemo(i, static d => d);")} 行", ex.Message);
+            Assert.Contains("第一次依赖 = 0,第二次依赖 = 1", ex.Message);
+            Assert.Contains("_cache[i]", ex.Message);
+        }
+
+        // 本文件里第一处包含 marker 的代码行行号(跳过注释与断言自身)。
+        private static int LineOf(string marker, [System.Runtime.CompilerServices.CallerFilePath] string file = "")
+        {
+            var lines = System.IO.File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var t = lines[i].TrimStart();
+                if (t.StartsWith("//") || t.Contains("LineOf(")) continue;
+                if (lines[i].Contains(marker) && lines[i].Contains("UseMemo")) return i + 1;
+            }
+            throw new System.InvalidOperationException("找不到 " + marker);
+        }
+
+        [Fact]
+        public void Hooks_OutsideProject_ThrowInDebug()
+        {
+            _board.Write(_a, 1.0);
+            // 首帧之前(OnCompose / Watch 回调里)
+            Assert.Throws<System.InvalidOperationException>(() => _ctx.UsePort(_a));
+            Assert.Throws<System.InvalidOperationException>(() => _ctx.UseMemo(1, static d => d));
+
+            Use(_a);
+            _ctx.EndProject();
+            // 帧结束之后(事件回调里)
+            Assert.Throws<System.InvalidOperationException>(() => _ctx.UsePort(_a));
+            Assert.Throws<System.InvalidOperationException>(() => _ctx.UsePorts(new[] { _a }, new double[1]));
+        }
+
+        [Fact]
+        public void FeatureProject_ClearsProjectingFlag_AfterFrame() => IncrementalTestKit.RunOnSta(() =>
+        {
+            // Feature 把 ctx 存下来、在帧外(事件回调里)再用:Project 结束后入口守卫要拦住。
+            FeatureContext? seen = null;
+            var feature = new ProbeFeature("f") { OnProjectAction = (_, c) => { seen = c; c.UsePort(_a); } };
+            var h = new SchemaHarness(feature);
+            h.Board.Write(_a, 1.0);
+            h.InvalidateEnvironment();
+            h.ProjectOnly();
+
+            Assert.NotNull(seen);
+            Assert.False(seen!._isProjecting);
+            Assert.Throws<System.InvalidOperationException>(() => seen.UsePort(_a));
+        });
+#endif
     }
 }

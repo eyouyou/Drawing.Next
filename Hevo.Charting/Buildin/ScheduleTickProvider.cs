@@ -48,24 +48,26 @@ namespace Hevo.Charting.Buildin
 
         public ITickStrategy GetStrategy(FeatureContext ctx)
         {
-            // strategy 实例终身只 new 一次,从 _totalLengthProvider/_indexToTime 取最新值
-            return ctx.UseMemo(this, _ =>
-                _strategyFactory != null
-                    ? _strategyFactory()
-                    : new TradeTimeTickStrategy(_totalLengthProvider, _indexToTime)).Value;
+            // strategy 实例终身只 new 一次,从 _totalLengthProvider/_indexToTime 取最新值。
+            // 缓存在 provider 自己身上而不是 ctx.UseMemo:后者按本文件行号寻址,同一 ctx 驱动两个本类实例时会撞成一份。
+            return _strategy ??= _strategyFactory != null
+                ? _strategyFactory()
+                : new TradeTimeTickStrategy(_totalLengthProvider, _indexToTime);
         }
 
         public ITickStylePolicy GetStyle(FeatureContext ctx)
         {
             // label 直接走 indexToTime,跟 times 数组无关——空白区也有正确 label
-            return ctx.UseMemo((_format, _formatter, _indexToTime),
-                static deps => new DelegateTickStylePolicy(mathIndex =>
-                {
-                    int idx = (int)Math.Round(mathIndex);
-                    DateTime time = deps._indexToTime(idx);
-                    if (time == DateTime.MinValue) return string.Empty;
-                    return time.FormatValue(deps._format, deps._formatter);
-                })).Value;
+            return _style ??= new DelegateTickStylePolicy(mathIndex =>
+            {
+                int idx = (int)Math.Round(mathIndex);
+                DateTime time = _indexToTime(idx);
+                if (time == DateTime.MinValue) return string.Empty;
+                return time.FormatValue(_format, _formatter);
+            });
         }
+
+        private ITickStrategy? _strategy;
+        private ITickStylePolicy? _style;
     }
 }

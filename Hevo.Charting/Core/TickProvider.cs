@@ -46,27 +46,31 @@ namespace Hevo.Charting.Core
             // 仅发生 struct 的 16 字节值拷贝，绝对不触发任何堆内存分配 (0-GC)！
             _dataBox.Value = col;
 
-            // 💥 3. 神级 Hook 闭环：依赖项设为 `this`！
-            // 因为 Provider (this) 的内存地址永远不变，所以 UseMemo 永远不会脏。
-            // 策略实例终身只 new 1 次！它只要从 _dataBox 取数据，永远是最新的！
-            return ctx.UseMemo(this, _ =>
+            // 3. 策略只依赖本 provider 的只读字段,缓存在 provider 自己身上。
+            // 不放进 ctx.UseMemo:那份状态按本文件行号寻址,同一 ctx 驱动两个同类 provider 时会撞成一份。
+            return _strategy ??= CreateStrategy();
+        }
+
+        private ITickStrategy? _strategy;
+        private ITickStylePolicy? _style;
+
+        private ITickStrategy CreateStrategy()
+        {
+            // 🚀 外部注入了策略工厂？把盒子交给它！
+            if (_strategyFactory != null)
             {
-                // 🚀 外部注入了策略工厂？把盒子交给它！
-                if (_strategyFactory != null)
-                {
-                    return _strategyFactory(_dataBox);
-                }
+                return _strategyFactory(_dataBox);
+            }
 
-                // 默认智能路由逻辑
-                if (typeof(TX) == typeof(DateTime))
-                {
-                    // 泛型擦除安全强转：因为只有 TX 是 DateTime 时才会进这个分支
-                    var timeBox = (RefBox<ReadOnlyMemory<DateTime>>)(object)_dataBox;
-                    return new TradingViewTimeMathStrategy(timeBox);
-                }
+            // 默认智能路由逻辑
+            if (typeof(TX) == typeof(DateTime))
+            {
+                // 泛型擦除安全强转：因为只有 TX 是 DateTime 时才会进这个分支
+                var timeBox = (RefBox<ReadOnlyMemory<DateTime>>)(object)_dataBox;
+                return new TradingViewTimeMathStrategy(timeBox);
+            }
 
-                return new TradingViewAxisMathStrategy();
-            }).Value;
+            return new TradingViewAxisMathStrategy();
         }
 
         public ITickStylePolicy GetStyle(FeatureContext ctx)
@@ -76,17 +80,16 @@ namespace Hevo.Charting.Core
             _dataBox.Value = col;
 
             // 删 Slicer 后，世界索引 == 数组下标。formatter 直接用 mathIndex 查表。
-            return ctx.UseMemo((_format, _formatter), deps =>
-                new DelegateTickStylePolicy(mathIndex =>
+            return _style ??= new DelegateTickStylePolicy(mathIndex =>
+            {
+                var span = _dataBox.Value.Span;
+                int idx = (int)Math.Round(mathIndex);
+                if (idx >= 0 && idx < span.Length)
                 {
-                    var span = _dataBox.Value.Span;
-                    int idx = (int)Math.Round(mathIndex);
-                    if (idx >= 0 && idx < span.Length)
-                    {
-                        return span[idx].FormatValue(deps._format, deps._formatter);
-                    }
-                    return string.Empty;
-                })).Value;
+                    return span[idx].FormatValue(_format, _formatter);
+                }
+                return string.Empty;
+            });
         }
     }
 
@@ -116,21 +119,21 @@ namespace Hevo.Charting.Core
             // 🚀 注入优先：如果外部指定了策略，直接返回
             if (_customStrategy != null) return _customStrategy;
 
-            // 💥 这里的依赖已经是 this，所以只会 new 一次，绝对安全 0-GC！
-            return ctx.UseMemo(this, _ => new TradingViewYAxisMathStrategy()).Value;
+            // 只依赖只读字段,按 provider 实例缓存(理由见 DomainTickProvider.GetStrategy)。
+            return _strategy ??= new TradingViewYAxisMathStrategy();
         }
 
         public ITickStylePolicy GetStyle(FeatureContext ctx)
         {
-            // 💥 这里依赖的是 (_format, _provider)，这两个都是只读字段，不会变，
-            // 所以这里的委托也只会被 new 一次，完美！
-            return ctx.UseMemo((_format, _provider),
-                    args => new DelegateTickStylePolicy(val =>
-                    {
-                        if (Math.Abs(val) < MathTolerance.NumericEqual) val = 0;
-                        return val.FormatValue(args._format, args._provider);
-                    })).Value;
+            return _style ??= new DelegateTickStylePolicy(val =>
+            {
+                if (Math.Abs(val) < MathTolerance.NumericEqual) val = 0;
+                return val.FormatValue(_format, _provider);
+            });
         }
+
+        private ITickStrategy? _strategy;
+        private ITickStylePolicy? _style;
     }
 
     /// <summary>
@@ -194,37 +197,44 @@ namespace Hevo.Charting.Core
             var (hints, _) = ctx.UsePort(_hintsPort);
             _hintsBox.Value = hints;
 
-            // 2. 终身 1 次构造策略实例
-            return ctx.UseMemo(this, _ => new AnchoredNiceTickStrategy(_anchorBox, _hintsBox)).Value;
+            // 2. 终身 1 次构造策略实例(按 provider 实例缓存,理由见 DomainTickProvider.GetStrategy)
+            return _strategy ??= new AnchoredNiceTickStrategy(_anchorBox, _hintsBox);
         }
 
         public ITickStylePolicy GetStyle(FeatureContext ctx)
         {
             // 闭包捕获 _anchorBox（引用稳定）以便 brush / styleSelector 每次读到最新 anchor。
             // _anchorBox 由 GetStrategy 在同一帧先填，调用顺序见 AxisFeature.OnProject。
+            return _style ??= CreateStyle();
+        }
+
+        private ITickStrategy? _strategy;
+        private ITickStylePolicy? _style;
+
+        private ITickStylePolicy CreateStyle()
+        {
             var anchorBox = _anchorBox;
             var baselineBrush = _baselineTextBrush;
             var baselineLine = _baselineLineStyle;
-            return ctx.UseMemo((_format, _provider, baselineBrush, baselineLine, anchorBox),
-                args => new DelegateTickStylePolicy(
-                    formatter: val =>
-                    {
-                        if (Math.Abs(val) < MathTolerance.NumericEqual) val = 0;
-                        return val.FormatValue(args._format, args._provider);
-                    },
-                    brushSelector: args.baselineBrush == null ? null : val =>
-                    {
-                        var anchor = args.anchorBox.Value;
-                        if (double.IsNaN(anchor)) return null;
-                        // 判 val 是否就是 anchor(典型:把昨收价那一根 tick 高亮上色)
-                        return Math.Abs(val - anchor) < MathTolerance.NumericEqual ? args.baselineBrush : null;
-                    },
-                    styleSelector: args.baselineLine == null ? null : val =>
-                    {
-                        var anchor = args.anchorBox.Value;
-                        if (double.IsNaN(anchor)) return null;
-                        return Math.Abs(val - anchor) < MathTolerance.NumericEqual ? args.baselineLine : null;
-                    })).Value;
+            return new DelegateTickStylePolicy(
+                formatter: val =>
+                {
+                    if (Math.Abs(val) < MathTolerance.NumericEqual) val = 0;
+                    return val.FormatValue(_format, _provider);
+                },
+                brushSelector: baselineBrush == null ? null : val =>
+                {
+                    var anchor = anchorBox.Value;
+                    if (double.IsNaN(anchor)) return null;
+                    // 判 val 是否就是 anchor(典型:把昨收价那一根 tick 高亮上色)
+                    return Math.Abs(val - anchor) < MathTolerance.NumericEqual ? baselineBrush : null;
+                },
+                styleSelector: baselineLine == null ? null : val =>
+                {
+                    var anchor = anchorBox.Value;
+                    if (double.IsNaN(anchor)) return null;
+                    return Math.Abs(val - anchor) < MathTolerance.NumericEqual ? baselineLine : null;
+                });
         }
     }
 }

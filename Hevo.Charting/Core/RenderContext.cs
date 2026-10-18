@@ -316,12 +316,21 @@ namespace Hevo.Charting.Core
         private readonly IVisualData _baseData;  // 读基准 (Live Data)
         private readonly IVisualData _draftData; // 写目标 (Transaction Draft)
 
-        internal VisualProxy(TTarget target, IVisualData baseData, IVisualData draftData)
+        // 只有经 FeatureContext.For / Shared 拿到的代理才带:Use<T> 要把"上次读到的"记在当前 Feature 身上。
+        // 放进本 struct 而不是另起一个类型,是为了让生成器产出的强类型 PublishData 扩展(this VisualProxy<TLayer>)
+        // 和跨程序集调用方(PythonNet)照旧命中。
+        private readonly FeatureContext? _feature;
+
+        internal VisualProxy(TTarget target, IVisualData baseData, IVisualData draftData, FeatureContext? feature = null)
         {
             Target = target;
             _baseData = baseData;
             _draftData = draftData;
+            _feature = feature;
         }
+
+        internal VisualProxy<TTarget> WithFeature(FeatureContext feature)
+            => new VisualProxy<TTarget>(Target, _baseData, _draftData, feature);
 
         /// <summary>
         /// 【新增】读取当前视角的最新数据。
@@ -330,6 +339,20 @@ namespace Hevo.Charting.Core
         public TData? Read<TData>() where TData : class
         {
             return _draftData.Get<TData>() ?? _baseData.Get<TData>();
+        }
+
+        /// <summary>
+        /// 读 + 跟本 Feature 上一帧读到时比,变没变(按引用比,Trait 是不可变 record,换了才算变)。
+        /// 只在 OnProject 里调;只报告,不唤醒:Trait 变了不会让没被叫起的 Feature 重跑,见 01 号文档「Use 体系」。
+        /// 状态按 (作用域, Trait 类型) 存,不按代码行,所以放进循环 / helper 都行;同一帧读两次,只有第一次能看到变化。
+        /// </summary>
+        public (TData? Value, bool IsChanged) Use<TData>() where TData : class
+        {
+            if (_feature is null)
+                throw new InvalidOperationException(
+                    $"Use<{typeof(TData).Name}> 只能用 OnProject 里 ctx.For(layer) / ctx.Shared() 拿到的代理调用;" +
+                    "RenderContext 直接给的代理不知道是哪个 Feature 在读,改用 Read<T>()。");
+            return _feature.UseTrait(Target!, Read<TData>());
         }
 
         /// <summary>
