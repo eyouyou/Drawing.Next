@@ -42,6 +42,10 @@ namespace Hevo.Charting.Tests
         }
 
         /// <summary>扫一遍列:全部等于第 0 个元素且不为 0(0 = ScatterIngestor 的 Fill 默认值)。</summary>
+        internal static readonly TimeSpan MinRace = TimeSpan.FromMilliseconds(1500);
+        internal static readonly TimeSpan MaxRace = TimeSpan.FromSeconds(15);
+        internal static bool ReadersRan(params ScanStats[] all) => Array.TrueForAll(all, s => Volatile.Read(ref s.Scans) > 0);
+
         public sealed class ScanStats
         {
             public int Scans, Bad;
@@ -162,8 +166,11 @@ namespace Hevo.Charting.Tests
                     while (!Volatile.Read(ref stop)) { schema.Source.PublishGen(gen, (int)gen % 2 == 0 ? 1000 : 1500); gen++; }
                 }) { IsBackground = true };
                 writer.Start();
-                var until = DateTime.UtcNow.AddMilliseconds(1500);
-                while (DateTime.UtcNow < until) cell.RunFrameNow(PlotMode.Sync);
+                // 至少竞争 1.5s,且等到每个读者都扫过(异步 Compute 在 CI 的 2 核机器上可能 1.5s 内一次都排不上),最多 15s
+                var start = DateTime.UtcNow;
+                while (DateTime.UtcNow - start < MinRace
+                       || (!ReadersRan(layerScatter, layerMapped, computeScatter, computeMapped) && DateTime.UtcNow - start < MaxRace))
+                    cell.RunFrameNow(PlotMode.Sync);
                 Volatile.Write(ref stop, true);
                 writer.Join();
                 Thread.Sleep(200); // 让在途的 ComputeFeature 跑完
