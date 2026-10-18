@@ -222,7 +222,14 @@ namespace Hevo.Charting.Core
             _context._isFullPass = isFullPass;
 
             _context.BeginProject(ctx, board);
-            OnProject(_context);
+            try
+            {
+                OnProject(_context);
+            }
+            finally
+            {
+                _context.EndProject();
+            }
 
 #if DEBUG
             // 把这一帧 OnProject 耗时喂回 tracer,UI 显示 "x.x ms" perf 徽章用。

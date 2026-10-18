@@ -13,6 +13,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- UseMemo 报错的"改前"写法编译不过(HEVO008),不参与编译;HookAnalyzerTests 读源码验证分析器会报。 -->
+    <Compile Remove="UseMemo\*.Before.cs" />
+    <None Include="UseMemo\*.Before.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 生成器注册写法同 Hevo.Drawing.LowCodeDemo(绕 .NET 5 SDK _wpftmp 不继承 Analyzer 类型 ProjectReference 的 bug) -->
     <ProjectReference Include="..\..\Hevo.Charting.CodeAnalysis\Hevo.Charting.CodeAnalysis.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>

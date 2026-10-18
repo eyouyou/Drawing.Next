@@ -88,7 +88,7 @@ dotnet test "Hevo.Charting.Tests/Hevo.Charting.Tests.csproj" -nologo
 
 - 不引入 `System.Reactive`,只用自研 `IWorkflow<T>`。
 - 数据进黑板后只通过 `DataPort<T>` 通信,业务实体泛型 `TItem` 仅停留在数据接入侧。
-- Hook(`UsePort` / `UseMemo` / `UseState`)只在 `OnProject` 帧路径里调;factory 里不嵌套调 Hook(HEVO004),循环里调 `UseMemo` / `UseState` 传 `discriminator`(HEVO005);严禁在 `OnProject` 内写 `DataBlackboard`,严禁跨帧缓存 `UsePort` 返回的 memory。
+- Hook(`UsePort` / `UseMemo`)只在 `OnProject` 帧路径里调;`UseMemo` 直接写在 `OnProject` 里,不写进 helper / 循环 / lambda / 本地函数(HEVO008,Debug 构建下运行时也会拦);严禁在 `OnProject` 内写 `DataBlackboard`,严禁跨帧缓存 `UsePort` 返回的 memory。
 - Feature 执行顺序由 `FeaturePhase` 控制,严禁靠 `List.Add` 顺序硬编码。
 - 物理坐标必须经 `IScale.Normalize`,严禁手写 `(x - min) / span * width` 之类反推公式。
 - 运行时增删 Feature 必须走 `Transact(...)`,不要散装 `Add/Remove`。
@@ -155,7 +155,7 @@ var (ticks, ticksChanged) = ctx.UseMemo((range, plotArea), static deps => { ... 
 - [ ] 是否有"翻译"语法?(有则删)
 - [ ] 魔法数字是否标注了物理含义?
 - [ ] 复杂的 `if` 是否有业务理由?
-- [ ] Hook 是否只在 `OnProject` 帧路径里调?循环里的 `UseMemo` / `UseState` 是否传了 `discriminator`?
+- [ ] Hook 是否只在 `OnProject` 帧路径里调?`UseMemo` 是否直接写在 `OnProject` 里(不在 helper / 循环 / lambda 里)?只想知道值变没变的地方,是不是直接跟字段比、没套 `UseMemo`?
 - [ ] 生命周期敏感代码(`OnSuspend / OnResume / Dispose`)是否说明了为何需要手动处理(见 00 号文档 §14 可暂停生命周期)?
 
 ---

@@ -17,23 +17,26 @@ namespace Hevo.Charting.Core
     }
 
     // ==========================================
-    // 💥 终极统一通道接口定义
-    // ==========================================
-    public interface IMemo<T>
-    {
-        T Value { get; }
-        bool IsChanged { get; }
-    }
-
-    public interface IState<T> : IMemo<T>
-    {
-        new T Value { get; set; }
-    }
-
-    // ==========================================
     // 💥 引擎大管家:FeatureContext
     // 热路径(每帧重绘)绝对零分配,全部复用已有对象!
     // ==========================================
+    // Use<T> 状态的 key。按引用比作用域:图层可能重写 Equals,这里要的是"同一个对象"。
+    internal readonly struct TraitUseKey : IEquatable<TraitUseKey>
+    {
+        public readonly object Scope;
+        public readonly Type TraitType;
+
+        public TraitUseKey(object scope, Type traitType)
+        {
+            Scope = scope;
+            TraitType = traitType;
+        }
+
+        public bool Equals(TraitUseKey other) => ReferenceEquals(Scope, other.Scope) && TraitType == other.TraitType;
+        public override bool Equals(object? obj) => obj is TraitUseKey other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Scope), TraitType);
+    }
+
     public partial class FeatureContext
     {
         internal RenderContext _renderCtx = null!;
@@ -45,12 +48,34 @@ namespace Hevo.Charting.Core
         // 代表环境纪元是否发生了改变(如 SizeChanged)
         internal bool _isFullPass;
 
-        internal readonly Dictionary<string, object> _dynamicStatePocket = new();
-
         // 💥 终极修复:彻底废弃易溢出的 _portTicks,换成 0-GC 的无限版本令牌!
         internal readonly Dictionary<object, VersionToken> _portTokens = new();
 
-        internal void BeginProject(RenderContext render, DataBlackboard board) { _renderCtx = render; _board = board; }
+        // _board / _renderCtx 只在 BeginProject 到 EndProject 之间是当前帧的(且在 ProjectAll 的读锁内);
+        // 帧外(OnCompose / Watch 回调 / 事件)调 Hook 会读到上一帧的引用甚至 null,Debug 下直接报出调用点。
+        internal bool _isProjecting;
+
+        // 每次 BeginProject 自增;UseMemo 用它在 Debug 下查"同一调用位置一帧内命中两次"。0 留给"从没命中过"。
+        internal int _projectFrame;
+
+        internal void BeginProject(RenderContext render, DataBlackboard board)
+        {
+            _renderCtx = render;
+            _board = board;
+            _isProjecting = true;
+            if (++_projectFrame == 0) _projectFrame = 1;
+        }
+
+        internal void EndProject() => _isProjecting = false;
+
+        [System.Diagnostics.Conditional("DEBUG")]
+        internal void AssertProjecting(string hook)
+        {
+            if (!_isProjecting)
+                throw new InvalidOperationException(
+                    $"{_currentFeature?.GetType().Name ?? "<feature>"} 在 OnProject 帧路径以外调了 {hook}:" +
+                    "OnCompose / Watch 回调 / 事件里没有当前帧的黑板与读锁,改在 OnProject 里读。");
+        }
 
         // 修复 H1 配套:Decompose 时清空跨帧状态。
         // 同一 Feature 实例可能被 Transact 重新装配(hot-plug),残留的 _portTokens / _hookPocket 会
@@ -59,8 +84,8 @@ namespace Hevo.Charting.Core
         {
             _portTokens.Clear();
             _hookPocket.Clear();
-            _dynamicStatePocket.Clear();
-            _isInsideHookFactory = false;
+            _traitSeen.Clear();
+            _isProjecting = false;
             _renderCtx = null!;
             _board = null!;
             _registry = null!;
@@ -70,8 +95,9 @@ namespace Hevo.Charting.Core
         // ==========================================
         // 💥 图层与共享状态代理
         // ==========================================
-        public VisualProxy<IVisualData> Shared() => _renderCtx.Shared();
-        public VisualProxy<IChartLayer> For(IChartLayer layer) => _renderCtx.For(layer);
+        // 返回的代理带上本 ctx,Use<T>() 才知道"上次读到的"记在哪个 Feature 上;Read / PublishData 不受影响。
+        public VisualProxy<IVisualData> Shared() => _renderCtx.Shared().WithFeature(this);
+        public VisualProxy<IChartLayer> For(IChartLayer layer) => _renderCtx.For(layer).WithFeature(this);
 
         /// <summary>
         /// 泛型重载:保留具体 layer 类型,让强类型 <c>PublishData&lt;TLayer, TData&gt;</c> 在跨程序集
@@ -79,7 +105,21 @@ namespace Hevo.Charting.Core
         /// 业务侧 typed call: <c>ctx.For&lt;LineLayer&gt;(_lineLayer).PublishData(new XAxisTrait(...))</c>。
         /// </summary>
         public VisualProxy<TLayer> For<TLayer>(TLayer layer) where TLayer : IChartLayer
-            => _renderCtx.For(layer);
+            => _renderCtx.For(layer).WithFeature(this);
+
+        // Use<T> 的"上次读到的 Trait":key = (作用域, Trait 类型),作用域是图层对象或共享区的 live 袋子。
+        // 跟 _portTokens 一样按对象而不是调用顺序存,Reset 时清空,重装后首帧重新报变化。
+        internal readonly Dictionary<TraitUseKey, object?> _traitSeen = new();
+
+        internal (T? Value, bool IsChanged) UseTrait<T>(object scope, T? value) where T : class
+        {
+            AssertProjecting("Use<T>");
+            var key = new TraitUseKey(scope, typeof(T));
+            if (_traitSeen.TryGetValue(key, out var last) && ReferenceEquals(last, value))
+                return (value, false);
+            _traitSeen[key] = value;
+            return (value, true);
+        }
 
         /// <summary>
         /// 💥 隐式查脏核心:值类型防抖,不生成任何对象,仅返回 struct Tuple
@@ -88,12 +128,8 @@ namespace Hevo.Charting.Core
         /// 端口第一次被读到才订阅;同一帧对同一端口读两次,只有第一次能看到 IsChanged = true。
         /// </para>
         /// </summary>
-        // ⚠️ 已知脏追踪盲区:
-        //   本方法只追踪 DataPort 的 VersionToken,不覆盖:
-        //     - ctx.Shared().Read<TTrait>() 读取的 Trait(ViewportSizeTrait / PlotAreaTrait / ScaleStrategyTrait 等)
-        //     - flow.Watch / flow.WatchAsync 自带的端口订阅(另一套独立机制)
-        //   若未来出现类似 "某 Feature 读了 Trait 但没标脏导致残影" 的现象,
-        //   定点修(给该 Feature 补 UsePort,或补一个 UseTrait<T>() API)。
+        // 只追踪 DataPort 的 VersionToken。Trait 变没变用 ctx.For(layer).Use<T>() / ctx.Shared().Use<T>();
+        // flow.Watch / WatchAsync 的端口订阅是另一套机制。Trait 变化不会唤醒 Feature,见 01 号文档「Use 体系」。
         public (T Value, bool IsChanged) UsePort<T>(
             DataPort<T> port,
             [System.Runtime.CompilerServices.CallerArgumentExpression("port")] string? portExpression = null)
@@ -107,6 +143,7 @@ namespace Hevo.Charting.Core
                     portExpression,
                     $"{_currentFeature?.GetType().Name ?? "<feature>"}.{portExpression} is null — " +
                     "ctx.UsePort 不接受 null 端口,调用前确保端口已装配。");
+            AssertProjecting(nameof(UsePort));
 
             // 1. 0-GC 拉取物理数据
             T val = _board.Read(port);
@@ -142,7 +179,11 @@ namespace Hevo.Charting.Core
         /// 列端口的引用版本(见 <see cref="DataBlackboard.GetIdentityVersion"/>):底层引用换了才变,原地改再 ForceWrite 不变。
         /// 只读令牌,不订阅、不占 Hook 槽位;配合同一端口的 <see cref="UsePort{T}"/> 使用(先 UsePort 订阅,再看引用变没变)。
         /// </summary>
-        public VersionToken PortIdentity<T>(DataPort<ReadOnlyMemory<T>> port) => _board.GetIdentityVersion(port);
+        public VersionToken PortIdentity<T>(DataPort<ReadOnlyMemory<T>> port)
+        {
+            AssertProjecting(nameof(PortIdentity));
+            return _board.GetIdentityVersion(port);
+        }
 
         /// <summary>
         /// 动态批量引脚订阅:端口个数运行期才知道时,一次读一组,任一端口变了就返回 true。
@@ -155,6 +196,7 @@ namespace Hevo.Charting.Core
         {
             if (ports.Length != buffer.Length)
                 throw new ArgumentException("Ports 数组和 Buffer 数组的长度必须一致!");
+            AssertProjecting(nameof(UsePorts));
 
             bool changed = false;
 
@@ -276,26 +318,6 @@ namespace Hevo.Charting.Core
             });
             // 重新穿上马甲,保持图表上下文
             return intercepted.BindTo(source.Chart);
-        }
-    }
-
-    public static class HookExtensions
-    {
-        // 💥 魔法 1:双元组解构 -> (Value, IsChanged)
-        // 适用于绝大多数只读数据拉取和 Memo
-        public static void Deconstruct<T>(this IMemo<T> memo, out T value, out bool isChanged)
-        {
-            value = memo.Value;
-            isChanged = memo.IsChanged;
-        }
-
-        // 💥 魔法 2:三元组解构 -> (Value, SetValue, IsChanged)
-        // 适用于需要双向绑定的内部 UI 状态 (类似 React)
-        public static void Deconstruct<T>(this IState<T> state, out T value, out Action<T> setValue, out bool isChanged)
-        {
-            value = state.Value;
-            setValue = v => state.Value = v;
-            isChanged = state.IsChanged;
         }
     }
 }

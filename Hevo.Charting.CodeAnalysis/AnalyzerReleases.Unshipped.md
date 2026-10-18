@@ -7,10 +7,8 @@ Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
 HEVO001 | Category | Error | NoPortDataCachingAnalyzer
 HEVO002 | Category | Error | ReadOnlyProjectPhaseAnalyzer
-HEVO004 | Architecture | Error | HevoHookNestingAnalyzer
-HEVO005 | Architecture | Error | HevoHookSafetyAnalyzer
-HEVO006 | Architecture | Error | HevoHookSafetyAnalyzer
 HEVO007 | Category | Warning | DataPortMustBeReadonlyAnalyzer
+HEVO008 | Architecture | Error | UseMemoPlacementAnalyzer
 
 ### Removed Rules
 

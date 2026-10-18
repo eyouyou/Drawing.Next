@@ -317,5 +317,70 @@ namespace Hevo.Charting.Tests
             AssertSameSeries(expectedSma, sma!);
             AssertSameSeries((double[])expectedChannel["upper"]!, upper!);
         }
+
+        // ── 01 号文档「UseMemo 是干什么的」 ─────────────────────────────────
+
+        [Fact]
+        public void UseMemo_CloseStats_RecomputesOnlyWhenDepsChange() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var closes = new DataPort<ReadOnlyMemory<double>>("Close");
+            var feature = new Hevo.Charting.DocSamples.UseMemo.CloseStatsFeature { Source = closes };
+            var h = new SchemaHarness(feature);
+
+            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 1.0, 3.0, 2.0 }));
+            h.InvalidateEnvironment();
+            h.ProjectOnly();
+            Assert.Equal(1, feature.ComputeCount);
+            Assert.Equal(3.0, feature.Published.Max);
+
+            // 全量重投影(比如窗口尺寸变了):OnProject 照跑,但依赖没变,factory 不跑
+            h.InvalidateEnvironment();
+            h.ProjectOnly();
+            Assert.Equal(1, feature.ComputeCount);
+
+            // 换了一块新数据:依赖变了才重算
+            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 5.0, 4.0 }));
+            h.ProjectOnly();
+            Assert.Equal(2, feature.ComputeCount);
+            Assert.Equal(4.5, feature.Published.Mean);
+        });
+
+        // ── 01 号文档「Use 体系」 ─────────────────────────────────────────
+
+        [Fact]
+        public void Use_StatsBand_PublishesOnlyWhenDataOrPlotAreaChanges() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var closes = new DataPort<ReadOnlyMemory<double>>("Close");
+            var area = new PlotAreaTrait(new HevoRect(0, 0, 100, 50));
+            // 代替 GridLayoutFeature:Layout 阶段发布当前的绘图区实例
+            var layout = new ProbeFeature("layout", FeaturePhase.Layout)
+            {
+                OnProjectAction = (_, ctx) => ctx.Shared().PublishData(area),
+            };
+            var feature = new Hevo.Charting.DocSamples.Use.StatsBandFeature { Source = closes };
+            var h = new SchemaHarness(layout, feature);
+
+            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 1.0, 3.0, 2.0 }));
+            h.InvalidateEnvironment();
+            h.Frame();
+            Assert.Equal(1, feature.PublishCount);
+
+            // 环境纪元变了、所有 Feature 都重跑,但数据和绘图区都没换:不发布
+            h.InvalidateEnvironment();
+            h.Frame();
+            Assert.Equal(1, feature.PublishCount);
+
+            // 绘图区换了
+            area = new PlotAreaTrait(new HevoRect(0, 0, 200, 50));
+            h.InvalidateEnvironment();
+            h.Frame();
+            Assert.Equal(2, feature.PublishCount);
+
+            // 只有数据换了:端口唤醒本 Feature,Layout 不跑,绘图区还是上次那个
+            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 5.0, 4.0 }));
+            h.Frame();
+            Assert.Equal(3, layout.ProjectCount);
+            Assert.Equal(3, feature.PublishCount);
+        });
     }
 }
