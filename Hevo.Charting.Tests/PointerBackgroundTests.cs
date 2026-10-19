@@ -118,10 +118,9 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void DragThreshold_FromInteractionOptions() => IncrementalTestKit.RunOnSta(() =>
         {
-            var rig = new Rig(extra: (i, s) => i.Remove<ChartInteractionFeature>().Canvas.Add(new ChartInteractionFeature
-            {
-                PointerHitPort = s.Hit, SupportedModes = ChartInteractionMode.All, DragThreshold = 30,
-            }));
+            // 唯一来源:InteractionOptions.DragThreshold
+            var rig = new Rig(extra: (i, s) => i.Remove<ChartInteractionFeature>().EnableStandard(s.Ports.Time,
+                FieldMeta.Literal("T", System.Windows.Media.Colors.Gray), new InteractionOptions<DateTime> { DragThreshold = 30, HitPort = s.Hit }));
             var p = rig.Add(new Probe());
             p.Set(rig, new PointerRegion { Shape = PointerShape.HLine(150, 0, 1000), Accepts = PointerAccepts.Click | PointerAccepts.Drag });
             rig.Drag(100, 150, 120, 150, steps: 2);   // 20 DIP < 30:点击
@@ -130,33 +129,39 @@ namespace Hevo.Charting.Tests
             Assert.DoesNotContain(p.Log, g => g.Phase == PointerPhase.Begin);
         });
 
-        // ================= Q9 请求取消 =================
+        // ================= Q9 回调里取消 =================
 
         [Fact]
-        public void RequestCancel_FromCallback_CancelsAfterDispatch_FromOutside_CancelsNow() => IncrementalTestKit.RunOnSta(() =>
+        public void CancelGesture_InCallback_CancelsAfterDispatch_OutsideThrows() => IncrementalTestKit.RunOnSta(() =>
         {
             var rig = new Rig();
             var p = rig.Add(new Probe());
             p.Set(rig, new PointerRegion { Shape = PointerShape.HLine(150, 0, 1000) });
-            p.OnGesture = (b, g, later) => { if (g.Phase == PointerPhase.Begin) rig.Router.Ports.RequestCancel(b); };
-            rig.Drag(100, 150, 180, 150);
-            var first = p.Log.ToArray();
-            p.Log.Clear();
-            p.OnGesture = null;
-
+            PointerGesture kept = default;
+            p.OnGesture = (b, g, later) =>
+            {
+                if (g.Phase != PointerPhase.Begin) return;
+                kept = g;
+                g.CancelGesture();
+                Assert.True(rig.Router.IsGestureActive);   // 这次分发结束后才生效
+            };
             rig.Mouse.Move(rig.Canvas, new Point(100, 150));
             rig.Mouse.Down(rig.Canvas, new Point(100, 150));
-            rig.Move(140, 150);
-            using (rig.Board.AcquireWriteLock()) rig.Router.Ports.RequestCancel(rig.Board);
+            rig.Move(150, 150);
+            bool activeAfter = rig.Router.IsGestureActive;
             bool captured = System.Windows.Input.Mouse.Captured != null;
-            rig.Mouse.Up(rig.Canvas, new Point(140, 150));
+            rig.Move(180, 150);
+            rig.Mouse.Up(rig.Canvas, new Point(180, 150));
+            rig.Frame();
+            var outside = Record.Exception(() => kept.CancelGesture());
             rig.Close();
 
-            var phases = first.Select(g => g.Phase).Where(x => x is not (PointerPhase.HoverEnter or PointerPhase.HoverMove or PointerPhase.HoverLeave)).ToArray();
+            var phases = p.Phases.Where(x => x is not (PointerPhase.HoverEnter or PointerPhase.HoverMove or PointerPhase.HoverLeave)).ToArray();
             Assert.Equal(new[] { PointerPhase.Press, PointerPhase.Begin, PointerPhase.Cancel }, phases);
-            Assert.Equal(PointerCancelReason.Requested, first.Single(g => g.Phase == PointerPhase.Cancel).Reason);
             Assert.Equal(PointerCancelReason.Requested, p.Log.Single(g => g.Phase == PointerPhase.Cancel).Reason);
+            Assert.False(activeAfter);
             Assert.False(captured);
+            Assert.IsType<InvalidOperationException>(outside);
         });
 
         // ================= ElementPlot =================

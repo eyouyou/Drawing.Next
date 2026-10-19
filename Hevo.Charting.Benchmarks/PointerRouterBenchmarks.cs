@@ -37,6 +37,7 @@ namespace Hevo.Charting.Benchmarks
             public void CaptureForBackground() { }
             public void ReleaseBackgroundCapture() { }
             public void SetFrameCallback(Action? callback) { }
+            public double DragThreshold => 4;
         }
 
         private PointerRegionStore _store = null!;

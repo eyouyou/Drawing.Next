@@ -366,7 +366,6 @@ namespace Hevo.Charting
                 DoubleClickResetConfig = options.DoubleClickResetConfig,
                 RequireClickToActivate = options.RequireClickToActivate,
                 DismissOnEscape = options.DismissOnEscape,
-                DragThreshold = options.DragThreshold,
                 ZoomStrategy = options.ZoomStrategy ?? new SmartAdaptiveZoomStrategy(),
                 AvailabilityPort = availabilityPort
             });
@@ -381,6 +380,9 @@ namespace Hevo.Charting
                     AvailabilityPort = availabilityPort
                 });
             }
+
+            // 指针区域的拖动阈值:唯一来源是这里的 InteractionOptions,路由器从共享区读
+            builder.Canvas.Seed(new Interaction.PointerSettingsTrait(options.DragThreshold));
 
             builder.Canvas.Add(new CrosshairFeature<TX> { HitStatePort = hitPort, XAxisDataPort = domainDataPort, XMeta = domainMeta, ShowIntersectionDots = options.ShowIntersectionDots });
             builder.Canvas.Add(new TooltipWidgetFeature<TX> { HitStatePort = hitPort, XAxisDataPort = domainDataPort, XMeta = options.TooltipXMeta ?? domainMeta });

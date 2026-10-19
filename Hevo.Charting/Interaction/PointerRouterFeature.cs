@@ -1,3 +1,4 @@
+using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
 using Hevo.Charting.LowCode;
 using Hevo.Charting.WorkFlow;
@@ -13,14 +14,17 @@ namespace Hevo.Charting.Interaction
     /// 见 04 号文档「指针区域」一节。
     /// </para>
     /// </summary>
+    /// <summary>路由器配置,由 <c>EnableStandard</c> 从 <c>InteractionOptions</c> 种进共享区(拖动阈值的唯一来源)。</summary>
+    internal sealed record PointerSettingsTrait(double DragThreshold) : IVisualTrait
+    {
+        public const double DefaultDragThreshold = 4.0;
+    }
+
     public sealed class PointerRouterFeature : Feature
     {
         // 跟视口端口同一阶段、更早装配:它的 Preview 键盘处理器要先于 ChartInteractionFeature 的(Esc 先给手势)
         public override FeaturePhase Phase => FeaturePhase.PreLayout;
         public override bool IsSingleton => true;
-
-        /// <summary>拖动阈值(DIP),全局。按下后移动不到这个距离松开算点击。默认 4(WPF 默认拖动距离)。</summary>
-        public static float DragThreshold { get; set; } = 4f;
 
         /// <summary>
         /// 按下时如果有排队没跑的帧,先同步跑掉再命中(默认开),保证命中用的区域 = 状态最新的区域。
@@ -47,8 +51,8 @@ namespace Hevo.Charting.Interaction
             _cell = chart;
             _router = new PointerRouter(store, _ports);
             store.Listener = _router;
-            flow.Watch(new object[] { _ports.CancelRequestPort }, _ => _router?.RequestCancel());
-            _adapter = new WpfPointerAdapter(chart, _router, store, () => CurrentBoardOrNull(), () => ctx.GetPlotArea());
+            _adapter = new WpfPointerAdapter(chart, _router, store, () => CurrentBoardOrNull(), () => ctx.GetPlotArea(),
+                () => ctx.Shared().Read<PointerSettingsTrait>()?.DragThreshold ?? PointerSettingsTrait.DefaultDragThreshold);
             RegisterDisposable(_adapter);
         }
 

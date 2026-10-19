@@ -176,9 +176,6 @@ namespace Hevo.Charting.Features
         /// </summary>
         public bool DismissOnEscape { get; init; } = false;
 
-        /// <summary>指针区域的拖动阈值(DIP):按下后移动不到这个距离松开算点击。默认 4。</summary>
-        public double DragThreshold { get; init; } = 4.0;
-
         private const double StandardWheelDelta = 120.0;
 
         // ==========================================
@@ -1023,8 +1020,6 @@ namespace Hevo.Charting.Features
             if (Math.Abs(sx - 1.0) > MathTolerance.ManipulationScale && SupportedModes.HasFlag(ChartInteractionMode.Zoom))
                 ApplyZoom(ctx, board, 1.0 / sx, origin.X);
         }
-
-        float IPointerBackground.DragThreshold => (float)DragThreshold;
 
         TimeSpan IPointerBackground.DoubleClickInterval => DoubleClickResetConfig.MaxInterval;
         double IPointerBackground.DoubleClickMaxMovement => DoubleClickResetConfig.MaxMovementPx;

@@ -65,7 +65,7 @@ namespace Hevo.Charting.Interaction
         SupersededByPan,
         /// <summary>手势中按了另一个鼠标键。</summary>
         OtherButton,
-        /// <summary>业务经 <see cref="PointerPorts.RequestCancel"/> 主动中止(拖价格线时委托单被成交)。</summary>
+        /// <summary>业务在回调里调 <see cref="PointerGesture.CancelGesture"/> 主动中止(拖价格线时委托单被成交)。</summary>
         Requested,
     }
 
@@ -319,9 +319,12 @@ namespace Hevo.Charting.Interaction
     /// </summary>
     public readonly struct PointerGesture : IEquatable<PointerGesture>
     {
-        internal PointerGesture(long sequence, object? owner, int regionId, int regionPart, PointerPhase phase, PointerCancelReason reason,
+        private readonly PointerRouter? _router;
+
+        internal PointerGesture(PointerRouter? router, long sequence, object? owner, int regionId, int regionPart, PointerPhase phase, PointerCancelReason reason,
             HevoPoint position, HevoPoint pressPosition, PointerButton button, PointerModifiers modifiers)
         {
+            _router = router;
             Sequence = sequence; Owner = owner; RegionId = regionId; RegionPart = regionPart; Phase = phase; Reason = reason;
             Position = position; PressPosition = pressPosition; Button = button; Modifiers = modifiers;
         }
@@ -349,6 +352,17 @@ namespace Hevo.Charting.Interaction
 
         public bool IsFor(object feature) => Owner != null && ReferenceEquals(Owner, feature);
 
+        /// <summary>
+        /// 中止进行中的手势:这次分发结束后,路由器以 <see cref="PointerCancelReason.Requested"/> 发 Cancel、释放捕获。
+        /// 只能在收到这条手势的回调里调用(手势控制不进黑板);手势已经结束(End / Click / Cancel 本身)时什么都不做。
+        /// </summary>
+        public void CancelGesture()
+        {
+            if (_router == null || !_router.IsDispatching(Sequence))
+                throw new InvalidOperationException("CancelGesture 只能在收到这条手势的 Watch 回调里调用。");
+            _router.RequestCancel();
+        }
+
         // 每条记录的 Sequence 唯一:按它比就够,也让端口的 WriteIfChanged 走 IEquatable 不装箱
         public bool Equals(PointerGesture other) => Sequence == other.Sequence && ReferenceEquals(Owner, other.Owner);
         public override bool Equals(object? obj) => obj is PointerGesture other && Equals(other);
@@ -366,18 +380,5 @@ namespace Hevo.Charting.Interaction
         /// <summary>只由路由器写。Watch 它,再用 <see cref="PointerGesture.IsFor"/> 挑出自己的。</summary>
         [PortDirection(PortDirection.Output)]
         public DataPort<PointerGesture> GesturePort { get; } = new("Pointer_Gesture");
-
-        /// <summary>"请求取消"计数:每次加一,路由器就以 <see cref="PointerCancelReason.Requested"/> 取消进行中的手势。用 <see cref="RequestCancel"/> 写。</summary>
-        public DataPort<long> CancelRequestPort { get; } = new("Pointer_CancelRequest");
-
-        /// <summary>
-        /// 主动中止进行中的手势(没有就什么都不做)。须在写锁内调用(手势回调里直接调;别处套 <c>AcquireWriteLock</c>)。
-        /// 在手势回调里调用时,等这次分发结束才生效。
-        /// </summary>
-        public void RequestCancel(DataBlackboard board)
-        {
-            if (board == null) throw new ArgumentNullException(nameof(board));
-            board.WriteIfChanged(CancelRequestPort, board.Read(CancelRequestPort) + 1);
-        }
     }
 }

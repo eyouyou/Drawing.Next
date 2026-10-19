@@ -28,6 +28,7 @@ namespace Hevo.Charting.Interaction
         private readonly PointerRegionStore _store;
         private readonly Func<DataBlackboard?> _board;
         private readonly Func<HevoRect> _plotArea;
+        private readonly Func<double> _dragThreshold;
         private bool _ownsCapture;
         private bool _cursorSet;
         private bool _disposed;
@@ -46,8 +47,9 @@ namespace Hevo.Charting.Interaction
         private readonly EventHandler _onRendering;
         private Action? _frameCallback;
 
-        public WpfPointerAdapter(ChartCell cell, PointerRouter router, PointerRegionStore store, Func<DataBlackboard?> board, Func<HevoRect> plotArea)
+        public WpfPointerAdapter(ChartCell cell, PointerRouter router, PointerRegionStore store, Func<DataBlackboard?> board, Func<HevoRect> plotArea, Func<double> dragThreshold)
         {
+            _dragThreshold = dragThreshold;
             _cell = cell;
             _router = router;
             _store = store;
@@ -320,5 +322,6 @@ namespace Hevo.Charting.Interaction
 
         public HevoRect PlotArea => _plotArea();
         public DataBlackboard? Board => _board();
+        public double DragThreshold => _dragThreshold();
     }
 }
