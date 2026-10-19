@@ -195,17 +195,18 @@ namespace Hevo.Charting.Interaction
         /// 按下命中:筛(形状、按键、修饰键、Accepts)→ 优先级高 → 图层靠上 → 离指针近 → 装配靠后 → 表内靠后。
         /// 返回区域下标,没有候选返回 -1。
         /// </summary>
-        internal int HitTestPress(HevoPoint p, PointerButton button, PointerModifiers modifiers, HevoRect plotArea)
-            => HitTest(p, button, modifiers, plotArea, hover: false);
+        internal int HitTestPress(HevoPoint p, PointerButton button, PointerModifiers modifiers, HevoRect plotArea, out int hitId)
+            => HitTest(p, button, modifiers, plotArea, hover: false, out hitId);
 
         /// <summary>悬停命中:只看形状和修饰键(悬停时还不知道会按哪个键)。</summary>
-        internal int HitTestHover(HevoPoint p, PointerModifiers modifiers, HevoRect plotArea)
-            => HitTest(p, PointerButton.None, modifiers, plotArea, hover: true);
+        internal int HitTestHover(HevoPoint p, PointerModifiers modifiers, HevoRect plotArea, out int hitId)
+            => HitTest(p, PointerButton.None, modifiers, plotArea, hover: true, out hitId);
 
-        private int HitTest(HevoPoint p, PointerButton button, PointerModifiers modifiers, HevoRect plotArea, bool hover)
+        private int HitTest(HevoPoint p, PointerButton button, PointerModifiers modifiers, HevoRect plotArea, bool hover, out int hitId)
         {
             int best = -1;
             float bestDist = 0;
+            hitId = 0;
             for (int i = 0; i < _flatCount; i++)
             {
                 ref readonly var f = ref _flat[i];
@@ -215,9 +216,10 @@ namespace Hevo.Charting.Interaction
                 if ((modifiers & r.RequiredModifiers) != r.RequiredModifiers) continue;
                 if (!hover && !AcceptsButton(r, button)) continue;
 
-                float d = r.Shape.Distance(p.X, p.Y, r.Tolerance, plotArea);
+                int id = r.Id;
+                float d = r.Shape.IsCustom ? r.Shape.Tester!.HitTest(p, out id) : r.Shape.Distance(p.X, p.Y, r.Tolerance, plotArea);
                 if (float.IsNaN(d)) continue;
-                if (best < 0 || Beats(in f, d, in _flat[best], bestDist)) { best = i; bestDist = d; }
+                if (best < 0 || Beats(in f, d, in _flat[best], bestDist)) { best = i; bestDist = d; hitId = id; }
             }
             return best;
         }
@@ -251,13 +253,13 @@ namespace Hevo.Charting.Interaction
             return best;
         }
 
-        /// <summary>按 (Feature, Id, Part) 找当前表里的区域;找不到返回 -1。</summary>
+        /// <summary>按 (Feature, Id, Part) 找当前表里的区域(自定义形状不看 Id,编号是命中时现算的);找不到返回 -1。</summary>
         internal int Find(Feature owner, int id, int part)
         {
             for (int i = 0; i < _flatCount; i++)
             {
                 ref readonly var f = ref _flat[i];
-                if (ReferenceEquals(f.Owner, owner) && f.Region.Id == id && f.Region.Part == part) return i;
+                if (ReferenceEquals(f.Owner, owner) && f.Region.Part == part && (f.Region.Shape.IsCustom || f.Region.Id == id)) return i;
             }
             return -1;
         }

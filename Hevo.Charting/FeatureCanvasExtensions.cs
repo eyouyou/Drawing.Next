@@ -87,6 +87,8 @@ namespace Hevo.Charting
         public bool RequireClickToActivate { get; init; } = false;
         /// <summary>true = 按下 Esc 立即解除 hover(隐藏 crosshair / tooltip),直至下次单击。</summary>
         public bool DismissOnEscape { get; init; } = false;
+        /// <summary>指针区域的拖动阈值(DIP):按下后移动不到这个距离松开算点击。默认 4。</summary>
+        public double DragThreshold { get; init; } = 4.0;
 
         // 💥 允许业务层注入自定义缩放策略
         public IZoomStrategy? ZoomStrategy { get; init; }
@@ -364,6 +366,7 @@ namespace Hevo.Charting
                 DoubleClickResetConfig = options.DoubleClickResetConfig,
                 RequireClickToActivate = options.RequireClickToActivate,
                 DismissOnEscape = options.DismissOnEscape,
+                DragThreshold = options.DragThreshold,
                 ZoomStrategy = options.ZoomStrategy ?? new SmartAdaptiveZoomStrategy(),
                 AvailabilityPort = availabilityPort
             });

@@ -113,7 +113,7 @@ namespace Hevo.Charting.Interaction
         private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
             _busy++;
-            try { if (_router.OnPress(MakeInput(e, Map(e.ChangedButton)))) e.Handled = true; }
+            try { if (_router.OnPress(MakeInput(e, Map(e.ChangedButton), e.ClickCount))) e.Handled = true; }
             finally { EndBusy(); }
         }
 
@@ -201,12 +201,12 @@ namespace Hevo.Charting.Interaction
             if (!_ownsCapture && !_cell.IsMouseOver) _router.OnLeave();
         }
 
-        private PointerInput MakeInput(MouseEventArgs e, PointerButton button)
+        private PointerInput MakeInput(MouseEventArgs e, PointerButton button, int clickCount = 0)
         {
             var dc = e.GetPosition(_cell.DrawingCanvas);
             var host = e.GetPosition(_cell);
             long ms = System.Diagnostics.Stopwatch.GetTimestamp() * 1000L / System.Diagnostics.Stopwatch.Frequency;
-            return new PointerInput(new HevoPoint((float)dc.X, (float)dc.Y), new HevoPoint((float)host.X, (float)host.Y), button, Modifiers(), ms);
+            return new PointerInput(new HevoPoint((float)dc.X, (float)dc.Y), new HevoPoint((float)host.X, (float)host.Y), button, Modifiers(), ms, clickCount);
         }
 
         private static PointerModifiers Modifiers()

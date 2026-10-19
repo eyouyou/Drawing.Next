@@ -6,10 +6,13 @@ namespace Hevo.Charting.Interaction
     /// <summary>一次指针输入,已从平台事件换算好。</summary>
     internal readonly struct PointerInput
     {
-        public PointerInput(HevoPoint position, HevoPoint hostPosition, PointerButton button, PointerModifiers modifiers, long timestampMs)
+        public PointerInput(HevoPoint position, HevoPoint hostPosition, PointerButton button, PointerModifiers modifiers, long timestampMs, int clickCount = 0)
         {
-            Position = position; HostPosition = hostPosition; Button = button; Modifiers = modifiers; TimestampMs = timestampMs;
+            Position = position; HostPosition = hostPosition; Button = button; Modifiers = modifiers; TimestampMs = timestampMs; ClickCount = clickCount;
         }
+
+        /// <summary>平台的连击计数(按下时有值,WPF ClickCount)。</summary>
+        public int ClickCount { get; }
 
         /// <summary>DrawingCanvas 坐标(DIP),区域与十字光标的口径。</summary>
         public HevoPoint Position { get; }
@@ -105,6 +108,7 @@ namespace Hevo.Charting.Interaction
         private State _state;
         private Feature? _owner;
         private PointerRegion? _region;
+        private int _regionId;
         private PointerButton _button;
         private HevoPoint _pressPos;
         private HevoPoint _pressHostPos;
@@ -126,6 +130,7 @@ namespace Hevo.Charting.Interaction
 
         private long _sequence;
         private bool _dispatching;
+        private bool _cancelPending;
 
         public PointerRouter(PointerRegionStore store, PointerPorts ports)
         {
@@ -161,38 +166,58 @@ namespace Hevo.Charting.Interaction
             if (FlushPendingFrameOnPress && host.HasPendingFrame) host.RunPendingFrame();
             if (_store.Count == 0) return false;
 
-            int hit = _store.HitTestPress(input.Position, input.Button, input.Modifiers, host.PlotArea);
+            int hit = _store.HitTestPress(input.Position, input.Button, input.Modifiers, host.PlotArea, out int hitId);
             if (hit < 0) return false;
 
             ref readonly var f = ref _store[hit];
             var owner = f.Owner;
             var region = f.Region;
 
+            var fallback = _store.Background;
+            var interval = fallback?.DoubleClickInterval ?? TimeSpan.FromMilliseconds(400);
+            double maxMove = fallback?.DoubleClickMaxMovement ?? 6.0;
+            bool isSecond = input.Button != PointerButton.Right
+                && _lastPressOwner != null && ReferenceEquals(_lastPressOwner, owner)
+                && _lastPressId == hitId && _lastPressPart == region.Part
+                && input.TimestampMs - _lastPressMs <= interval.TotalMilliseconds
+                && Math.Abs(input.Position.X - _lastPressPos.X) <= maxMove
+                && Math.Abs(input.Position.Y - _lastPressPos.Y) <= maxMove;
+            _lastPressOwner = owner; _lastPressId = hitId; _lastPressPart = region.Part;
+            _lastPressMs = input.TimestampMs; _lastPressPos = input.Position;
+
+            // Q12:只接受双击的区域,第一次按下不认领(照常平移),只记位置;第二次落在同一区域才认领
+            const PointerAccepts clickOrDrag = PointerAccepts.Click | PointerAccepts.Drag;
+            bool doubleClickOnly = input.Button != PointerButton.Right
+                && (region.Accepts & clickOrDrag) == 0 && (region.Accepts & PointerAccepts.DoubleClick) != 0;
+            if (doubleClickOnly)
+            {
+                if (region.PassThrough)
+                {
+                    // 旁观:平台判定是第二击就发 DoubleClick,按下照常交给兜底
+                    _lastPressOwner = null;
+                    if (input.ClickCount == 2)
+                        Dispatch(new PointerGesture(++_sequence, owner, hitId, region.Part, PointerPhase.DoubleClick, PointerCancelReason.None,
+                            input.Position, input.Position, input.Button, input.Modifiers));
+                    return false;
+                }
+                if (!isSecond) return false;
+            }
+
             _lastPos = input.Position;
             _lastModifiers = input.Modifiers;
 
             // 悬停在别的区域上:先让它离开
-            if (_hoverOwner != null && !(ReferenceEquals(_hoverOwner, owner) && _hoverId == region.Id && _hoverPart == region.Part))
+            if (_hoverOwner != null && !SameHover(owner, hitId, region))
                 LeaveHover(input.Position, input.Modifiers);
 
             host.Focus();
-            _store.Background?.OnPressClaimed(input.Position);
+            fallback?.OnPressClaimed(input.Position);
 
-            var fallback = _store.Background;
-            var interval = fallback?.DoubleClickInterval ?? TimeSpan.FromMilliseconds(400);
-            double maxMove = fallback?.DoubleClickMaxMovement ?? 6.0;
-            _pressIsSecondClick = input.Button != PointerButton.Right
-                && _lastPressOwner != null && ReferenceEquals(_lastPressOwner, owner)
-                && _lastPressId == region.Id && _lastPressPart == region.Part
-                && input.TimestampMs - _lastPressMs <= interval.TotalMilliseconds
-                && Math.Abs(input.Position.X - _lastPressPos.X) <= maxMove
-                && Math.Abs(input.Position.Y - _lastPressPos.Y) <= maxMove;
-            _lastPressOwner = owner; _lastPressId = region.Id; _lastPressPart = region.Part;
-            _lastPressMs = input.TimestampMs; _lastPressPos = input.Position;
-
+            _pressIsSecondClick = isSecond;
             _state = State.Pressed;
             _owner = owner;
             _region = region;
+            _regionId = hitId;
             _button = input.Button;
             _pressPos = input.Position;
             _pressHostPos = input.HostPosition;
@@ -297,6 +322,14 @@ namespace Hevo.Charting.Interaction
             LeaveHover(default, _lastModifiers);
         }
 
+        /// <summary>业务请求取消(<see cref="PointerPorts.RequestCancel"/>)。分发途中先记下,这次分发结束后再取消。</summary>
+        internal void RequestCancel()
+        {
+            if (_state == State.Idle) return;
+            if (_dispatching) { _cancelPending = true; return; }
+            CancelActive(PointerCancelReason.Requested, _lastPos ?? _pressPos, _lastModifiers);
+        }
+
         /// <summary>图表暂停(切走 Tab、最小化):拖动中取消,清悬停。</summary>
         public void OnSuspend()
         {
@@ -348,7 +381,7 @@ namespace Hevo.Charting.Interaction
             var pressHost = _pressHostPos;
             var press = _pressPos;
             var button = _button;
-            var owner = _owner; var region = _region!;
+            var owner = _owner; var region = _region!; int regionId = _regionId;
             // 先回空闲再分发。捕获先不放:平移接手就转给它(由 ChartInteractionFeature 松手时释放),接不了再释放
             bool hadCapture = _capturing;
             _state = State.Idle; _owner = null; _region = null; _capturing = false;
@@ -358,7 +391,7 @@ namespace Hevo.Charting.Interaction
 
             try
             {
-                Dispatch(new PointerGesture(++_sequence, owner, region.Id, region.Part, PointerPhase.Cancel, PointerCancelReason.SupersededByPan,
+                Dispatch(new PointerGesture(++_sequence, owner, regionId, region.Part, PointerPhase.Cancel, PointerCancelReason.SupersededByPan,
                     input.Position, press, button, input.Modifiers));
             }
             catch
@@ -379,11 +412,12 @@ namespace Hevo.Charting.Interaction
         {
             var owner = _owner;
             var region = _region;
+            int regionId = _regionId;
             var button = _button;
             var press = _pressPos;
             ResetToIdle();
             if (owner == null || region == null) return;
-            Dispatch(new PointerGesture(++_sequence, owner, region.Id, region.Part, phase, reason, position, press, button, modifiers));
+            Dispatch(new PointerGesture(++_sequence, owner, regionId, region.Part, phase, reason, position, press, button, modifiers));
         }
 
         private void ResetToIdle()
@@ -411,7 +445,7 @@ namespace Hevo.Charting.Interaction
         private void DispatchGuarded(PointerPhase phase, PointerCancelReason reason, HevoPoint position, PointerModifiers modifiers)
         {
             var region = _region!;
-            var g = new PointerGesture(++_sequence, _owner, region.Id, region.Part, phase, reason, position, _pressPos, _button, modifiers);
+            var g = new PointerGesture(++_sequence, _owner, _regionId, region.Part, phase, reason, position, _pressPos, _button, modifiers);
             try
             {
                 Dispatch(g);
@@ -433,7 +467,7 @@ namespace Hevo.Charting.Interaction
             // 别人(图表平移、框选)抓着鼠标时不改悬停
             if (host.IsMouseCapturedByOther) return;
 
-            int hit = _store.HitTestHover(p, modifiers, host.PlotArea);
+            int hit = _store.HitTestHover(p, modifiers, host.PlotArea, out int hitId);
             if (hit < 0)
             {
                 LeaveHover(p, modifiers);
@@ -443,18 +477,24 @@ namespace Hevo.Charting.Interaction
             ref readonly var f = ref _store[hit];
             var owner = f.Owner;
             var region = f.Region;
-            if (_hoverOwner != null && ReferenceEquals(_hoverOwner, owner) && _hoverId == region.Id && _hoverPart == region.Part)
+            if (_hoverOwner != null && SameHover(owner, hitId, region))
             {
+                _hoverId = hitId;
                 ApplyCursor(region.Cursor);
-                Dispatch(new PointerGesture(++_sequence, owner, region.Id, region.Part, PointerPhase.HoverMove, PointerCancelReason.None, p, p, PointerButton.None, modifiers));
+                Dispatch(new PointerGesture(++_sequence, owner, hitId, region.Part, PointerPhase.HoverMove, PointerCancelReason.None, p, p, PointerButton.None, modifiers));
                 return;
             }
 
             LeaveHover(p, modifiers);
-            _hoverOwner = owner; _hoverId = region.Id; _hoverPart = region.Part;
+            _hoverOwner = owner; _hoverId = hitId; _hoverPart = region.Part;
             ApplyCursor(region.Cursor);
-            Dispatch(new PointerGesture(++_sequence, owner, region.Id, region.Part, PointerPhase.HoverEnter, PointerCancelReason.None, p, p, PointerButton.None, modifiers));
+            Dispatch(new PointerGesture(++_sequence, owner, hitId, region.Part, PointerPhase.HoverEnter, PointerCancelReason.None, p, p, PointerButton.None, modifiers));
         }
+
+        // 同一个悬停对象:自定义形状(ElementPlot)在元素之间移动算同一个区域里移动,编号随 HoverMove 带出,
+        // 跟原来"每次移动报一次命中元素"一致,中间不插 HoverLeave
+        private bool SameHover(Feature owner, int id, PointerRegion region)
+            => ReferenceEquals(_hoverOwner, owner) && _hoverPart == region.Part && (region.Shape.IsCustom || _hoverId == id);
 
         private void LeaveHover(HevoPoint p, PointerModifiers modifiers)
         {
@@ -502,6 +542,11 @@ namespace Hevo.Charting.Interaction
             finally
             {
                 _dispatching = false;
+            }
+            if (_cancelPending)
+            {
+                _cancelPending = false;
+                if (_state != State.Idle) CancelActive(PointerCancelReason.Requested, _lastPos ?? _pressPos, _lastModifiers);
             }
 #if DEBUG
             double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;

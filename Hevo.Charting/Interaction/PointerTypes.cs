@@ -65,6 +65,8 @@ namespace Hevo.Charting.Interaction
         SupersededByPan,
         /// <summary>手势中按了另一个鼠标键。</summary>
         OtherButton,
+        /// <summary>业务经 <see cref="PointerPorts.RequestCancel"/> 主动中止(拖价格线时委托单被成交)。</summary>
+        Requested,
     }
 
     /// <summary>鼠标按键,取值对齐 Avalonia <c>MouseButton</c>。</summary>
@@ -146,6 +148,12 @@ namespace Hevo.Charting.Interaction
         /// <summary>模态区域:没有手势进行中时按 Esc,发 <see cref="PointerPhase.Escape"/> 给它。</summary>
         public bool Modal { get; init; }
 
+        /// <summary>
+        /// 框架内部:只接受双击的区域"旁观"第二次按下 —— 发 DoubleClick 但不认领,按下照常交给兜底(双击复原照常触发)。
+        /// 判定用平台的连击计数(WPF ClickCount),跟原来 MouseLeftButtonDown + ClickCount == 2 的写法一致。
+        /// </summary>
+        internal bool PassThrough { get; init; }
+
         /// <summary>拖动中隐藏十字光标。</summary>
         public bool HideCrosshairWhileActive { get; init; }
     }
@@ -156,16 +164,25 @@ namespace Hevo.Charting.Interaction
     /// </summary>
     public readonly struct PointerShape
     {
-        internal enum ShapeKind : byte { None, HLine, VLine, Segment, Rect, Circle, Polyline, WholePlot }
+        internal enum ShapeKind : byte { None, HLine, VLine, Segment, Rect, Circle, Polyline, WholePlot, Custom }
 
         internal readonly ShapeKind Kind;
         internal readonly float A, B, C, D;   // HLine: y,left,right; VLine: x,top,bottom; Segment: ax,ay,bx,by; Rect: x,y,w,h; Circle: cx,cy,r
         internal readonly ReadOnlyMemory<HevoPoint> Points;
+        internal readonly IPointerHitTester? Tester;
 
-        private PointerShape(ShapeKind kind, float a, float b, float c, float d, ReadOnlyMemory<HevoPoint> points = default)
+        private PointerShape(ShapeKind kind, float a, float b, float c, float d, ReadOnlyMemory<HevoPoint> points = default, IPointerHitTester? tester = null)
         {
-            Kind = kind; A = a; B = b; C = c; D = d; Points = points;
+            Kind = kind; A = a; B = b; C = c; D = d; Points = points; Tester = tester;
         }
+
+        /// <summary>
+        /// 框架内部:命中时现算(ElementPlot 按命中那一刻的投影找最近元素,跟原来 MouseMove 里现算一致)。
+        /// 命中结果带回元素编号,作为手势的 RegionId。业务用不到(封闭形状集合,见 Q7)。
+        /// </summary>
+        internal static PointerShape Custom(IPointerHitTester tester) => new PointerShape(ShapeKind.Custom, 0, 0, 0, 0, default, tester);
+
+        internal bool IsCustom => Kind == ShapeKind.Custom;
 
         public bool IsEmpty => Kind == ShapeKind.None;
 
@@ -257,6 +274,8 @@ namespace Hevo.Charting.Interaction
                     float dx = x - A, dy = y - B;
                     return dx * dx + dy * dy <= C * C ? 0f : float.NaN;
                 }
+                case ShapeKind.Custom:
+                    return Tester!.HitTest(new HevoPoint(x, y), out _);
                 case ShapeKind.WholePlot:
                     return !plotArea.IsEmpty && x >= plotArea.Left && x <= plotArea.Right && y >= plotArea.Top && y <= plotArea.Bottom
                         ? 0f : float.NaN;
@@ -286,6 +305,12 @@ namespace Hevo.Charting.Interaction
             float dx = px - (ax + u * vx), dy = py - (ay + u * vy);
             return (float)Math.Sqrt(dx * dx + dy * dy);
         }
+    }
+
+    /// <summary>框架内部的现算命中:命中返回距离(并给出编号),没命中返回 NaN。</summary>
+    internal interface IPointerHitTester
+    {
+        float HitTest(HevoPoint p, out int id);
     }
 
     /// <summary>
@@ -341,5 +366,18 @@ namespace Hevo.Charting.Interaction
         /// <summary>只由路由器写。Watch 它,再用 <see cref="PointerGesture.IsFor"/> 挑出自己的。</summary>
         [PortDirection(PortDirection.Output)]
         public DataPort<PointerGesture> GesturePort { get; } = new("Pointer_Gesture");
+
+        /// <summary>"请求取消"计数:每次加一,路由器就以 <see cref="PointerCancelReason.Requested"/> 取消进行中的手势。用 <see cref="RequestCancel"/> 写。</summary>
+        public DataPort<long> CancelRequestPort { get; } = new("Pointer_CancelRequest");
+
+        /// <summary>
+        /// 主动中止进行中的手势(没有就什么都不做)。须在写锁内调用(手势回调里直接调;别处套 <c>AcquireWriteLock</c>)。
+        /// 在手势回调里调用时,等这次分发结束才生效。
+        /// </summary>
+        public void RequestCancel(DataBlackboard board)
+        {
+            if (board == null) throw new ArgumentNullException(nameof(board));
+            board.WriteIfChanged(CancelRequestPort, board.Read(CancelRequestPort) + 1);
+        }
     }
 }
