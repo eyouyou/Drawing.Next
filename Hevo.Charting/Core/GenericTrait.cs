@@ -38,7 +38,9 @@ namespace Hevo.Charting.Core
             where TLayer : IChartLayer, IConsumes<TData>
             where TData : class, IVisualTrait
         {
-            return proxy.PublishData(modifier);
+            // 💥 必须显式写 <TData>:写成 PublishData(modifier) 会把委托本身当 Trait 发出去(TData 被推断成 Func<,>),
+            // 编译能过、图层永远读不到新值。显式类型实参保证绑定到"读旧值 → 调 modifier → 发新值"的实例方法。
+            return proxy.UpdateData<TData>(modifier);
         }
 
         /// <summary>
@@ -84,7 +86,8 @@ namespace Hevo.Charting.Core
             where TTarget : ISharedScope
             where TData : class, IVisualTrait
         {
-            return proxy.PublishData(modifier);
+            // 同上:显式 <TData>,否则发出去的是委托
+            return proxy.UpdateData<TData>(modifier);
         }
     }
 
