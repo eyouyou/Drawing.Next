@@ -464,8 +464,8 @@ namespace Hevo.Charting.Interaction
                 if (_hoverOwner != null || _appliedCursor != PointerCursor.Default) LeaveHover(p, modifiers);
                 return;
             }
-            // 别人(图表平移、框选)抓着鼠标时不改悬停
-            if (host.IsMouseCapturedByOther) return;
+            // 别人(图表平移、框选)抓着鼠标时悬停照常算(ElementPlot 原来在平移中也报悬停),只是不动光标
+            bool keepCursor = host.IsMouseCapturedByOther;
 
             int hit = _store.HitTestHover(p, modifiers, host.PlotArea, out int hitId);
             if (hit < 0)
@@ -480,14 +480,14 @@ namespace Hevo.Charting.Interaction
             if (_hoverOwner != null && SameHover(owner, hitId, region))
             {
                 _hoverId = hitId;
-                ApplyCursor(region.Cursor);
+                if (!keepCursor) ApplyCursor(region.Cursor);
                 Dispatch(new PointerGesture(++_sequence, owner, hitId, region.Part, PointerPhase.HoverMove, PointerCancelReason.None, p, p, PointerButton.None, modifiers));
                 return;
             }
 
             LeaveHover(p, modifiers);
             _hoverOwner = owner; _hoverId = hitId; _hoverPart = region.Part;
-            ApplyCursor(region.Cursor);
+            if (!keepCursor) ApplyCursor(region.Cursor);
             Dispatch(new PointerGesture(++_sequence, owner, hitId, region.Part, PointerPhase.HoverEnter, PointerCancelReason.None, p, p, PointerButton.None, modifiers));
         }
 

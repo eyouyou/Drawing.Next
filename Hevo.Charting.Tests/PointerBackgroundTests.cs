@@ -201,6 +201,20 @@ namespace Hevo.Charting.Tests
             Assert.True(away!.Value.IsOutOfBounds);
         });
 
+        /// <summary>原来元素悬停是普通 MouseMove 订阅,平移中指针扫过元素也报;保持。</summary>
+        [Fact]
+        public void ElementPlot_HoverStillReported_WhileChartPans() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (rig, scatter, _) = ScatterRig();
+            var hovered = new List<int>();
+            scatter.ElementHovered += (_, e) => hovered.Add(e.Index);
+            rig.Drag(Cx - 90, Cy, Cx, Cy, steps: 6);
+            var after = rig.ActiveRange;
+            rig.Close();
+            Assert.True(after.Min < rig.Initial.Min, "这是一次平移");
+            Assert.Contains(0, hovered);
+        });
+
         [Fact]
         public void ElementPlot_DoubleClick_Default_BothElementAndViewportReset() => IncrementalTestKit.RunOnSta(() =>
         {
