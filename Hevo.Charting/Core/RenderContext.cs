@@ -208,6 +208,11 @@ namespace Hevo.Charting.Core
                 // 如果有局部数据提交，合并到它的 Live 库
                 if (hasLocalDraft) liveLocalBag.CommitFrom(draftBag);
 
+#if DEBUG
+                // 只记帧数 / 写日志,不影响下面的判脏
+                cl.TickSilentDiagnosis(liveLocalBag, _liveGlobalData);
+#endif
+
                 // 如果已经脏了，就不用继续查了
                 if (cl.IsDirty) continue;
 
@@ -217,6 +222,9 @@ namespace Hevo.Charting.Core
                 if (!cl.IsDiscovered)
                 {
                     // 第一帧哪怕尺寸变了它都不管。只有专属于它的局部数据到了，它才会被“点醒”。
+                    // 有意如此:第一次 Update 要过 [RequiredTrait] 的 fail-fast 校验,等本层数据到齐再录,
+                    // 不会因为提前唤醒抛错或画出半成品。代价是只读共享 Trait 的图层永远不醒 ——
+                    // Debug 构建下 TickSilentDiagnosis 会把这种图层报出来。
                     if (hasLocalDraft) cl.MarkDirty();
                     continue;
                 }
