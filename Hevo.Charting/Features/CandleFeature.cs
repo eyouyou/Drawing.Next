@@ -108,7 +108,7 @@ namespace Hevo.Charting.Features
         // 动态层：永远只负责绘制“最后一根”正在实时跳动的 K 线，以及挂载十字光标等热数据。
         private readonly CandleLayer _dynamicLayer = new() { Level = ChartLayerType.Interaction };
 
-        // 静态层上次录制时四列的引用版本(DataBlackboard.GetIdentityVersion)。只存令牌、不存列引用:
+        // 静态层上次录制时四列的引用版本(ctx.PortIdentity)。只存令牌、不存列引用:
         // 列缓冲会被纪元回收重写(开发规范《DataBlackboard 与 UsePort 物理读取铁律》第 5 条),存引用跨帧比较会被
         // 缓冲池 A → B → A 换回同一块数组骗过;引用版本在每次换块时都变,换回来也算变。
         private VersionToken _staticOpen, _staticHigh, _staticLow, _staticClose;
