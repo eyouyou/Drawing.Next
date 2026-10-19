@@ -30,7 +30,9 @@ namespace Hevo.Charting.Interaction
         private double _friction;
         private double _minV;
         private double _windowMs;
-        private Action<double>? _applyDelta;
+        // K 线这类按整根吸附的横轴,一帧的位移可能不到一根:没消费掉的像素留到下一帧累加
+        private double _residualPx;
+        private Func<double, double>? _applyDelta;
         private Func<RealRange>? _readActive;
         private IPointerHost? _clock;
         private Action? _tickHandler;
@@ -47,7 +49,8 @@ namespace Hevo.Charting.Interaction
         }
 
         /// <summary>抬手时启动衰减循环;速度低于阈值则不启动。可重复调 Start —— 内部先 Stop 旧循环。</summary>
-        public void Start(InertiaPanOptions config, IPointerHost clock, Action<double> applyPxDelta, Func<RealRange> readActiveRange)
+        /// <param name="applyPxDelta">平移若干像素,返回真正消费的像素(按整根吸附时可能是 0)。</param>
+        public void Start(InertiaPanOptions config, IPointerHost clock, Func<double, double> applyPxDelta, Func<RealRange> readActiveRange)
         {
             Stop();
             _windowMs = config.VelocityWindowMs;
@@ -56,6 +59,7 @@ namespace Hevo.Charting.Interaction
 
             _running = true;
             _vPxPerSec = v;
+            _residualPx = 0;
             _friction = config.Friction;
             _minV = config.MinVelocityPxPerSec;
             _applyDelta = applyPxDelta;
@@ -104,9 +108,14 @@ namespace Hevo.Charting.Interaction
             _lastTickMs = now;
             if (dt <= 0 || dt > MaxFrameDeltaSec) return; // 异常帧跳过,保留 velocity
 
-            // 撞墙检测: 比对 ActiveRange 是否真动了(被 ViewportManager Hard 钳回则视为撞墙)
+            // 撞墙检测: 比对 ActiveRange 是否真动了(被 ViewportManager Hard 钳回则视为撞墙)。
+            // 只在这一帧真的写了视口时判:不到一根被吸附截成 0 不是撞墙。Start 后紧跟的那一帧 dt 常常只有一两毫秒,
+            // 按撞墙停的话,甩动松手后惯性多半一帧就没了
+            _residualPx += _vPxPerSec * dt;
             var before = _readActive();
-            _applyDelta(_vPxPerSec * dt);
+            double consumed = _applyDelta(_residualPx);
+            if (consumed == 0) { Decay(dt); return; }
+            _residualPx -= consumed;
             var after = _readActive();
             if (after.IsValid && before.IsValid
                 && Math.Abs(after.Min - before.Min) < MathTolerance.NumericEqual
@@ -115,6 +124,11 @@ namespace Hevo.Charting.Interaction
                 Stop(); return;
             }
 
+            Decay(dt);
+        }
+
+        private void Decay(double dt)
+        {
             // 按 FpsBaseline (60Hz) 等效衰减:跨显示器刷新率保持一致手感
             _vPxPerSec *= Math.Pow(_friction, dt * FpsBaseline);
             if (Math.Abs(_vPxPerSec) < _minV) Stop();
