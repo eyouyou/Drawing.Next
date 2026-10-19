@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Media;
@@ -227,6 +227,40 @@ namespace Hevo.Charting.Tests
             cell.Invalidate();
             Assert.Equal(0, backend.LastRecordedLayers);
             Assert.Equal(0, backend.LastRepaintedSurfaces);
+        });
+
+        // DrawPolygon / DrawBand:横竖边的填充跟 WPF 逐像素一致(两边顶点都取设备像素边界),断带处为空,分段两色各在各的位置
+        [Fact]
+        public void FillCommands_MatchWpf() => IncrementalTestKit.RunOnSta(() =>
+        {
+            using var cells = new Cells();
+            var poly = new List<HevoPoint> { new(20.3f, 10.6f), new(90.7f, 10.6f), new(90.7f, 30.2f), new(20.3f, 30.2f) };
+            var gap = new HevoBand();
+            for (int i = 0; i <= 22; i++)
+            {
+                if (i >= 10 && i <= 12) gap.AddGap();
+                else gap.Add(10.4f + i * 10, 60.3f, 100.6f);
+            }
+            var wave = new HevoBand();
+            for (int i = 0; i <= 110; i++)
+            {
+                float x = 10 + i * 2;
+                wave.Add(x, 130 - 20 * MathF.Sin((x - 10) / 220f * MathF.PI * 2), 130);
+            }
+            Action<IDrawingSink> axis = d =>
+            {
+                d.DrawPolygon(Down, null, poly);
+                d.DrawBand(Up, null, gap);
+            };
+            var wpf = RenderOnce(cells, axis, null);
+            var skia = RenderOnce(cells, axis, new SkiaRenderBackend());
+            Assert.True(Count(wpf) > 5000);
+            Assert.Equal(0, CountDiff(wpf, skia));
+
+            var crossed = RenderOnce(cells, d => d.DrawBand(Down, null, wave, Up), new SkiaRenderBackend());
+            Assert.Equal(0xFF00A000u, crossed[120 * W + 65]);  // 波峰下方:上边在上
+            Assert.Equal(0xFFFF0000u, crossed[140 * W + 175]); // 波谷:穿越
+            Assert.Equal(0u, crossed[140 * W + 65]);
         });
 
         [Fact]

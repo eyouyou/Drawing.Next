@@ -245,6 +245,48 @@ namespace Hevo.Charting.Skia
                         if (Stroke(cmd.Pen) is { } pen) canvas.DrawPath(p, UsePath(pen, p));
                         break;
                     }
+                    case DrawOp.DrawPolygon:
+                    {
+                        if (cmd.RefData is not List<HevoPoint> pts || pts.Count < 3) break;
+                        var s = CollectionsMarshal.AsSpan(pts);
+                        if (Fill(cmd.Brush) is { } fill)
+                        {
+                            var w = new PathWriter(_path, true, true, 0f, _scale);
+                            if (FillGeometry.Polygon(s, ref w)) canvas.DrawPath(_path, UsePath(fill, _path));
+                        }
+                        if (Stroke(cmd.Pen) is { } pen)
+                        {
+                            var w = new PathWriter(_path, false, true, PixelSnap.HalfPx(DeviceThickness(cmd.Pen!.Thickness)), _scale);
+                            if (FillGeometry.Polygon(s, ref w)) canvas.DrawPath(_path, UsePath(pen, _path));
+                        }
+                        break;
+                    }
+                    case DrawOp.DrawBand:
+                    {
+                        if (cmd.RefData is not HevoBand band || band.Count < 2) break;
+                        var up = CollectionsMarshal.AsSpan(band.Upper);
+                        var lo = CollectionsMarshal.AsSpan(band.Lower);
+                        var crossed = band.CrossedBrush;
+                        if (Fill(cmd.Brush) is { } fill)
+                        {
+                            var w = new PathWriter(_path, true, true, 0f, _scale);
+                            FillGeometry.Band(up, lo, crossed != null ? 1 : 0, ref w);
+                            if (w.Figures > 0) canvas.DrawPath(_path, UsePath(fill, _path));
+                        }
+                        if (crossed != null && Fill(crossed) is { } crossedFill)
+                        {
+                            var w = new PathWriter(_path, true, true, 0f, _scale);
+                            FillGeometry.Band(up, lo, -1, ref w);
+                            if (w.Figures > 0) canvas.DrawPath(_path, UsePath(crossedFill, _path));
+                        }
+                        if (Stroke(cmd.Pen) is { } pen)
+                        {
+                            var w = new PathWriter(_path, false, false, PixelSnap.HalfPx(DeviceThickness(cmd.Pen!.Thickness)), _scale);
+                            FillGeometry.BandEdges(up, lo, ref w);
+                            if (w.Figures > 0) canvas.DrawPath(_path, UsePath(pen, _path));
+                        }
+                        break;
+                    }
                     case DrawOp.DrawText:
                         Text(cmd);
                         break;
@@ -299,6 +341,29 @@ namespace Hevo.Charting.Skia
         }
 
         private HevoRect InsideStroke(HevoRect r, double deviceThickness) => PixelSnap.InsideStroke(r, deviceThickness, _scale);
+
+        /// <summary>DrawPolygon / DrawBand 写进复用的 _path(Reset 后重填)。顶点对齐同 WPF 后端:填充取设备像素边界,描边同 polyline。</summary>
+        private struct PathWriter : IFigureWriter
+        {
+            private readonly SKPath _p;
+            private readonly bool _fill, _closed;
+            private readonly float _half, _k;
+            public int Figures;
+
+            public PathWriter(SKPath path, bool fill, bool closed, float half, float k)
+            {
+                _p = path; _fill = fill; _closed = closed; _half = half; _k = k; Figures = 0;
+                path.Reset(); // 默认非零环绕,跟 WPF / 位图后端一致
+            }
+
+            private SKPoint S(HevoPoint p) => _fill
+                ? new SKPoint(PixelSnap.FillVertex(p.X, _k), PixelSnap.FillVertex(p.Y, _k))
+                : new SKPoint(PixelSnap.Vertex(p.X, _half, _k), PixelSnap.Vertex(p.Y, _half, _k));
+
+            public void Begin(HevoPoint p) { _p.MoveTo(S(p)); Figures++; }
+            public void LineTo(HevoPoint p) => _p.LineTo(S(p));
+            public void End() { if (_closed) _p.Close(); }
+        }
 
         private void Rect(HevoRect r, IHevoBrush? brush, HevoPen? penDesc)
         {
