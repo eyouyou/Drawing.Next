@@ -86,21 +86,30 @@ namespace Hevo.Charting.Abstractions
         public const int MaxTraitTypes = 1024;
 
         private static int _counter = -1;
-        public static int Next()
+        public static int Next(Type traitType)
         {
             int next = Interlocked.Increment(ref _counter);
             if (next >= MaxTraitTypes)
                 throw new InvalidOperationException(
                     $"已注册的 IVisualTrait 类型超过硬上限 {MaxTraitTypes}。请检查是否有泛型滥用导致 TraitId<T> 不断膨胀。");
+#if DEBUG
+            s_names[next] = traitType.Name;
+#endif
             return next;
         }
+
+#if DEBUG
+        // 只给 Debug 诊断用:按 id 反查 Trait 类型名(图层判脏只存 id)。Release 不留这张表。
+        private static readonly string?[] s_names = new string?[MaxTraitTypes];
+        public static string NameOf(int id) => (uint)id < MaxTraitTypes ? s_names[id] ?? $"#{id}" : $"#{id}";
+#endif
         public static int CurrentCount => Volatile.Read(ref _counter) + 1;
     }
 
     public static class TraitId<T> where T : class
     {
         // 泛型静态缓存：JIT 编译期就会把它优化为极致的常量访问
-        public static readonly int Id = TraitIndexer.Next();
+        public static readonly int Id = TraitIndexer.Next(typeof(T));
     }
 
     // ==========================================
@@ -176,6 +185,21 @@ namespace Hevo.Charting.Abstractions
             foreach (int id in draftBag._changedIds)
             {
                 _repo[id] = draftBag._repo[id];
+            }
+        }
+
+        /// <summary>
+        /// 把另一个袋子里变过的 Trait 逐个发布进来(跟 <see cref="Publish{T}"/> 一样登记为"变过")。
+        /// 跟 <see cref="CommitFrom"/> 的区别:CommitFrom 是草稿 → 正式库,不登记变化;这里是往草稿里追加。
+        /// </summary>
+        internal void PublishAllFrom(VisualDataBag source)
+        {
+            if (source.IsEmpty) return;
+            if (source._repo.Length > _repo.Length) Array.Resize(ref _repo, source._repo.Length);
+            foreach (int id in source._changedIds)
+            {
+                _repo[id] = source._repo[id];
+                _changedIds.Add(id);
             }
         }
 

@@ -142,6 +142,57 @@ namespace Hevo.Charting.Abstractions
             IsDirty = true;
         }
 
+#if DEBUG
+        // Debug 诊断:挂上后连续这么多帧都没录出任何指令,就在输出窗口报一次。
+        // 120 帧:按需出帧,一次拖拽 / 一秒 tick 推送就有几十帧,数据正常到达的图层早该画出东西;
+        // 再短会把"数据还在加载"的图层误报出来。
+        internal const int SilentLayerFrameThreshold = 120;
+
+        internal int FramesSinceAttach;
+        internal bool HasRecordedContent;
+        /// <summary>报过的诊断文本(测试读它;null = 还没报)。</summary>
+        internal string? SilentLayerDiagnosis;
+
+        // 每帧 RenderContext.SubmitSync 调一次。只写日志:不抛、不标脏、不改任何渲染状态。
+        // 只报一次,只报"从挂上到现在一条指令都没录出来"的图层;被隐藏的帧不计数(隐藏时不画是预期)。
+        internal void TickSilentDiagnosis(VisualDataBag liveLocal, VisualDataBag liveGlobal)
+        {
+            if (HasRecordedContent || SilentLayerDiagnosis != null) return;
+            var visibility = liveLocal.Get<VisibilityTrait>() ?? liveGlobal.Get<VisibilityTrait>();
+            if (visibility is { IsVisible: false }) return;
+            if (++FramesSinceAttach < SilentLayerFrameThreshold) return;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[Hevo.Charting] 图层 '").Append(Name).Append("' (").Append(GetType().Name)
+              .Append(") 挂上后 ").Append(FramesSinceAttach).Append(" 帧没录出任何指令。");
+            if (!IsDiscovered)
+            {
+                // 深度睡眠:还没被唤醒过,OnUpdate 一次都没跑
+                sb.Append("没有喂过数据:OnUpdate 一次都没跑,图层要等第一份发到本层的 Trait 才会被唤醒。")
+                  .Append("常见原因:Feature 只往共享作用域发(ctx.Shared()),本层什么都没收到;图层只读共享 Trait;")
+                  .Append("用 canvas.AddLayer / AddUnmanagedLayer 挂了层,但没人给它喂数据。")
+                  .Append("改法:Feature 里在 OnProject 用 ctx.For(layer).PublishData 发本层的数据 / 样式 Trait;")
+                  .Append("不用 Feature 时用 cell.AddUnmanagedLayer(layer) 返回的代理 PublishData。");
+            }
+            else
+            {
+                List<string>? nulls = null;
+                foreach (var kvp in DependencyTracker.TrackedRefs)
+                {
+                    if (kvp.Value is null) (nulls ??= new List<string>()).Add(TraitIndexer.NameOf(kvp.Key));
+                }
+                if (nulls != null)
+                    sb.Append("OnUpdate 读到的这些 Trait 在本层和共享作用域里都是 null:").Append(string.Join(", ", nulls))
+                      .Append("。检查它们是不是发错了作用域(哪些是共享的见 06 号文档「Trait 作用域」)。");
+                else
+                    sb.Append("OnUpdate 跑过,读到的 Trait 都在,但没有画任何东西(检查投影区间 / 数据长度)。");
+            }
+            sb.Append("如果本层就是要等用户操作才画(比如标记层),可忽略。");
+            SilentLayerDiagnosis = sb.ToString();
+            System.Diagnostics.Debug.WriteLine(SilentLayerDiagnosis);
+        }
+#endif
+
         /// <summary>
         /// OnUpdate 是否必须在 UI 线程执行(直接读写 WPF 控件 / DependencyObject 的图层返回 true)。
         /// PlotMode.Parallel 下这类图层不进线程池,留在 UI 线程录制。
@@ -212,6 +263,10 @@ namespace Hevo.Charting.Abstractions
             //    构造期会清空上一帧记忆,因此仅在 IsDirty=true(确认进入渲染分支)时再创建。
             var tracker = new TrackerDataProxy(this, data);
             OnUpdate(tracker, active.Drawing, active.Widget);
+#if DEBUG
+            if (active.Drawing.Commands.Count > 0 || active.Bitmap.PixelData != IntPtr.Zero || !active.Widget.IsEmpty)
+                HasRecordedContent = true;
+#endif
 
             // 5. 标记已完成首次发现:从下一帧起 SubmitSync 走 Strategy B 自动判脏
             IsDiscovered = true;
