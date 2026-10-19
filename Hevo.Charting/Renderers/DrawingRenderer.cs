@@ -230,6 +230,42 @@ namespace Hevo.Charting.Renderers
                         break;
                     }
 
+                    case DrawOp.DrawPolygon:
+                    {
+                        if (cmd.RefData is not List<HevoPoint> polyPts || polyPts.Count < 3) break;
+                        var ps = CollectionsMarshal.AsSpan(polyPts);
+                        var brush = GetBrush(cmd.Brush);
+                        if (brush != null && BuildPolygon(ps, true, 0f, k) is { } fillGeo)
+                            dc.DrawGeometry(brush, null, fillGeo);
+                        var pen = GetPen(cmd.Pen);
+                        if (pen != null)
+                        {
+                            float vHalf = PixelSnap.HalfPx(PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k));
+                            if (BuildPolygon(ps, false, vHalf, k) is { } strokeGeo) dc.DrawGeometry(null, pen, strokeGeo);
+                        }
+                        break;
+                    }
+                    case DrawOp.DrawBand:
+                    {
+                        if (cmd.RefData is not HevoBand band || band.Count < 2) break;
+                        var up = CollectionsMarshal.AsSpan(band.Upper);
+                        var lo = CollectionsMarshal.AsSpan(band.Lower);
+                        var crossed = band.CrossedBrush;
+                        // 分段时两种颜色各一个几何:同一个 StreamGeometry 只能配一个画刷
+                        var brush = GetBrush(cmd.Brush);
+                        if (brush != null && BuildBand(up, lo, crossed != null ? 1 : 0, k) is { } aboveGeo)
+                            dc.DrawGeometry(brush, null, aboveGeo);
+                        if (crossed != null && GetBrush(crossed) is { } crossedBrush && BuildBand(up, lo, -1, k) is { } crossedGeo)
+                            dc.DrawGeometry(crossedBrush, null, crossedGeo);
+                        var pen = GetPen(cmd.Pen);
+                        if (pen != null)
+                        {
+                            float vHalf = PixelSnap.HalfPx(PixelSnap.DeviceThickness(cmd.Pen!.Thickness, k));
+                            if (BuildBandEdges(up, lo, vHalf, k) is { } edgeGeo) dc.DrawGeometry(null, pen, edgeGeo);
+                        }
+                        break;
+                    }
+
                     case DrawOp.DrawGeometry:
                         if (cmd.RefData is string svg)
                         {
@@ -425,6 +461,74 @@ namespace Hevo.Charting.Renderers
                     new Point(PixelSnap.Vertex(p3.X, vHalf, k), PixelSnap.Vertex(p3.Y, vHalf, k)),
                     isStroked: true, isSmoothJoin: false);
             }
+            geo.Freeze();
+            return geo;
+        }
+
+        // 填充图形:顶点按设备像素边界取整(同 FillRect),横竖边是实心像素;描边图形:顶点同 polyline 的 Vertex。
+        // 非零环绕,跟位图 / Skia 后端一致(StreamGeometry 默认是奇偶)。
+        private struct GeoWriter : IFigureWriter
+        {
+            private readonly StreamGeometryContext _ctx;
+            private readonly bool _fill, _closed;
+            private readonly float _half, _k;
+            public int Figures;
+
+            public GeoWriter(StreamGeometryContext ctx, bool fill, bool closed, float half, float k)
+            {
+                _ctx = ctx; _fill = fill; _closed = closed; _half = half; _k = k; Figures = 0;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            private Point S(HevoPoint p) => _fill
+                ? new Point(PixelSnap.FillVertex(p.X, _k), PixelSnap.FillVertex(p.Y, _k))
+                : new Point(PixelSnap.Vertex(p.X, _half, _k), PixelSnap.Vertex(p.Y, _half, _k));
+
+            public void Begin(HevoPoint p) { _ctx.BeginFigure(S(p), _fill, _closed); Figures++; }
+            public void LineTo(HevoPoint p) => _ctx.LineTo(S(p), !_fill, false);
+            public void End() { }
+        }
+
+        private static Geometry? BuildPolygon(ReadOnlySpan<HevoPoint> pts, bool fill, float vHalf, float k)
+        {
+            var geo = new StreamGeometry { FillRule = FillRule.Nonzero };
+            bool any;
+            using (var ctx = geo.Open())
+            {
+                var w = new GeoWriter(ctx, fill, closed: true, vHalf, k);
+                any = FillGeometry.Polygon(pts, ref w);
+            }
+            if (!any) return null;
+            geo.Freeze();
+            return geo;
+        }
+
+        private static Geometry? BuildBand(ReadOnlySpan<HevoPoint> up, ReadOnlySpan<HevoPoint> lo, int sign, float k)
+        {
+            var geo = new StreamGeometry { FillRule = FillRule.Nonzero };
+            int figures;
+            using (var ctx = geo.Open())
+            {
+                var w = new GeoWriter(ctx, fill: true, closed: true, 0f, k);
+                FillGeometry.Band(up, lo, sign, ref w);
+                figures = w.Figures;
+            }
+            if (figures == 0) return null;
+            geo.Freeze();
+            return geo;
+        }
+
+        private static Geometry? BuildBandEdges(ReadOnlySpan<HevoPoint> up, ReadOnlySpan<HevoPoint> lo, float vHalf, float k)
+        {
+            var geo = new StreamGeometry();
+            int figures;
+            using (var ctx = geo.Open())
+            {
+                var w = new GeoWriter(ctx, fill: false, closed: false, vHalf, k);
+                FillGeometry.BandEdges(up, lo, ref w);
+                figures = w.Figures;
+            }
+            if (figures == 0) return null;
             geo.Freeze();
             return geo;
         }

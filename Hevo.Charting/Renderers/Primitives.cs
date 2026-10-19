@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace Hevo.Charting.Renderers
 {
     /// <summary>
-    /// 16 个原子绘图操作指令。
+    /// 18 个原子绘图操作指令。
     /// 涵盖了从基础几何、批量优化到媒体流的所有能力。
     /// </summary>
     public enum DrawOp : byte
@@ -35,7 +35,12 @@ namespace Hevo.Charting.Renderers
         PushClip,
         PushOpacity,
         PushTransform,
-        Pop
+        Pop,
+
+        // --- 填充 (2个) ---
+        // 追加在末尾而不是插进"基础几何":已有指令的枚举值保持不变。
+        DrawPolygon,          // 闭合多边形:填充 + 可选描边(实心箭头、矩形 / 平行四边形画线工具)
+        DrawBand,             // 两条折线之间的带状填充(区间填色、布林带、通道),NaN 断带,可按上下穿越分两色
     }
 
     /// <summary>

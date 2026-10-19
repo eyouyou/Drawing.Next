@@ -180,6 +180,61 @@ namespace Hevo.Charting.Tests
             });
         }
 
+        // ── 06 号文档「填充」:DrawBand 区间填色 ───────────────────────────
+
+        private struct FigureCount : IFigureWriter
+        {
+            public int Figures;
+            public void Begin(HevoPoint p) => Figures++;
+            public void LineTo(HevoPoint p) { }
+            public void End() { }
+        }
+
+        [Fact]
+        public void RangeShadeLayer_RecordsOneClippedBand_WithGapAndTwoSides()
+        {
+            // 价格围绕阈值 100 上下穿越;前 10 根暖机期 NaN,第 30 根停牌缺口
+            var close = Prices(60);
+            int n = close.Length;
+            var threshold = new double[n];
+            for (int i = 0; i < n; i++) threshold[i] = 100;
+            for (int i = 0; i < 10; i++) close[i] = double.NaN;
+            close[30] = double.NaN;
+
+            IncrementalTestKit.RunOnSta(() =>
+            {
+                var layer = new Hevo.Charting.DocSamples.Fill.RangeShadeLayer();
+                var data = new TraitBag()
+                    .With(new Hevo.Charting.DocSamples.Fill.RangeShadeTrait(close, threshold))
+                    .With(Hevo.Charting.DocSamples.Fill.RangeShadeStyle.Create(System.Windows.Media.Colors.Green, System.Windows.Media.Colors.Red))
+                    .With(ScaleStrategyTrait.LineMode)
+                    .With(new PlotAreaTrait(new HevoRect(0, 0, 400, 200)))
+                    .With(new XAxisTrait(new RealRange(0, n - 1)))
+                    .With(new YAxisTrait(new RealRange(80, 130)));
+
+                layer.MarkDirty();
+                layer.Update(data);
+                layer.SwapBuffer();
+
+                var cmds = ((LayerBuffer)layer.Buffer).Drawing.Commands;
+                Assert.Equal(new[] { DrawOp.PushClip, DrawOp.DrawBand, DrawOp.Pop }, cmds.Select(c => c.Op));
+                var band = Assert.IsType<HevoBand>(cmds[1].RefData);
+                Assert.Equal(n, band.Count); // NaN 原样留在带子里(断带),不跳过
+                Assert.NotNull(band.CrossedBrush);
+
+                var up = band.Upper.ToArray();
+                var lo = band.Lower.ToArray();
+                var whole = new FigureCount();
+                FillGeometry.Band(up, lo, 0, ref whole);
+                Assert.Equal(2, whole.Figures); // 缺口两侧各一段
+                var above = new FigureCount();
+                var below = new FigureCount();
+                FillGeometry.Band(up, lo, +1, ref above);
+                FillGeometry.Band(up, lo, -1, ref below);
+                Assert.True(above.Figures > 0 && below.Figures > 0, "价格在阈值上下都有,两种颜色都该出图形");
+            });
+        }
+
         // ── 15 分钟上手 L2:C# 指标类 ──────────────────────────────────────
 
         [Fact]
