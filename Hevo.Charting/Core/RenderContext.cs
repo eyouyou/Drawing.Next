@@ -171,6 +171,20 @@ namespace Hevo.Charting.Core
         }
 
         /// <summary>
+        /// 把帧外攒下的本层 Trait 并进本帧该图层的草稿,跟 Feature 在 OnProject 里 For(layer).PublishData 等价
+        /// (SubmitSync 合并草稿时照常唤醒 / 判脏)。给 <see cref="LayerFeed"/> 用。
+        /// </summary>
+        internal void PublishLocalDraft(IChartLayer layer, VisualDataBag pending)
+        {
+            if (!_transactionMap.TryGetValue(layer, out var draftBag))
+            {
+                draftBag = new VisualDataBag();
+                _transactionMap[layer] = draftBag;
+            }
+            draftBag.PublishAllFrom(pending);
+        }
+
+        /// <summary>
         /// 获取全局共享属性的操作代理。
         /// 修改全局配置（如主题、坐标系）会存入全局草稿箱。
         /// </summary>

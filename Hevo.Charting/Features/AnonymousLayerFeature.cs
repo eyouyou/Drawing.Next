@@ -8,6 +8,12 @@ namespace Hevo.Charting.Features
     {
         /// <summary>
         /// 💥 极简逃生舱：允许用户一键添加物理图层，无需编写 Feature 类！
+        /// <para>
+        /// 只负责挂层和生命周期,不喂数据。图层要等第一份发到本层的 Trait 才画(深度睡眠,见 00 号文档 §16.1),
+        /// 所以还得有一个持有这个图层引用的 Feature 在 OnProject 里 <c>ctx.For(layer).PublishData(...)</c>。
+        /// 完全不用 Feature 时改用 <see cref="ChartCell.AddUnmanagedLayer{TLayer}"/>,用它返回的代理喂数据。
+        /// 包出来的是 ChartFeature,要求 cell 上已挂视口端口(ChartReactiveSchema 会自动补)。
+        /// </para>
         /// </summary>
         public static IFeatureContext AddLayer(this IFeatureContext context, IChartLayer layer, FeaturePhase phase = FeaturePhase.Series)
         {

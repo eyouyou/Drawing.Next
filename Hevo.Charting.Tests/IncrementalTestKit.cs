@@ -75,6 +75,10 @@ namespace Hevo.Charting.Tests
         /// <summary>把 protected AttachLayer 暴露给测试在 Compose 委托里用。</summary>
         public void Attach<TLayer>(TLayer layer) where TLayer : IChartLayer => AttachLayer(layer);
 
+        /// <summary>挂层并经 AttachLayer 返回的代理发一份 Trait(Feature 在 OnCompose 里发静态样式的写法)。</summary>
+        public void AttachAndPublish<TLayer, T>(TLayer layer, T trait) where TLayer : IChartLayer where T : class
+            => AttachLayer(layer).PublishData(trait);
+
         protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             => OnComposeAction?.Invoke(this);
 

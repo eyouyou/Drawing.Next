@@ -168,10 +168,11 @@ namespace Hevo.Charting.Abstractions
             if (!IsDiscovered)
             {
                 // 深度睡眠:还没被唤醒过,OnUpdate 一次都没跑
-                sb.Append("OnUpdate 一次都没跑过 —— 图层要等第一份发到本层(ctx.For(layer))的 Trait 才会被唤醒。")
+                sb.Append("没有喂过数据:OnUpdate 一次都没跑,图层要等第一份发到本层的 Trait 才会被唤醒。")
                   .Append("常见原因:Feature 只往共享作用域发(ctx.Shared()),本层什么都没收到;图层只读共享 Trait;")
-                  .Append("用 AddLayer 逃生舱挂的层没有 Feature 给它发数据。")
-                  .Append("改法:由拥有这一层的 Feature 在 OnProject 里用 ctx.For(layer).PublishData 发本层的数据 / 样式 Trait。");
+                  .Append("用 canvas.AddLayer / AddUnmanagedLayer 挂了层,但没人给它喂数据。")
+                  .Append("改法:Feature 里在 OnProject 用 ctx.For(layer).PublishData 发本层的数据 / 样式 Trait;")
+                  .Append("不用 Feature 时用 cell.AddUnmanagedLayer(layer) 返回的代理 PublishData。");
             }
             else
             {

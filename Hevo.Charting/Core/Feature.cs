@@ -155,7 +155,7 @@ namespace Hevo.Charting.Core
                 layer.Name = $"{layer.Name}_{InstanceId}";
             }
             if (!_managedLayers.Contains(layer)) _managedLayers.Add(layer);
-            return Chart.AddUnmanagedLayer(layer);
+            return Chart.AttachFeatureLayer(layer);
         }
 
         // ==========================================

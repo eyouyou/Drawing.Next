@@ -189,6 +189,21 @@ namespace Hevo.Charting.Abstractions
         }
 
         /// <summary>
+        /// 把另一个袋子里变过的 Trait 逐个发布进来(跟 <see cref="Publish{T}"/> 一样登记为"变过")。
+        /// 跟 <see cref="CommitFrom"/> 的区别:CommitFrom 是草稿 → 正式库,不登记变化;这里是往草稿里追加。
+        /// </summary>
+        internal void PublishAllFrom(VisualDataBag source)
+        {
+            if (source.IsEmpty) return;
+            if (source._repo.Length > _repo.Length) Array.Resize(ref _repo, source._repo.Length);
+            foreach (int id in source._changedIds)
+            {
+                _repo[id] = source._repo[id];
+                _changedIds.Add(id);
+            }
+        }
+
+        /// <summary>
         /// 清空草稿箱数据，避免内存泄漏。
         /// </summary>
         internal void Clear()

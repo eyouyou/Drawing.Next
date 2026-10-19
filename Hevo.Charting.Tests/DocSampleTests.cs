@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
+using Hevo.Charting.DocSamples.BareCell;
 using Hevo.Charting.DocSamples.Bollinger;
 using Hevo.Charting.DocSamples.QuickStart;
 using Hevo.Charting.Features;
@@ -381,6 +382,27 @@ namespace Hevo.Charting.Tests
             h.Frame();
             Assert.Equal(3, layout.ProjectCount);
             Assert.Equal(3, feature.PublishCount);
+        });
+
+        // ── 裸 ChartCell(不用 Feature):喂了才画,再喂再画 ──────────────────
+
+        [Fact]
+        public void BareCell_FedLayerDraws_AndRedrawsOnNextFeed() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var cell = new ChartCell();
+            var layer = new LevelLineLayer();
+            var feed = BareCellSample.AddLevelLine(cell, layer, y: 40);
+
+            cell.RunFrameNow(PlotMode.Sync);
+            var first = ((LayerBuffer)layer.Buffer).Drawing.Commands.Count;
+            Assert.True(first > 0, "喂了数据的图层应在下一帧录出指令");
+            Assert.True(layer.IsDiscovered);
+
+            var style = feed.Read<LevelLineTrait>()!;
+            feed.PublishData(style with { Y = 60 });
+            cell.RunFrameNow(PlotMode.Sync);
+            Assert.Equal(60, feed.Read<LevelLineTrait>()!.Y);
+            Assert.Equal(1, cell.LastFrameDirtyLayers);
         });
     }
 }
