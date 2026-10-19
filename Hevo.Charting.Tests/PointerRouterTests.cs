@@ -28,7 +28,7 @@ namespace Hevo.Charting.Tests
             public bool RequireClickToActivate { get; init; }
             public bool DismissOnEscape { get; init; }
             public BoxZoomOptions? BoxZoom { get; init; }
-            public Action<InteractionBuilder>? Extra { get; init; }
+            public Action<InteractionBuilder, Schema>? Extra { get; init; }
 
             protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
 
@@ -45,7 +45,7 @@ namespace Hevo.Charting.Tests
                             boxZoomConfig: BoxZoom, requireClickToActivate: RequireClickToActivate, dismissOnEscape: DismissOnEscape,
                             // 速度采样窗口放宽:CI 上一帧可能很慢,默认 60ms 窗口里可能一个采样都不剩,惯性就不启动
                             inertiaPanConfig: new InertiaPanOptions { VelocityWindowMs = 2000 });
-                        Extra?.Invoke(i);
+                        Extra?.Invoke(i, this);
                     });
             }
         }
@@ -63,7 +63,7 @@ namespace Hevo.Charting.Tests
             private readonly Window _window;
 
             public Rig(bool requireClickToActivate = false, BoxZoomOptions? boxZoom = null, bool dismissOnEscape = false,
-                Action<InteractionBuilder>? extra = null, double left = -10000)
+                Action<InteractionBuilder, Schema>? extra = null, double left = -10000)
             {
                 Schema = new Schema { RequireClickToActivate = requireClickToActivate, BoxZoom = boxZoom, DismissOnEscape = dismissOnEscape, Extra = extra };
                 Cell.Template = Schema;
@@ -80,6 +80,18 @@ namespace Hevo.Charting.Tests
                 Interaction = Schema.ListFeatures().OfType<ChartInteractionFeature>().Single();
                 Router = Schema.ListFeatures().OfType<PointerRouterFeature>().Single();
 
+                Seed(Board, Schema, _viewport);
+                Schema.Trigger.Push(Board);
+                Schema.InvalidateEnvironment();
+                Frame();
+                Frame();   // 第二帧让视口钳制落定:否则第一次拖动的位移被首屏钳制吃掉,跟"先加 Feature 再拖"的对照组差一步
+                Mouse = new RawMouse(_window);
+                Initial = ActiveRange;
+            }
+
+            /// <summary>100 根 K 线 + Y 量程 80–120。</summary>
+            public static void Seed(DataBlackboard board, Schema schema, ViewportPorts viewport)
+            {
                 var time = new DateTime[Length];
                 double[] open = new double[Length], high = new double[Length], low = new double[Length], close = new double[Length];
                 for (int i = 0; i < Length; i++)
@@ -87,22 +99,16 @@ namespace Hevo.Charting.Tests
                     time[i] = new DateTime(2026, 1, 1).AddMinutes(i);
                     open[i] = 100 + i % 7; close[i] = 101 + i % 5; high[i] = 110; low[i] = 95;
                 }
-                using (Board.BeginTransaction())
+                using (board.BeginTransaction())
                 {
-                    Board.ForceWrite(Schema.Ports.Time, new ReadOnlyMemory<DateTime>(time));
-                    Board.ForceWrite(Schema.Ports.Open, new ReadOnlyMemory<double>(open));
-                    Board.ForceWrite(Schema.Ports.High, new ReadOnlyMemory<double>(high));
-                    Board.ForceWrite(Schema.Ports.Low, new ReadOnlyMemory<double>(low));
-                    Board.ForceWrite(Schema.Ports.Close, new ReadOnlyMemory<double>(close));
-                    Board.WriteIfChanged(_viewport.LogicalLength, Length);
-                    Board.WriteIfChanged(Schema.YRange, new RealRange(80, 120));
+                    board.ForceWrite(schema.Ports.Time, new ReadOnlyMemory<DateTime>(time));
+                    board.ForceWrite(schema.Ports.Open, new ReadOnlyMemory<double>(open));
+                    board.ForceWrite(schema.Ports.High, new ReadOnlyMemory<double>(high));
+                    board.ForceWrite(schema.Ports.Low, new ReadOnlyMemory<double>(low));
+                    board.ForceWrite(schema.Ports.Close, new ReadOnlyMemory<double>(close));
+                    board.WriteIfChanged(viewport.LogicalLength, Length);
+                    board.WriteIfChanged(schema.YRange, new RealRange(80, 120));
                 }
-                Schema.Trigger.Push(Board);
-                Schema.InvalidateEnvironment();
-                Frame();
-                Frame();   // 第二帧让视口钳制落定:否则第一次拖动的位移被首屏钳制吃掉,跟"先加 Feature 再拖"的对照组差一步
-                Mouse = new RawMouse(_window);
-                Initial = ActiveRange;
             }
 
             public RealRange Initial { get; }

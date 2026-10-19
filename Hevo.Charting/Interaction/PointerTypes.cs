@@ -292,7 +292,7 @@ namespace Hevo.Charting.Interaction
     /// 手势端口上的一条记录。每次鼠标移动都要写,所以是值类型;业务只读不构造。
     /// 坐标都是 DrawingCanvas 坐标(DIP),跟十字光标命中同一口径。
     /// </summary>
-    public readonly struct PointerGesture
+    public readonly struct PointerGesture : IEquatable<PointerGesture>
     {
         internal PointerGesture(long sequence, object? owner, int regionId, int regionPart, PointerPhase phase, PointerCancelReason reason,
             HevoPoint position, HevoPoint pressPosition, PointerButton button, PointerModifiers modifiers)
@@ -323,6 +323,11 @@ namespace Hevo.Charting.Interaction
         public PointerModifiers Modifiers { get; }
 
         public bool IsFor(object feature) => Owner != null && ReferenceEquals(Owner, feature);
+
+        // 每条记录的 Sequence 唯一:按它比就够,也让端口的 WriteIfChanged 走 IEquatable 不装箱
+        public bool Equals(PointerGesture other) => Sequence == other.Sequence && ReferenceEquals(Owner, other.Owner);
+        public override bool Equals(object? obj) => obj is PointerGesture other && Equals(other);
+        public override int GetHashCode() => Sequence.GetHashCode();
 
         public override string ToString() => $"#{Sequence} {Phase}{(Reason != PointerCancelReason.None ? "(" + Reason + ")" : "")} id={RegionId}.{RegionPart} @({Position.X:F0},{Position.Y:F0})";
     }

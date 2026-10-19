@@ -453,7 +453,7 @@ namespace Hevo.Charting.Interaction
         }
 
         // 分发 = 持写锁写一次端口。同步 Watch 在锁内、同一调用栈里跑完;Watch 里经 later(...) 登记的锁外回调
-        // 在最后一层锁退出后执行。Sequence 每次递增,ForceWrite 保证 Watch 一定触发。
+        // 在最后一层锁退出后执行。Sequence 每次递增,值总会变,WriteIfChanged 一定触发 Watch。
         private void Dispatch(in PointerGesture g)
         {
             var board = _host?.Board;
@@ -471,7 +471,7 @@ namespace Hevo.Charting.Interaction
 #endif
             try
             {
-                using (board.AcquireWriteLock()) board.ForceWrite(_ports.GesturePort, g);
+                using (board.AcquireWriteLock()) board.WriteIfChanged(_ports.GesturePort, g);
             }
             finally
             {
