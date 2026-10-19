@@ -13,7 +13,7 @@ namespace Hevo.Charting.Tests
 {
     /// <summary>
     /// HEVO008:UseMemo 只能直接写在 Feature.OnProject 里。
-    /// 用 Roslyn 现编一段引用真实 Hevo.Charting 的源码跑 <see cref="UseMemoPlacementAnalyzer"/>,
+    /// 用 Roslyn 现编一段引用真实 Charting 的源码跑 <see cref="UseMemoPlacementAnalyzer"/>,
     /// 断言三种情况各自的文案(哪个类型 / 方法、哪一行、改法);01 号文档引用的 DocSamples 改前 / 改后也在这里验证。
     /// </summary>
     public sealed class HookAnalyzerTests

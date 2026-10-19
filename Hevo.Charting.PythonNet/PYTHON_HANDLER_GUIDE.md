@@ -591,7 +591,7 @@ def my_indicator(close):
 | 波动率 | `ta.stdev` / `ta.bbands`(Bollinger) |
 | 多输入 | `ta.true_range` / `ta.atr` / `ta.mfi` / `ta.vwap` / `ta.obv` |
 
-详见 [HevoIndicatorsSources.cs](HevoIndicatorsSources.cs) 内嵌的 `_ta_*.py` 源码。
+详见 [IndicatorsSources.cs](HevoIndicatorsSources.cs) 内嵌的 `_ta_*.py` 源码。
 
 ---
 

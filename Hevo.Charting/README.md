@@ -1,4 +1,4 @@
-# Hevo.Charting 开发准则
+# Charting 开发准则
 
 引擎核心工程的开发准则:.NET 5 兼容红线、常用命令、架构铁律摘要、注释规范。
 仓库总入口是根目录 [README.md](../README.md);AI 协作约定在 [AGENTS.md](../AGENTS.md)。深入架构读 `00`–`06` 系列。
@@ -164,7 +164,7 @@ var (ticks, ticksChanged) = ctx.UseMemo((range, plotArea), static deps => { ... 
 
 完整导航见根目录 [README.md](../README.md#文档导航)。本目录下:
 
-- `00.Hevo.Charting 架构协议与开发规范.md` — 架构红线、铁律、SOP(主参考)
+- `00.架构协议与开发规范.md` — 架构红线、铁律、SOP(主参考)
 - `01.业务Feature设计.md` — 业务侧 Feature 拆解模式
 - `04.交互层架构.md` — 鼠标 / 键盘 / 滚轮 → 视口数学
 - `06.WPF 渲染规约.md` — 像素对齐契约 / snap 实现 / WPF 后端性能路线图

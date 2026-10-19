@@ -1,4 +1,4 @@
-# Hevo.Charting
+# Charting
 
 > 基于 C# / WPF 的高性能金融图表引擎，针对千万级数据点设计，0-GC 渲染管线、强类型引脚、声明式装配，配套低代码蓝图与 LLM 工具链。
 
@@ -37,16 +37,16 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 
 | 项目 | 角色 | 说明 |
 |------|------|------|
-| [Hevo.Charting](./Hevo.Charting) | 引擎核心 | 抽象层、Feature 库、Layer / Renderer、低代码蓝图、Designer。 |
-| [Hevo.Charting.CodeAnalysis](./Hevo.Charting.CodeAnalysis) | 编译期 | Roslyn 分析器与源生成器：`UseMemo` 位置校验、跨帧缓存检测、Trait Consumer / Required 校验、Port Generator。 |
-| [Hevo.Drawing.LowCodeDemo](./Hevo.Drawing.LowCodeDemo) | 示例宿主 | 低代码蓝图运行时 + Node Editor + Python 编辑器 + Mock 撮合的 WPF 演示工程。 |
-| [Hevo.Charting.PythonNet](./Hevo.Charting.PythonNet) | 集成层 | Python 集成：`IPythonRuntime` + `PythonHandlerRegistry` + 蓝图层 `PyFeature` 节点。详见 [PYTHON_HANDLER_GUIDE](./Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md)。 |
-| [Hevo.Charting.Mcp](./Hevo.Charting.Mcp) | LLM 工具链 | MCP 服务进程，向 LLM 暴露 ComponentRegistry 与 DryRun 校验器，闭合"see → describe → validate"循环。详见 [README](./Hevo.Charting.Mcp/README.md)。 |
-| [Hevo.Charting.Tests](./Hevo.Charting.Tests) | 测试 | xUnit 单元 / 集成测试(400 多个用例)。 |
-| [Hevo.Charting.Tests/DocSamples](./Hevo.Charting.Tests/DocSamples) | 文档示例 | 开发规范 / 15 分钟上手引用的示例代码,按业务侧约束(`LangVersion 9` + 生成器)编译,由 `DocSampleTests` 回归。 |
-| [Hevo.Charting.Benchmarks](./Hevo.Charting.Benchmarks) | 基准 | BenchmarkDotNet 量化基准，覆盖蓝图编译化、反射 vs 编译 setter、端到端管线等。详见 [README](./Hevo.Charting.Benchmarks/README.md)。 |
-| [Hevo.Trade.Abstractions](./Hevo.Trade.Abstractions) | 交易抽象 | `ITradeService` 接口 + DTO + `NullTradeService`；不依赖 Charting / WPF / Skia，可独立引用。 |
-| [Hevo.Trade.Mock](./Hevo.Trade.Mock) | 交易实现 | `ITradeService` 的内存 Mock 实装，给 demo / 测试 / 策略回放用。 |
+| [Charting](./Hevo.Charting) | 引擎核心 | 抽象层、Feature 库、Layer / Renderer、低代码蓝图、Designer。 |
+| [Charting.CodeAnalysis](./Hevo.Charting.CodeAnalysis) | 编译期 | Roslyn 分析器与源生成器：`UseMemo` 位置校验、跨帧缓存检测、Trait Consumer / Required 校验、Port Generator。 |
+| [Drawing.LowCodeDemo](./Hevo.Drawing.LowCodeDemo) | 示例宿主 | 低代码蓝图运行时 + Node Editor + Python 编辑器 + Mock 撮合的 WPF 演示工程。 |
+| [Charting.PythonNet](./Hevo.Charting.PythonNet) | 集成层 | Python 集成：`IPythonRuntime` + `PythonHandlerRegistry` + 蓝图层 `PyFeature` 节点。详见 [PYTHON_HANDLER_GUIDE](./Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md)。 |
+| [Charting.Mcp](./Hevo.Charting.Mcp) | LLM 工具链 | MCP 服务进程，向 LLM 暴露 ComponentRegistry 与 DryRun 校验器，闭合"see → describe → validate"循环。详见 [README](./Hevo.Charting.Mcp/README.md)。 |
+| [Charting.Tests](./Hevo.Charting.Tests) | 测试 | xUnit 单元 / 集成测试(400 多个用例)。 |
+| [Charting.Tests/DocSamples](./Hevo.Charting.Tests/DocSamples) | 文档示例 | 开发规范 / 15 分钟上手引用的示例代码,按业务侧约束(`LangVersion 9` + 生成器)编译,由 `DocSampleTests` 回归。 |
+| [Charting.Benchmarks](./Hevo.Charting.Benchmarks) | 基准 | BenchmarkDotNet 量化基准，覆盖蓝图编译化、反射 vs 编译 setter、端到端管线等。详见 [README](./Hevo.Charting.Benchmarks/README.md)。 |
+| [Trade.Abstractions](./Hevo.Trade.Abstractions) | 交易抽象 | `ITradeService` 接口 + DTO + `NullTradeService`；不依赖 Charting / WPF / Skia，可独立引用。 |
+| [Trade.Mock](./Hevo.Trade.Mock) | 交易实现 | `ITradeService` 的内存 Mock 实装，给 demo / 测试 / 策略回放用。 |
 
 ## 文档导航
 
@@ -60,7 +60,7 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 | — | [术语表](./docs/术语表.md) | 全员 | 每个术语一句话,对照前端 / 通用概念。 |
 | — | [开发准则](./Hevo.Charting/README.md) | 开发者 | .NET 5 兼容红线、常用命令、铁律摘要、注释规范。 |
 | — | [AGENTS.md](./AGENTS.md) | AI 助手 | 唤醒词、阅读顺序、硬约束速记、文档约定。 |
-| 00 | [架构协议与开发规范](./Hevo.Charting/00.Hevo.Charting%20架构协议与开发规范.md) | AI / 架构师 / 开发者 | 架构红线、System Prompt、ECS 协议、并发与上下文边界。**最高纲领文件。** |
+| 00 | [架构协议与开发规范](./Hevo.Charting/00.架构协议与开发规范.md) | AI / 架构师 / 开发者 | 架构红线、System Prompt、ECS 协议、并发与上下文边界。**最高纲领文件。** |
 | 01 | [业务 Feature 设计](./Hevo.Charting/01.业务Feature设计.md) | 业务开发者 | Feature 铁律、`OnCompose` / `OnProject` 切分、`DataBlackboard` / `UsePort` 物理读取限制。 |
 | 04 | [交互层架构](./Hevo.Charting/04.交互层架构.md) | 交互 Feature 开发者 | WPF 事件 → `ChartInteractionFeature` → 视口意图 → 命中广播的全链路。 |
 | 06 | [WPF 渲染规约](./Hevo.Charting/06.WPF%20渲染规约.md) | 渲染层维护者 | 像素对齐契约、snap 实现、WPF 后端性能路线图。 |
@@ -72,9 +72,9 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 
 | 文档 | 受众 | 内容 |
 |------|------|------|
-| [Hevo.Charting.Mcp/README.md](./Hevo.Charting.Mcp/README.md) | LLM 集成 | MCP 工具说明、安装到 Claude / Cursor 的步骤、JSON schema。 |
-| [Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md](./Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md) | 策略 / 指标开发者 | Python handler 写法、`@indicator` 装饰器、PortBindings 反射、热重载、诊断。 |
-| [Hevo.Charting.Benchmarks/README.md](./Hevo.Charting.Benchmarks/README.md) | 性能维护者 | 跑法、实测数据、§1–§6 优化方案对照。 |
+| [Charting.Mcp/README.md](./Hevo.Charting.Mcp/README.md) | LLM 集成 | MCP 工具说明、安装到 Claude / Cursor 的步骤、JSON schema。 |
+| [Charting.PythonNet/PYTHON_HANDLER_GUIDE.md](./Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md) | 策略 / 指标开发者 | Python handler 写法、`@indicator` 装饰器、PortBindings 反射、热重载、诊断。 |
+| [Charting.Benchmarks/README.md](./Hevo.Charting.Benchmarks/README.md) | 性能维护者 | 跑法、实测数据、§1–§6 优化方案对照。 |
 
 ## 架构核心一图流
 
@@ -99,7 +99,7 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 
 ## 不可逾越的红线（节选）
 
-完整列表与判例见 [00 号文档](./Hevo.Charting/00.Hevo.Charting%20架构协议与开发规范.md)，下面是最常踩的几条：
+完整列表与判例见 [00 号文档](./Hevo.Charting/00.架构协议与开发规范.md)，下面是最常踩的几条：
 
 - **0-GC**：`Project` 帧不 `new` 集合 / 数组 / 闭包（工作集合做成跨帧复用字段；每帧发布的不可变 Trait 记录除外），昂贵计算只走 `ctx.UseMemo`(factory 写成 `static` lambda)。
 - **Hook 规则**：Hook 只在 `OnProject` 帧路径里调；`UseMemo` 直接写在 `OnProject` 里，不写进 helper / 循环 / lambda / 本地函数（HEVO008，Debug 构建下运行时也会拦）。`UsePort` 可以放进分支：没读的帧不更新版本，下次读到时 `IsChanged` 跟上次读到时比。

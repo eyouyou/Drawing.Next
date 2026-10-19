@@ -1,4 +1,4 @@
-# Hevo.Charting TODO
+# Charting TODO
 
 性能优化、架构清理、待还的技术债。每条都是触发条件 + 改动方案 + 触发后的实施步骤。
 

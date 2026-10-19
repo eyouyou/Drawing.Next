@@ -51,6 +51,6 @@
   </ItemGroup>
 
   <!-- §D2.5.7 嵌入 Python 运行时:见仓库根 Directory.Build.targets,
-       检测 ProjectReference 含 Hevo.Charting.PythonNet 自动启用 Python312 同步。 -->
+       检测 ProjectReference 含 Charting.PythonNet 自动启用 Python312 同步。 -->
 
 </Project>

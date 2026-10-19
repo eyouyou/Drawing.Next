@@ -63,7 +63,7 @@ namespace Hevo.Charting.Benchmarks
             // 绘制策略对照:同一套指令改由框架光栅化进位图(ChartCell.RenderModeOverride / ChartLayer.Mode = Bitmap)
             new("bmp",        "增量+位图(全部图层)", false, false, false, PlotMode.Sync, ProbeRenderer.BitmapAll),
             new("bmp-series", "增量+位图(序列图层)", false, false, false, PlotMode.Sync, ProbeRenderer.BitmapSeries),
-            // Skia 后端(Hevo.Charting.Skia):CPU 帧耗时含光栅;GPU 光栅在随后的 WPF 渲染里。光栅部分另在报告末尾 Skia 表单列
+            // Skia 后端(Charting.Skia):CPU 帧耗时含光栅;GPU 光栅在随后的 WPF 渲染里。光栅部分另在报告末尾 Skia 表单列
             new("skia",       "增量+Skia",          false, false, false, PlotMode.Sync, ProbeRenderer.Skia),
             new("skia-gpu",   "增量+Skia GPU",      false, false, false, PlotMode.Sync, ProbeRenderer.SkiaGpu),
         };
@@ -576,7 +576,7 @@ namespace Hevo.Charting.Benchmarks
                 ch.Cell.IsHitTestVisible = false; // 同 ProbeRig:不让真实鼠标位置影响测量
                 var window = new Window
                 {
-                    Title = "Hevo render probe (startup)",
+                    Title = "Charting render probe (startup)",
                     SizeToContent = SizeToContent.WidthAndHeight,
                     Content = ch.Cell,
                     WindowStartupLocation = WindowStartupLocation.CenterScreen,
@@ -978,7 +978,7 @@ namespace Hevo.Charting.Benchmarks
 
             var window = new Window
             {
-                Title = "Hevo render probe",
+                Title = "Charting render probe",
                 SizeToContent = SizeToContent.WidthAndHeight,
                 ResizeMode = ResizeMode.NoResize,
                 Content = host,

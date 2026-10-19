@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- 文档里引用的示例代码。按业务侧工程的约束编译(同 Hevo.Drawing.LowCodeDemo):
+  <!-- 文档里引用的示例代码。按业务侧工程的约束编译(同 Drawing.LowCodeDemo):
        LangVersion 9、不开 ImplicitUsings、Roslyn 生成器 / 分析器照常生效。
-       示例能编译 = 文档里的写法在真实业务工程里能编译。由 Hevo.Charting.Tests 引用并测试。 -->
+       示例能编译 = 文档里的写法在真实业务工程里能编译。由 Charting.Tests 引用并测试。 -->
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 生成器注册写法同 Hevo.Drawing.LowCodeDemo(绕 .NET 5 SDK _wpftmp 不继承 Analyzer 类型 ProjectReference 的 bug) -->
+    <!-- 生成器注册写法同 Drawing.LowCodeDemo(绕 .NET 5 SDK _wpftmp 不继承 Analyzer 类型 ProjectReference 的 bug) -->
     <ProjectReference Include="..\..\Hevo.Charting.CodeAnalysis\Hevo.Charting.CodeAnalysis.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>

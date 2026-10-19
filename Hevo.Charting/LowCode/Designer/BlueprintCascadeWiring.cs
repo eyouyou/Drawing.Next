@@ -162,7 +162,7 @@ namespace Hevo.Charting.LowCode.Designer
                     $"CascadeEdge: 上游 {fromDs.GetType().Name}.Stream 返回 null。");
 
             // 2. stream 是 IWorkflow<DataSnapshot<TItem>>;走 IWorkflow<T>.Subscribe 反射调用。
-            //    IWorkflow<T> 在 Hevo.Charting 命名空间(非 .Core);Stream 属性可能返回更具体的实现类型
+            //    IWorkflow<T> 在 Charting 命名空间(非 .Core);Stream 属性可能返回更具体的实现类型
             //    (如 WorkflowTrigger<T>),沿其 generic interfaces 找接口本身。
             const string IWorkflowFullName = "Hevo.Charting.IWorkflow`1";
             Type streamIfaceType = streamProp.PropertyType;

@@ -1,4 +1,4 @@
-# Hevo.Charting.Benchmarks
+# Charting.Benchmarks
 
 低代码蓝图子系统优化方案 (§1–§6) 的量化基准。
 
@@ -522,7 +522,7 @@ float64 结果拷进调用点缓冲池(`LowCode/ResultBufferPool`),Python 这条
 
 tick → 帧延迟 P99 在所有组合下都 ≤ 1.4 ms(本次堆只有几 MB,Gen2 很便宜;真实应用堆越大,收益越明显)。
 
-**LOH 阈值是进程级设置,只能由宿主应用(exe)配置**,Hevo.Charting 作为库设不了。在应用的 csproj 里加:
+**LOH 阈值是进程级设置,只能由宿主应用(exe)配置**,Charting 作为库设不了。在应用的 csproj 里加:
 
 ```xml
 <ItemGroup>

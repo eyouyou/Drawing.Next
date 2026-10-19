@@ -11,7 +11,7 @@ using ModelContextProtocol.Server;
 namespace Hevo.Charting.Mcp;
 
 /// <summary>
-/// MCP 工具集 —— 把 Hevo.Charting 蓝图能力暴露给 LLM:
+/// MCP 工具集 —— 把 Charting 蓝图能力暴露给 LLM:
 /// <list type="bullet">
 ///   <item><c>list_components</c>:列已注册组件,LLM 拼蓝图前先看清"积木盒里有什么"</item>
 ///   <item><c>describe_component</c>:看某组件的输入/输出端口,定义它能跟谁连</item>

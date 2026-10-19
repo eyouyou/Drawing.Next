@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Hevo.Charting.LowCode.Designer;
 
 // 15 分钟上手 L2:用一个 C# 类实现指标。
-// 照抄到 Hevo.Drawing.LowCodeDemo 里即可用(写法按 Demo 工程的 LangVersion 9)。
+// 照抄到 Drawing.LowCodeDemo 里即可用(写法按 Demo 工程的 LangVersion 9)。
 namespace Hevo.Charting.DocSamples.QuickStart
 {
     /// <summary>

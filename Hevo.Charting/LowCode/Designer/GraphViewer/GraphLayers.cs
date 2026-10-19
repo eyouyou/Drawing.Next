@@ -391,7 +391,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         }
     }
 
-    // GraphMinimapLayer 已合并到通用 Hevo.Charting.Layers.MinimapLayer ——
+    // GraphMinimapLayer 已合并到通用 Charting.Layers.MinimapLayer ——
     // GraphSchema.PushTraitToLayers 自己负责把 GraphState 翻译成 MinimapTrait(ContentBounds + ContentItems + Viewport)。
     // 旧的 ComputeContentBounds 静态方法搬到 GraphSchema.ComputeNodesAabb,跟 ComputeMinimapMapping 共用。
 
