@@ -219,7 +219,7 @@ namespace Hevo.Charting.Tests
         }
 #endif
 
-        // 不走 Feature 装配:在装配作用域里 CombineLatest / Join 登记的变换会在 Build 时再登记一次(另行跟进),
+        // 不走 Feature 装配(装配路径见 FeatureComposeOperatorTests),
         // 这里只验锁外读版本号这一条,用一个不带图表的渲染流壳直接挂
         private sealed class BareRenderFlow : IRenderFlow<DataBlackboard>
         {

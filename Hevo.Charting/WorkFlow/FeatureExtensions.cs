@@ -273,50 +273,66 @@ namespace Hevo.Charting.WorkFlow
             });
         }
 
+        // CombineLatest / Merge / Join 的公开重载都要在装配作用域里登记一个变换,Build 时串进 schema 主管线。
+        // 变换里只能调不登记的内核再 Wrap:Build 正在遍历变换列表,调回公开重载会再登记一次,遍历期间改列表就抛异常。
         public static IRenderFlow<DataBlackboard> CombineLatest(
             this IRenderFlow<DataBlackboard> flow,
             object[] requiredPorts,
             Action<DataBlackboard> sideEffect)
         {
             sideEffect = BindToComposingFeature(sideEffect);
-            IWorkflow<DataBlackboard> baseFlow = ((IWorkflow<DataBlackboard>)flow).WatchAsync(requiredPorts, b =>
+            var wrapped = flow.Wrap(CombineLatestCore(flow, requiredPorts, sideEffect));
+            FeatureComposeScope.Current?.AddTransform(current => current.Wrap(CombineLatestCore(current, requiredPorts, sideEffect)));
+            return wrapped;
+        }
+
+        private static IWorkflow<DataBlackboard> CombineLatestCore(
+            IWorkflow<DataBlackboard> flow,
+            object[] requiredPorts,
+            Action<DataBlackboard> sideEffect)
+        {
+            return flow.WatchAsync(requiredPorts, b =>
             {
                 // 线程池回调不持锁:版本号字典是普通字典,读它要进读锁;副作用在锁外跑(它可能自己拿写锁)
                 if (!AllPortsWritten(b, requiredPorts)) return;
                 sideEffect(b);
             });
-
-            var wrapped = flow.Wrap(baseFlow);
-            FeatureComposeScope.Current?.AddTransform(current => current.CombineLatest(requiredPorts, sideEffect));
-            return wrapped;
         }
 
         public static IRenderFlow<DataBlackboard> Merge(
             this IRenderFlow<DataBlackboard> source,
             IRenderFlow<DataBlackboard> other)
         {
-            IWorkflow<DataBlackboard> combined = new WorkflowEngine<DataBlackboard>((next, error) =>
+            var wrapped = source.Wrap(MergeCore(source, other));
+            FeatureComposeScope.Current?.AddTransform(current => current.Wrap(MergeCore(current, other)));
+            return wrapped;
+        }
+
+        private static IWorkflow<DataBlackboard> MergeCore(
+            IWorkflow<DataBlackboard> source,
+            IWorkflow<DataBlackboard> other)
+        {
+            return new WorkflowEngine<DataBlackboard>((next, error) =>
             {
                 var sub1 = source.Subscribe(next, error);
                 var sub2 = other.Subscribe(next, error);
-                // Phase 11 / §H.10：CompositeDisposable 多上游 fan-out IPausable
+                // CompositeDisposable 多上游 fan-out IPausable
                 return new CompositeDisposable(sub1, sub2);
             });
-            var wrapped = source.Wrap(combined);
-            FeatureComposeScope.Current?.AddTransform(current => current.Merge(other));
-            return wrapped;
         }
 
         public static IRenderFlow<DataBlackboard> Join(
             this IRenderFlow<DataBlackboard> source,
             params object[] requiredPorts)
         {
-            // Where 在管线释放黑板锁之后才跑,同样要自己进读锁
-            IWorkflow<DataBlackboard> filtered = ((IWorkflow<DataBlackboard>)source).Where(b => AllPortsWritten(b, requiredPorts));
-            var wrapped = source.Wrap(filtered);
-            FeatureComposeScope.Current?.AddTransform(current => current.Join(requiredPorts));
+            var wrapped = source.Wrap(JoinCore(source, requiredPorts));
+            FeatureComposeScope.Current?.AddTransform(current => current.Wrap(JoinCore(current, requiredPorts)));
             return wrapped;
         }
+
+        // Where 在管线释放黑板锁之后才跑,同样要自己进读锁
+        private static IWorkflow<DataBlackboard> JoinCore(IWorkflow<DataBlackboard> source, object[] requiredPorts)
+            => source.Where(b => AllPortsWritten(b, requiredPorts));
 
         // 每个端口都至少写过一次(版本号不是 default)。读锁可重入(持写锁 / 可升级读锁时进读锁也行);
         // 黑板已释放 = 管线正在拆,当作没就绪。
