@@ -100,7 +100,7 @@ namespace Hevo.Charting.Tests
             using (var call = b.BeginCall())
             {
                 published = call.Rent(100);
-                using (board.AcquireWriteLock())
+                using (board.WriteScope())
                     write.Invoke(null, new object[] { board, port, "line", new ReadOnlyMemory<double>(published, 0, 100), call });
             }
             Assert.Contains(published, b.PublishedForTest);

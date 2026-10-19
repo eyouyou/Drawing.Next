@@ -87,7 +87,7 @@ namespace Hevo.Charting.Features
         {
             flow.Watch(new object[] { Viewport.ActiveRange }, board =>
             {
-                using (board.AcquireUpgradeableReadLock())
+                using (board.UpdateScope())
                 {
                     var activeRange = board.Read(Viewport.ActiveRange);
                     int logicalLength = board.Read(Viewport.LogicalLength);
@@ -101,8 +101,8 @@ namespace Hevo.Charting.Features
 
         private void PublishAvailability(DataBlackboard board)
         {
-            using (board.AcquireWriteLock())
-                board.WriteIfChanged(AvailabilityPort, new DataAvailability(_isLeftWallHit, _isRightWallHit));
+            using (board.WriteScope())
+                board.Write(AvailabilityPort, new DataAvailability(_isLeftWallHit, _isRightWallHit));
         }
 
         /// <summary>
@@ -176,7 +176,7 @@ namespace Hevo.Charting.Features
             int lengthBeforeFetch = 0;
             if (!board.IsDisposed)
             {
-                using (board.AcquireReadLock()) { lengthBeforeFetch = board.Read(Viewport.LogicalLength); }
+                using (board.ReadScope()) { lengthBeforeFetch = board.Read(Viewport.LogicalLength); }
             }
 
             try
@@ -202,7 +202,7 @@ namespace Hevo.Charting.Features
                 if (!isNetworkFault && !board.IsDisposed)
                 {
                     bool wallHit = false;
-                    using (board.AcquireReadLock())
+                    using (board.ReadScope())
                     {
                         int lengthAfterFetch = board.Read(Viewport.LogicalLength);
 
@@ -222,7 +222,7 @@ namespace Hevo.Charting.Features
                         }
                     }
 
-                    // ReadLock 释放后再 publish：AcquireWriteLock 不能在 ReadLock 内嵌套
+                    // ReadLock 释放后再 publish：WriteScope 不能在 ReadLock 内嵌套
                     if (wallHit) PublishAvailability(board);
                 }
 
@@ -240,7 +240,7 @@ namespace Hevo.Charting.Features
                 {
                     if (board != null && !board.IsDisposed)
                     {
-                        using (board.AcquireUpgradeableReadLock())
+                        using (board.UpdateScope())
                         {
                             CheckBoundaries(board.Read(Viewport.ActiveRange), board.Read(Viewport.LogicalLength), board);
                         }

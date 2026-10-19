@@ -30,7 +30,7 @@ namespace Hevo.Charting.Tests
                 start.SignalAndWait();
                 for (int i = 1; i <= Iterations; i++)
                 {
-                    using (board.AcquireWriteLock()) board.WriteIfChanged(port, i * 2 + offset);
+                    using (board.WriteScope()) board.Write(port, i * 2 + offset);
                 }
             }, TaskCreationOptions.LongRunning);
 
@@ -38,8 +38,8 @@ namespace Hevo.Charting.Tests
             Assert.True(both.Wait(TimeSpan.FromSeconds(15)), "两块板交叉写镜像端口发生死锁");
 
             int va, vb;
-            using (a.AcquireReadLock()) va = a.Read(port);
-            using (b.AcquireReadLock()) vb = b.Read(port);
+            using (a.ReadScope()) va = a.Read(port);
+            using (b.ReadScope()) vb = b.Read(port);
             Assert.Equal(va, vb);
         }
 
@@ -53,9 +53,9 @@ namespace Hevo.Charting.Tests
             context.AttachBoard(b);
             var port = context.SharedViewport.LogicalLength;
 
-            using (a.BeginTransaction()) a.WriteIfChanged(port, 42);
+            using (a.WriteScope()) a.Write(port, 42);
 
-            using (b.AcquireReadLock()) Assert.Equal(42, b.Read(port));
+            using (b.ReadScope()) Assert.Equal(42, b.Read(port));
         }
 
         [Fact]
@@ -66,10 +66,10 @@ namespace Hevo.Charting.Tests
             foreach (var board in boards) context.AttachBoard(board);
             var port = context.SharedViewport.LogicalLength;
 
-            using (boards[1].AcquireWriteLock()) boards[1].WriteIfChanged(port, 7);
+            using (boards[1].WriteScope()) boards[1].Write(port, 7);
 
             foreach (var board in boards)
-                using (board.AcquireReadLock()) Assert.Equal(7, board.Read(port));
+                using (board.ReadScope()) Assert.Equal(7, board.Read(port));
         }
 
         [Fact]
@@ -83,9 +83,9 @@ namespace Hevo.Charting.Tests
             b.Dispose();
             var port = context.SharedViewport.LogicalLength;
 
-            using (a.AcquireWriteLock()) a.WriteIfChanged(port, 5);
+            using (a.WriteScope()) a.Write(port, 5);
 
-            using (a.AcquireReadLock()) Assert.Equal(5, a.Read(port));
+            using (a.ReadScope()) Assert.Equal(5, a.Read(port));
         }
     }
 }

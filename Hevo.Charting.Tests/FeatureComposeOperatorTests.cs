@@ -36,10 +36,10 @@ namespace Hevo.Charting.Tests
                     flow.CombineLatest(new object[] { A, B }, _ => fired.Set()));
                 var h = new SchemaHarness(feature);
 
-                h.Board.Write(A, 1.0);
+                h.Board.WriteLocked(A, 1.0);
                 Assert.False(fired.Wait(200), "只写了一个端口不该放行");
 
-                h.Board.Write(B, 1.0);
+                h.Board.WriteLocked(B, 1.0);
                 Assert.True(fired.Wait(5000), "两个端口都写过后应放行");
             });
         }
@@ -54,11 +54,11 @@ namespace Hevo.Charting.Tests
                     flow.Join(A, B).Watch(new object[] { C }, _ => calls++));
                 var h = new SchemaHarness(feature); // 装配后推一次黑板:端口都没写,挡住
 
-                h.Board.Write(A, 1.0);
+                h.Board.WriteLocked(A, 1.0);
                 h.Schema.Trigger.Push(h.Board); // 只写了一个:挡住
                 Assert.Equal(0, calls);
 
-                h.Board.Write(B, 1.0);
+                h.Board.WriteLocked(B, 1.0);
                 h.Schema.Trigger.Push(h.Board); // 写全:放行,Watch 首次执行
                 Assert.Equal(1, calls);
             });

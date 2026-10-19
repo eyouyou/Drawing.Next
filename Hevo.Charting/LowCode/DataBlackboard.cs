@@ -18,24 +18,16 @@ namespace Hevo.Charting.LowCode
 
         // ==========================================
         // 🛡️ 核心装甲升级：工业级读写分离锁
-        // 💥 必须开启 SupportsRecursion！这是支持 BeginTransaction 嵌套、以及 Upgrade 锁升级的物理基础！
+        // 💥 必须开启 SupportsRecursion！这是支持 WriteScope 嵌套、以及 UpdateScope 里升级写锁的物理基础！
         // ==========================================
         private readonly ReaderWriterLockSlim _rwLock = new(LockRecursionPolicy.SupportsRecursion);
 
         private int _transactionDepth = 0;
         private readonly HashSet<object> _dirtyPorts = new();
 
-        // 修复 H3：预分配快照缓冲，替代 EndTransaction 里每次 ToList() 的堆分配。
+        // 修复 H3：预分配快照缓冲，替代 EndWriteScope 里每次 ToList() 的堆分配。
         // _portsSnapshot 在首次事务提交后增长到足够容量，之后复用，热路径零分配。
         private readonly List<object> _portsSnapshot = new();
-
-        // 事务复用同一个作用域对象:它的 Dispose 只转调 EndTransaction,没有自己的状态
-        private readonly TransactionScope _transactionScope;
-
-        public DataBlackboard()
-        {
-            _transactionScope = new TransactionScope(this);
-        }
 
         /// <summary>端口最新写入的版本令牌;没写过返回 default。须持锁调用(同 <see cref="Read{T}"/>)。</summary>
         internal VersionToken GetVersion(object port)
@@ -48,7 +40,7 @@ namespace Hevo.Charting.LowCode
         private void AssertLockHeld(object port)
         {
             if (!_rwLock.IsReadLockHeld && !_rwLock.IsWriteLockHeld && !_rwLock.IsUpgradeableReadLockHeld)
-                throw new InvalidOperationException($"[黑板越权访问] 读引脚 {port} 的版本号失败！必须先调用 AcquireReadLock() 开启快照边界！");
+                throw new InvalidOperationException($"[黑板越权访问] 读引脚 {port} 的版本号失败！必须在 ReadScope() / UpdateScope() / WriteScope() 内读！");
         }
 
         // 列端口(ReadOnlyMemory<T>)的"引用版本":只在新值的底层引用(数组 / 起点 / 长度)跟当前值不同时才变。
@@ -76,54 +68,75 @@ namespace Hevo.Charting.LowCode
         }
 
         // ==========================================
-        // 💥 给业务层暴露的三大神器 (支持 using 语法)
-        // 返回 readonly struct + duck-typed Dispose:每次 using 0 堆分配。
-        // 旧实现是 class 包装,Interaction / Viewport / Paging hot path 每次 mouse / scroll 事件都 new 一个
-        // scope 对象;改成 struct 后稳态零 GC。所有 caller 用 `using (...)` 形式,API 调用面不变。
+        // 读写作用域(都配 using):
+        //   ReadScope   只读;连读几个端口时拿到的是同一时刻的值
+        //   UpdateScope 先读、看情况再写;读的这段不挡普通读者,要写时在里面嵌套 WriteScope
+        //   WriteScope  写;作用域里的写入先攒着,最外层 WriteScope 结束时统一通知订阅者(一次)
+        // 返回 readonly struct:每次 using 零堆分配(交互 / 视口 / 分页热路径每个鼠标事件都要开一次)。
         // ==========================================
-        public ReadLockScope AcquireReadLock() { ThrowIfDisposed(); _rwLock.EnterReadLock(); return new ReadLockScope(this); }
-        public WriteLockScope AcquireWriteLock() { ThrowIfDisposed(); _rwLock.EnterWriteLock(); return new WriteLockScope(this); }
-        public UpgradeableReadLockScope AcquireUpgradeableReadLock() { ThrowIfDisposed(); _rwLock.EnterUpgradeableReadLock(); return new UpgradeableReadLockScope(this); }
+
+        /// <summary>只读作用域。连读几个端口要求同一时刻时用;OnProject / 手势回调里框架已持锁,不用再开。</summary>
+        public BlackboardScope ReadScope()
+        {
+            ThrowIfDisposed();
+            _rwLock.EnterReadLock();
+            return new BlackboardScope(this, ScopeKind.Read);
+        }
+
+        /// <summary>
+        /// 读后写作用域:先读、看情况再写。读的这段不挡普通读者,同一时刻只有一个 UpdateScope / WriteScope。
+        /// 要写时在里面嵌套 <see cref="WriteScope"/>;内层结束就通知订阅者,外层后面接着读能读到 Watch 算出的派生值。
+        /// </summary>
+        public BlackboardScope UpdateScope()
+        {
+            ThrowIfDisposed();
+            _rwLock.EnterUpgradeableReadLock();
+            return new BlackboardScope(this, ScopeKind.Update);
+        }
+
+        /// <summary>
+        /// 写作用域:独占写锁;作用域里的 <see cref="Write{T}"/> / <see cref="ForceWrite{T}"/> 先攒着,
+        /// 最外层 WriteScope 结束时按端口统一通知,几个端口一起写订阅者也只看到一次。
+        /// 可嵌套;在 <see cref="UpdateScope"/> 里开即为升级。
+        /// </summary>
+        public BlackboardScope WriteScope()
+        {
+            ThrowIfDisposed();
+            _rwLock.EnterWriteLock();
+            _transactionDepth++;
+            return new BlackboardScope(this, ScopeKind.Write);
+        }
 
         private void ThrowIfDisposed()
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(DataBlackboard));
         }
 
-        public readonly struct ReadLockScope : IDisposable
+        internal enum ScopeKind : byte { Read, Update, Write }
+
+        /// <summary><see cref="ReadScope"/> / <see cref="UpdateScope"/> / <see cref="WriteScope"/> 的返回值,只用于 using。</summary>
+        public readonly struct BlackboardScope : IDisposable
         {
             private readonly DataBlackboard _b;
-            internal ReadLockScope(DataBlackboard b) { _b = b; }
+            private readonly ScopeKind _kind;
+            internal BlackboardScope(DataBlackboard b, ScopeKind kind) { _b = b; _kind = kind; }
             public void Dispose()
             {
-                var pending = _b.TakeAfterUnlockIfLastHold();
-                _b._rwLock.ExitReadLock();
-                _b.RunAfterUnlock(pending);
+                switch (_kind)
+                {
+                    case ScopeKind.Write: _b.EndWriteScope(); break;
+                    case ScopeKind.Update: _b.ExitScope(ScopeKind.Update); break;
+                    default: _b.ExitScope(ScopeKind.Read); break;
+                }
             }
         }
 
-        public readonly struct WriteLockScope : IDisposable
+        private void ExitScope(ScopeKind kind)
         {
-            private readonly DataBlackboard _b;
-            internal WriteLockScope(DataBlackboard b) { _b = b; }
-            public void Dispose()
-            {
-                var pending = _b.TakeAfterUnlockIfLastHold();
-                _b._rwLock.ExitWriteLock();
-                _b.RunAfterUnlock(pending);
-            }
-        }
-
-        public readonly struct UpgradeableReadLockScope : IDisposable
-        {
-            private readonly DataBlackboard _b;
-            internal UpgradeableReadLockScope(DataBlackboard b) { _b = b; }
-            public void Dispose()
-            {
-                var pending = _b.TakeAfterUnlockIfLastHold();
-                _b._rwLock.ExitUpgradeableReadLock();
-                _b.RunAfterUnlock(pending);
-            }
+            var pending = TakeAfterUnlockIfLastHold();
+            if (kind == ScopeKind.Update) _rwLock.ExitUpgradeableReadLock();
+            else _rwLock.ExitReadLock();
+            RunAfterUnlock(pending);
         }
 
         // ==========================================
@@ -161,7 +174,7 @@ namespace Hevo.Charting.LowCode
 
         // ==========================================
         // Watch 表:按注册顺序的一张表 + 每项一个脏标志。
-        // 写入时把关心该端口的项标脏,提交时(非事务写的末尾 / 最外层事务结束)按注册顺序只跑脏的。
+        // 写入时把关心该端口的项标脏,提交时(深度为零时的单次写入末尾 / 最外层 WriteScope 结束)按注册顺序只跑脏的。
         // 顺序、重入(回调里再写再提交 = 嵌套再扫一遍,深度优先)、异常(标志调用前清,后面的留到下次提交)
         // 都跟以前"每次提交把所有 Watch 的提交回调调一遍、各自看自己脏没脏"一致,只是不再进两把锁。
         // 脏标志、_dirtyCount、两张表只在写锁内碰;退订只置 Removed 不拿锁,写锁内不在扫表时再压缩。
@@ -263,7 +276,7 @@ namespace Hevo.Charting.LowCode
             }
         }
 
-        // 写锁内:非事务写的末尾、最外层事务结束
+        // 写锁内:深度为零时的单次写入末尾、最外层 WriteScope 结束
         private void Commit()
         {
             if (_dirtyCount > 0)
@@ -348,10 +361,10 @@ namespace Hevo.Charting.LowCode
             DevTools.TracerRegistry.Get(this)?.RecordRead(port);
 
             // 💥 引擎级防弹衣：你敢不带套（不加锁）就来读黑板？
-            // 强制约束业务层：必须在 ReadLock 或 WriteLock 范围内调用 Read！
+            // 强制约束业务层:必须在 ReadScope / UpdateScope / WriteScope 内调用 Read
             if (!_rwLock.IsReadLockHeld && !_rwLock.IsWriteLockHeld && !_rwLock.IsUpgradeableReadLockHeld)
             {
-                throw new InvalidOperationException($"[黑板越权访问] 读引脚 {port.Id} 失败！必须先调用 AcquireReadLock() 开启快照边界！");
+                throw new InvalidOperationException($"[黑板越权访问] 读引脚 {port.Id} 失败！必须在 ReadScope() / UpdateScope() / WriteScope() 内读！");
             }
 #endif
             if (_memory.TryGetValue<DataPort<T>, T>(port, out var val)) return val;
@@ -361,7 +374,8 @@ namespace Hevo.Charting.LowCode
         // ==========================================
         // ✍️ 极速裸写：把升级和加锁的权利还给外层！
         // ==========================================
-        public void WriteIfChanged<T>(DataPort<T> port, T value)
+        /// <summary>值变了才写(<see cref="EqualityComparer{T}.Default"/> 比较);须在 <see cref="WriteScope"/> 内。</summary>
+        public void Write<T>(DataPort<T> port, T value)
         {
             // 1. 极速查脏
             if (_memory.TryGetValue<DataPort<T>, T>(port, out var oldVal))
@@ -371,6 +385,7 @@ namespace Hevo.Charting.LowCode
             ForceWrite(port, value);
         }
 
+        /// <summary>跳过查脏直接写(如 K 线最后一根原地改后重发同一块列);须在 <see cref="WriteScope"/> 内。</summary>
         public void ForceWrite<T>(DataPort<T> port, T value)
         {
 #if DEBUG
@@ -382,7 +397,7 @@ namespace Hevo.Charting.LowCode
             // 💥 引擎级防弹衣：必须持有写锁才能修改数据！
             if (!_rwLock.IsWriteLockHeld)
             {
-                throw new InvalidOperationException($"[黑板越权篡改] 写引脚 {port.Id} 失败！必须先调用 BeginTransaction() 或 AcquireWriteLock()！");
+                throw new InvalidOperationException($"[黑板越权篡改] 写引脚 {port.Id} 失败！必须在 WriteScope() 内写！");
             }
 #endif
             // 列端口:先跟当前值比引用(ROM.Equals 比数组 / 起点 / 长度,不比内容)
@@ -397,14 +412,14 @@ namespace Hevo.Charting.LowCode
             _portTokens[port] = token;
             if (identityChanged) _identityTokens[port] = token;
 
-            // 4. 路由拦截 (此时必在 WriteLock 的保护伞下)
+            // 4. 路由拦截:WriteScope 内攒着,结束时统一通知;Watch 回调里(深度已归零)的写入当下通知
             if (_transactionDepth > 0)
             {
                 _dirtyPorts.Add(port);
             }
             else
             {
-                NotifyPort(port); // 非事务裸写，依然在业务层的写锁控制下
+                NotifyPort(port);
                 Commit();
             }
         }
@@ -435,10 +450,10 @@ namespace Hevo.Charting.LowCode
         {
             var result = new List<(string, string, string, object?)>();
             // Inspector 寿命可能比 board 长(切 template、关图时 schema.Decompose 会先 Dispose 旧 board);
-            // dispose 后 _rwLock 已经被 Dispose,再 AcquireReadLock 会抛 ObjectDisposedException。
+            // dispose 后 _rwLock 已经被 Dispose,再 ReadScope 会抛 ObjectDisposedException。
             // 这里直接短路返回空列表,UI 端拿到的 ports 段就是空数组,语义清晰。
             if (IsDisposed) return result;
-            using (AcquireReadLock())
+            using (ReadScope())
             {
                 foreach (var (key, value) in _memory.EnumerateAll())
                 {
@@ -464,7 +479,7 @@ namespace Hevo.Charting.LowCode
         {
             if (IsDisposed) return (0, 0, 0);
             int total = 0, port = 0, nonPort = 0;
-            using (AcquireReadLock())
+            using (ReadScope())
             {
                 foreach (var (key, _) in _memory.EnumerateAll())
                 {
@@ -477,19 +492,8 @@ namespace Hevo.Charting.LowCode
         }
 #endif
 
-        /// <summary>
-        /// 开启一个黑板写入事务，期间所有的 Write 不会触发 Watch 回调
-        /// </summary>
-        public IDisposable BeginTransaction()
-        {
-            ThrowIfDisposed();
-            _rwLock.EnterWriteLock(); // 💥 显式上排他写锁，确保事务期间绝对无人能读写
-            _transactionDepth++;
-            return _transactionScope;
-        }
-
-        // 修改 EndTransaction：
-        internal void EndTransaction()
+        // 最外层 WriteScope 结束:逐端口通知,再跑一遍脏 Watch
+        private void EndWriteScope()
         {
             try
             {
@@ -518,13 +522,6 @@ namespace Hevo.Charting.LowCode
                 _rwLock.ExitWriteLock(); // 💥 释放排他写锁
                 RunAfterUnlock(pending);
             }
-        }
-
-        private sealed class TransactionScope : IDisposable
-        {
-            private readonly DataBlackboard _board;
-            public TransactionScope(DataBlackboard board) => _board = board;
-            public void Dispose() => _board.EndTransaction();
         }
 
         private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(1);
@@ -561,7 +558,7 @@ namespace Hevo.Charting.LowCode
 
     /// <summary>
     /// 黑板端口写入观察者(框架内部:Schema 判脏 Feature、DevTools 内存雷达)。
-    /// 在写入线程上、持写锁时调用(非事务写当下 / 事务结束时逐端口),实现里不要去拿别的板的锁。
+    /// 在写入线程上、持写锁时调用(WriteScope 结束时逐端口;Watch 回调里的写入当下),实现里不要去拿别的板的锁。
     /// </summary>
     internal interface IBoardObserver
     {
@@ -687,7 +684,7 @@ namespace Hevo.Charting.LowCode
         {
             // 销毁与推送并发:板已关门就丢掉这次推送(管线正在拆,没有下游要看了)
             if (_persistentBoard.IsDisposed) return _persistentBoard;
-            using (_persistentBoard.BeginTransaction())
+            using (_persistentBoard.WriteScope())
             {
                 // 按添加顺序执行，确保标量先写入，向量后写入
                 for (int i = 0; i < _ingestors.Count; i++)
@@ -706,7 +703,7 @@ namespace Hevo.Charting.LowCode
         /// <param name="board"></param>
         public void ProcessTo(DataSnapshot<TItem> snapshot, DataBlackboard board)
         {
-            using (board.BeginTransaction())
+            using (board.WriteScope())
             {
                 for (int i = 0; i < _ingestors.Count; i++)
                 {

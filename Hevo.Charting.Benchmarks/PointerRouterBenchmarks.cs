@@ -84,7 +84,7 @@ namespace Hevo.Charting.Benchmarks
         public void PlainBoardWrite()
         {
             var b = _host.Board!;
-            using (b.AcquireWriteLock()) b.WriteIfChanged(_plain, _v += 1);
+            using (b.WriteScope()) b.Write(_plain, _v += 1);
         }
 
         [Benchmark(Description = "拖动中:单次移动(写手势端口)")]

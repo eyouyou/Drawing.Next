@@ -693,7 +693,7 @@ namespace Hevo.Charting.DevTools
                 dc.PushOpacity(isDimmed ? 0.1 : 1.0);
 
                 // 环路标记:框架里有合法的循环依赖(比如 ViewportManager ↔ ChartInteraction
-                // 互写 UserRange/ActiveRange,靠 WriteIfChanged 去重),不是 bug。所以用琥珀色而非红色,
+                // 互写 UserRange/ActiveRange,靠 Write 去重),不是 bug。所以用琥珀色而非红色,
                 // 表达"这是个 loop"而不是"这是错误"。Pen 加宽 4px 当 halo 用,识别度足够。
                 if (_cyclicLinks.Contains((link.Src, link.Tgt)))
                 {

@@ -197,23 +197,23 @@ namespace Hevo.Charting.Benchmarks
                 var all = new RealRange(0, bars);
                 double lastClose = data.Close[bars - 1];
                 var p = schema.Ports;
-                using (board.BeginTransaction())
+                using (board.WriteScope())
                 {
-                    board.WriteIfChanged(p.Time, new ReadOnlyMemory<DateTime>(data.Time));
-                    board.WriteIfChanged(p.Open, new ReadOnlyMemory<double>(data.Open));
-                    board.WriteIfChanged(p.High, new ReadOnlyMemory<double>(data.High));
-                    board.WriteIfChanged(p.Low, new ReadOnlyMemory<double>(data.Low));
-                    board.WriteIfChanged(p.Close, new ReadOnlyMemory<double>(data.Close));
-                    board.WriteIfChanged(schema.SmaPort, new ReadOnlyMemory<double>(data.Sma));
-                    board.WriteIfChanged(schema.PricePort, lastClose);
-                    board.WriteIfChanged(schema.Viewport.LogicalLength, bars);
+                    board.Write(p.Time, new ReadOnlyMemory<DateTime>(data.Time));
+                    board.Write(p.Open, new ReadOnlyMemory<double>(data.Open));
+                    board.Write(p.High, new ReadOnlyMemory<double>(data.High));
+                    board.Write(p.Low, new ReadOnlyMemory<double>(data.Low));
+                    board.Write(p.Close, new ReadOnlyMemory<double>(data.Close));
+                    board.Write(schema.SmaPort, new ReadOnlyMemory<double>(data.Sma));
+                    board.Write(schema.PricePort, lastClose);
+                    board.Write(schema.Viewport.LogicalLength, bars);
                 }
                 schema.Trigger.Push(board);
                 schema.InvalidateEnvironment();
-                using (volumeBoard.BeginTransaction())
+                using (volumeBoard.WriteScope())
                 {
-                    volumeBoard.WriteIfChanged(volume.TimePort, new ReadOnlyMemory<DateTime>(data.Time));
-                    volumeBoard.WriteIfChanged(volume.VolumePort, new ReadOnlyMemory<double>(data.Volume));
+                    volumeBoard.Write(volume.TimePort, new ReadOnlyMemory<DateTime>(data.Time));
+                    volumeBoard.Write(volume.VolumePort, new ReadOnlyMemory<double>(data.Volume));
                 }
                 volume.Trigger.Push(volumeBoard);
                 volume.InvalidateEnvironment();
@@ -240,7 +240,7 @@ namespace Hevo.Charting.Benchmarks
                 rig.Interaction = features.OfType<ChartInteractionFeature>().Single();
                 rig.Line = features.OfType<DraggableLineFeature>().Single();
                 rig.Measure = features.OfType<MeasureFeature>().Single();
-                using (board.AcquireReadLock()) rig.InitialRange = board.Read(schema.Viewport.ActiveRange);
+                using (board.ReadScope()) rig.InitialRange = board.Read(schema.Viewport.ActiveRange);
                 window.PreviewMouseMove += (_, _) => Interlocked.Increment(ref rig.MouseEvents);
                 // 行为链里 ChartInteractionFeature 那组的共享状态 → 惯性执行器;每帧记一下它是否在跑、速度多少
                 var groups = (System.Collections.IEnumerable)Field(cell.PointerRegions.Behaviors, "_groups")!;
@@ -332,7 +332,7 @@ namespace Hevo.Charting.Benchmarks
                 flow.Watch(new object[] { port }, board =>
                 {
                     PointerGesture g;
-                    using (board.AcquireReadLock()) g = board.Read(port);
+                    using (board.ReadScope()) g = board.Read(port);
                     string owner = g.Owner?.GetType().Name.Replace("Feature", "") ?? "-";
                     _owner.Gestures.Add($"{owner}:{g.Phase}{(g.Reason != PointerCancelReason.None ? "(" + g.Reason + ")" : "")}");
                 });
@@ -490,10 +490,10 @@ namespace Hevo.Charting.Benchmarks
                 {
                     _rig.Schema.LegacyHandledEnabled = false;
                     var b = _rig.Board;
-                    using (b.AcquireWriteLock())
+                    using (b.WriteScope())
                     {
-                        b.WriteIfChanged(_rig.Schema.Viewport.UserRange, _rig.InitialRange);
-                        b.WriteIfChanged(_rig.Schema.PricePort, _rig.InitialPrice);
+                        b.Write(_rig.Schema.Viewport.UserRange, _rig.InitialRange);
+                        b.Write(_rig.Schema.PricePort, _rig.InitialPrice);
                     }
                     _rig.Schema.Commits.Clear();
                     _rig.Schema.Gestures.Clear();
@@ -525,7 +525,7 @@ namespace Hevo.Charting.Benchmarks
                 PointerHitState? hit;
                 double price;
                 bool hot, measure, box;
-                using (b.AcquireReadLock())
+                using (b.ReadScope())
                 {
                     active = b.Read(s.Viewport.ActiveRange);
                     hit = b.Read(s.Hit);

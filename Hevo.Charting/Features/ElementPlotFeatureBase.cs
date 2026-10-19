@@ -211,8 +211,8 @@ namespace Hevo.Charting.Features
         private void WriteHitState(DataBlackboard board, PointerHitState? state)
         {
             if (HitStatePort == null) return;
-            using (board.AcquireWriteLock())
-                board.WriteIfChanged(HitStatePort, state);
+            using (board.WriteScope())
+                board.Write(HitStatePort, state);
         }
 
         private (int Index, HevoPoint Hit, double DistSq) HitTest(RenderContext ctx, HevoPoint screen)

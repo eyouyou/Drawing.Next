@@ -36,7 +36,7 @@ namespace Hevo.Charting.Features
 
         public MeasureOptions Options { get; init; } = new MeasureOptions();
 
-        // record struct:WriteIfChanged 比较走 IEquatable,不装箱
+        // record struct:Write 比较走 IEquatable,不装箱
         private readonly record struct DragState(bool Active, HevoPoint From, HevoPoint To);
 
         private readonly DataPort<DragState> _statePort = new("Measure_State");
@@ -56,11 +56,11 @@ namespace Hevo.Charting.Features
             {
                 case PointerPhase.Begin:
                 case PointerPhase.Move:
-                    board.WriteIfChanged(_statePort, new DragState(true, g.PressPosition, g.Position));
+                    board.Write(_statePort, new DragState(true, g.PressPosition, g.Position));
                     break;
                 case PointerPhase.End:
                 {
-                    board.WriteIfChanged(_statePort, default);
+                    board.Write(_statePort, default);
                     var onMeasured = Options.OnMeasured;
                     var proj = _projection;
                     if (onMeasured == null || !proj.IsValid) break;
@@ -70,7 +70,7 @@ namespace Hevo.Charting.Features
                     break;
                 }
                 case PointerPhase.Cancel:
-                    board.WriteIfChanged(_statePort, default);
+                    board.Write(_statePort, default);
                     break;
             }
         }

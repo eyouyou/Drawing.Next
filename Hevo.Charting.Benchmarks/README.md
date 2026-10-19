@@ -43,7 +43,7 @@ dotnet run -c Release -- --filter "*" --warmupCount 3 --iterationCount 5
 
 | 方面 | A → B | 原因 |
 |---|---|---|
-| AutoMap Feed(2000 / 2 万根,100 tick/s) | 帧率 2.0 → 76 / 79 帧/s;tick→帧延迟中位 248 / 249 → 0.2 / 0.7 ms;每帧 Feature 重算 7.5 / 8.0 → 3.5 / 3.7 | A 的 FastSourceMap 原地复用同一块数组再 `WriteIfChanged`,ROM 引用没变 → 长度不变的 tick 不通知,只有新增 K 线时才出帧(**A 上是功能缺陷**)。B 每次写新缓冲 + 按内容判等。B 的分配(5.3 / 21.2 MB/s)是正常出帧的代价 |
+| AutoMap Feed(2000 / 2 万根,100 tick/s) | 帧率 2.0 → 76 / 79 帧/s;tick→帧延迟中位 248 / 249 → 0.2 / 0.7 ms;每帧 Feature 重算 7.5 / 8.0 → 3.5 / 3.7 | A 的 FastSourceMap 原地复用同一块数组再 `Write`,ROM 引用没变 → 长度不变的 tick 不通知,只有新增 K 线时才出帧(**A 上是功能缺陷**)。B 每次写新缓冲 + 按内容判等。B 的分配(5.3 / 21.2 MB/s)是正常出帧的代价 |
 | PyFeed(2 万根,1 / 4 / 8 个 Python 指标) | GC 暂停 3.46 / 2.25 / 1.91 → 1.59 / 1.44 / 1.42 ms/s;完成率 88 / 30 / 0 → 92 / 34 / 0 % | Python 调用期间让出列读者登记,不再挡缓冲复用 |
 | Feed(C# SMA) | 2 万根 @1000 tick/s GC 暂停 9.35 → 6.48 ms/s;其余分配 / 延迟持平 | 列缓冲按纪元复用 |
 | BDN DryRun_50Features | 57.6 µs / 81 KB → 2.25 µs / 3 KB | DryRun 按类型缓存端口元数据 |

@@ -87,7 +87,7 @@ namespace Hevo.Charting.Tests
                 b.PublishRange(5, 2);
 
                 Assert.NotNull(board);
-                using (board!.AcquireReadLock())
+                using (board!.ReadScope())
                 {
                     Assert.Equal(5, board.Read(timePort).Length);
                     var colA = board.Read(portA).Span;

@@ -54,7 +54,7 @@ namespace Hevo.Charting.Interaction
         {
             var hitPort = _s.F.PointerHitPort;
             var viewport = _s.Viewport;
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var hit = board.Read(hitPort);
                 var baseRange = board.Read(viewport.ActiveRange);
@@ -72,12 +72,12 @@ namespace Hevo.Charting.Interaction
                 bool isRangeChanged = false;
                 if (targetIndex < baseRange.Min)
                 {
-                    using (board.AcquireWriteLock()) board.WriteIfChanged(viewport.UserRange, new RealRange(targetIndex, targetIndex + baseRange.Span));
+                    using (board.WriteScope()) board.Write(viewport.UserRange, new RealRange(targetIndex, targetIndex + baseRange.Span));
                     isRangeChanged = true;
                 }
                 else if (targetIndex > baseRange.Max)
                 {
-                    using (board.AcquireWriteLock()) board.WriteIfChanged(viewport.UserRange, new RealRange(targetIndex - baseRange.Span, targetIndex));
+                    using (board.WriteScope()) board.Write(viewport.UserRange, new RealRange(targetIndex - baseRange.Span, targetIndex));
                     isRangeChanged = true;
                 }
 

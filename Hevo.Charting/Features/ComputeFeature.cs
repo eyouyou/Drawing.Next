@@ -191,7 +191,7 @@ namespace Hevo.Charting.Features
                 {
                     // ① 瞬间读锁捞 inputs
                     var argsBuf = new object?[orderedPorts.Length];
-                    using (board.AcquireReadLock())
+                    using (board.ReadScope())
                     {
                         for (int i = 0; i < orderedPorts.Length; i++)
                         {
@@ -219,7 +219,7 @@ namespace Hevo.Charting.Features
                         return;
                     }
 
-                    // ③ WriteOutput 内部自己 AcquireWriteLock,μs 级提交
+                    // ③ WriteOutput 内部自己 WriteScope,μs 级提交
                     WriteOutput(board, raw, multiOutput, call);
                 }
                 return;
@@ -239,7 +239,7 @@ namespace Hevo.Charting.Features
             {
                 // ① 瞬间读锁捞 input
                 ReadOnlyMemory<double> input;
-                using (board.AcquireReadLock())
+                using (board.ReadScope())
                 {
                     input = board.Read(InputPort);
                     if (input.Length == 0) return;
@@ -367,7 +367,7 @@ namespace Hevo.Charting.Features
                     Console.WriteLine($"[ComputeFeature] 多输出模式 handler 应返 IDictionary<string,object?>,实际 {raw.GetType().Name},跳过。");
                     return;
                 }
-                using (board.AcquireWriteLock())
+                using (board.WriteScope())
                 {
                     foreach (var kv in Outputs)
                     {
@@ -378,7 +378,7 @@ namespace Hevo.Charting.Features
                             double[] a              => a,
                             _                       => ReadOnlyMemory<double>.Empty,
                         };
-                        if (rom.Length > 0) { board.WriteIfChanged(kv.Value, rom); call.Written(kv.Value, rom); }
+                        if (rom.Length > 0) { board.Write(kv.Value, rom); call.Written(kv.Value, rom); }
                     }
                 }
                 return;
@@ -394,9 +394,9 @@ namespace Hevo.Charting.Features
                     return;
                 }
             }
-            using (board.AcquireWriteLock())
+            using (board.WriteScope())
             {
-                board.WriteIfChanged(OutputPort, rom1);
+                board.Write(OutputPort, rom1);
                 call.Written(OutputPort, rom1);
             }
         }

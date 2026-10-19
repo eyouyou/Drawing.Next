@@ -24,10 +24,10 @@ namespace Hevo.Charting.Tests
                 var buf = pub.Rent(1000);
                 Assert.NotSame(published, buf);
                 for (int i = 0; i < 1000; i++) buf[i] = k;
-                using (board.AcquireWriteLock()) pub.Publish(board, port, buf, 1000);
+                using (board.WriteScope()) pub.Publish(board, port, buf, 1000);
                 published = buf;
                 seen.Add(buf);
-                using (board.AcquireReadLock())
+                using (board.ReadScope())
                 {
                     var col = board.Read(port);
                     Assert.Equal(1000, col.Length);

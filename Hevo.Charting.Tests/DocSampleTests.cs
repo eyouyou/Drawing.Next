@@ -43,7 +43,7 @@ namespace Hevo.Charting.Tests
 
         private static double[] ReadPort(DataBlackboard board, DataPort<ReadOnlyMemory<double>> port)
         {
-            using (board.AcquireReadLock()) return board.Read(port).ToArray();
+            using (board.ReadScope()) return board.Read(port).ToArray();
         }
 
         private static string RepoFile(params string[] parts)
@@ -383,7 +383,7 @@ namespace Hevo.Charting.Tests
             var feature = new Hevo.Charting.DocSamples.UseMemo.CloseStatsFeature { Source = closes };
             var h = new SchemaHarness(feature);
 
-            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 1.0, 3.0, 2.0 }));
+            h.Board.WriteLocked(closes, new ReadOnlyMemory<double>(new[] { 1.0, 3.0, 2.0 }));
             h.InvalidateEnvironment();
             h.ProjectOnly();
             Assert.Equal(1, feature.ComputeCount);
@@ -395,7 +395,7 @@ namespace Hevo.Charting.Tests
             Assert.Equal(1, feature.ComputeCount);
 
             // 换了一块新数据:依赖变了才重算
-            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 5.0, 4.0 }));
+            h.Board.WriteLocked(closes, new ReadOnlyMemory<double>(new[] { 5.0, 4.0 }));
             h.ProjectOnly();
             Assert.Equal(2, feature.ComputeCount);
             Assert.Equal(4.5, feature.Published.Mean);
@@ -416,7 +416,7 @@ namespace Hevo.Charting.Tests
             var feature = new Hevo.Charting.DocSamples.Use.StatsBandFeature { Source = closes };
             var h = new SchemaHarness(layout, feature);
 
-            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 1.0, 3.0, 2.0 }));
+            h.Board.WriteLocked(closes, new ReadOnlyMemory<double>(new[] { 1.0, 3.0, 2.0 }));
             h.InvalidateEnvironment();
             h.Frame();
             Assert.Equal(1, feature.PublishCount);
@@ -433,7 +433,7 @@ namespace Hevo.Charting.Tests
             Assert.Equal(2, feature.PublishCount);
 
             // 只有数据换了:端口唤醒本 Feature,Layout 不跑,绘图区还是上次那个
-            h.Board.Write(closes, new ReadOnlyMemory<double>(new[] { 5.0, 4.0 }));
+            h.Board.WriteLocked(closes, new ReadOnlyMemory<double>(new[] { 5.0, 4.0 }));
             h.Frame();
             Assert.Equal(3, layout.ProjectCount);
             Assert.Equal(3, feature.PublishCount);

@@ -46,7 +46,7 @@ namespace Hevo.Charting.CodeAnalysis
                 var targetMethod = GetMethodName(invocation);
 
                 // 抓捕黑板写入动作
-                if (targetMethod == "Write" || targetMethod == "WriteIfChanged" || targetMethod == "Publish")
+                if (targetMethod == "Write" || targetMethod == "Write" || targetMethod == "Publish")
                 {
                     // ctx.Pointer().Publish(...) 发布指针区域,语义同 Trait(随帧提交、不写黑板),是 OnProject 的本职
                     if (targetMethod == "Publish" && IsPointerRegionPublish(context, invocation)) continue;

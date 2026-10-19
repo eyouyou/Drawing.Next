@@ -197,7 +197,7 @@ namespace Hevo.Charting.Tests
             h.Frame();
             Assert.Equal(new[] { (0, true) }, seen);
 
-            h.Board.Write(port, 1.0);
+            h.Board.WriteLocked(port, 1.0);
             h.Frame();
             Assert.Equal(2, writer.ProjectCount);
             Assert.Single(seen); // reader 没被叫起

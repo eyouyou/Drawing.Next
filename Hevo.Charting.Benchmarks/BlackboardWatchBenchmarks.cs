@@ -7,7 +7,7 @@ namespace Hevo.Charting.Benchmarks
 {
     /// <summary>
     /// 黑板写入 + 提交分发的成本,跟 Watch 数量的关系。Watch 走正式的 <c>flow.Watch</c> 挂上去(跟 Feature 装配同一条路),
-    /// 写入都在 <c>AcquireWriteLock</c> 里裸写一次(非事务写 = 写完立即提交)。
+    /// 写入都在 <c>WriteScope</c> 里裸写一次(非事务写 = 写完立即提交)。
     /// <list type="bullet">
     /// <item>CommitOneDirty:50 个 Watch 各听一个端口,写其中一个 → 只该跑 1 个回调。</item>
     /// <item>CommitNoneDirty:50 个 Watch,写一个谁都不听的端口 → 一个回调都不该跑(纯提交开销)。</item>
@@ -55,7 +55,7 @@ namespace Hevo.Charting.Benchmarks
             _cross = new DataBlackboard();
             var subs = new System.Collections.Generic.List<IDisposable>
             {
-                Source(_cross).Watch(new object[] { _pointer }, b => b.WriteIfChanged(_hit, b.Read(_pointer) * 2)).Subscribe(_ => { }),
+                Source(_cross).Watch(new object[] { _pointer }, b => b.Write(_hit, b.Read(_pointer) * 2)).Subscribe(_ => { }),
                 Source(_cross).Watch(new object[] { _hit }, b => _calls += (int)b.Read(_hit) & 1).Subscribe(_ => { }),
             };
             for (int i = 0; i < 18; i++)
@@ -83,28 +83,28 @@ namespace Hevo.Charting.Benchmarks
         [Benchmark]
         public int CommitOneDirty()
         {
-            using (_watched.AcquireWriteLock()) _watched.WriteIfChanged(_watchedPorts[0], ++_v);
+            using (_watched.WriteScope()) _watched.Write(_watchedPorts[0], ++_v);
             return _calls;
         }
 
         [Benchmark]
         public int CommitNoneDirty()
         {
-            using (_watched.AcquireWriteLock()) _watched.WriteIfChanged(_unwatched, ++_v);
+            using (_watched.WriteScope()) _watched.Write(_unwatched, ++_v);
             return _calls;
         }
 
         [Benchmark]
         public double RawWriteNoWatch()
         {
-            using (_bare.AcquireWriteLock()) _bare.WriteIfChanged(_barePort, ++_v);
+            using (_bare.WriteScope()) _bare.Write(_barePort, ++_v);
             return _v;
         }
 
         [Benchmark]
         public int CrosshairMove()
         {
-            using (_cross.AcquireWriteLock()) _cross.WriteIfChanged(_pointer, ++_v);
+            using (_cross.WriteScope()) _cross.Write(_pointer, ++_v);
             return _calls;
         }
     }

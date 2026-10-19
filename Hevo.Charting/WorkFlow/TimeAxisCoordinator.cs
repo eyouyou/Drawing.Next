@@ -17,7 +17,7 @@ namespace Hevo.Charting.WorkFlow
         private readonly DataPort<ReadOnlyMemory<DateTime>> _timePort;
 
         // 利用 VirtualDataSource 做管线粘合剂：任何源变化 → Feed 脉冲 → Ingestor.Process → Merge
-        // Ingestor.Process 由 UniversalDataPipe 在 BeginTransaction (WriteLock) 内调用，写入天然原子
+        // Ingestor.Process 由 UniversalDataPipe 在 WriteScope (WriteLock) 内调用，写入天然原子
         private readonly VirtualDataSource<byte> _pulseSource = new();
         private static readonly List<byte> _pulsePayload = new() { 0 };
 
@@ -179,7 +179,7 @@ namespace Hevo.Charting.WorkFlow
             if (n == 0)
             {
                 board.ForceWrite(_timePort, ReadOnlyMemory<DateTime>.Empty);
-                if (_vp != null) board.WriteIfChanged(_vp.LogicalLength, 0);
+                if (_vp != null) board.Write(_vp.LogicalLength, 0);
                 _mergedCount = 0;
                 return;
             }
@@ -234,7 +234,7 @@ namespace Hevo.Charting.WorkFlow
 
             _mergedCount = merged;
 
-            // 4. 写黑板（board 已在 UniversalDataPipe.Process 的 BeginTransaction 内）
+            // 4. 写黑板（board 已在 UniversalDataPipe.Process 的 WriteScope 内）
             board.ForceWrite(_timePort, new ReadOnlyMemory<DateTime>(_mergedTimes, 0, merged));
             _timeRing.Published(_mergedTimes);
             for (int i = 0; i < n; i++) _snapshotBuf[i].WriteOutputs(board, merged);
@@ -242,7 +242,7 @@ namespace Hevo.Charting.WorkFlow
             if (_vp != null)
             {
                 int logLen = _logicalLengthOverride?.Invoke() ?? merged;
-                board.WriteIfChanged(_vp.LogicalLength, logLen);
+                board.Write(_vp.LogicalLength, logLen);
             }
         }
 

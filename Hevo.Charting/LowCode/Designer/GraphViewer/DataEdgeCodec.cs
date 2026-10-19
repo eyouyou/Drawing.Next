@@ -72,7 +72,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         /// Feature 节点写两类 binding:
         /// <list type="bullet">
         ///   <item><b>OutputPort</b>:每根 OutputPort 都写 globalId(从 prepass 表读)。必须写,即使没被本 cell
-        ///         消费 —— 否则 init=null! 的端口在 OnCompose 走到 WriteIfChanged(null,...) 触发 NRE 静默吞,
+        ///         消费 —— 否则 init=null! 的端口在 OnCompose 走到 Write(null,...) 触发 NRE 静默吞,
         ///         整个 cell 黑屏。</item>
         ///   <item><b>InputPort</b>:
         ///         (a) 非数组 + 有 BindingId 且没有指向别处的入边 → verbatim 写出(scope-qualified

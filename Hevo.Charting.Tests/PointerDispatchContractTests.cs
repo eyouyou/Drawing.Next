@@ -55,7 +55,7 @@ namespace Hevo.Charting.Tests
             p.OnGesture = (b, g, later) =>
             {
                 if (g.Phase != PointerPhase.Move && g.Phase != PointerPhase.Begin) return;
-                b.WriteIfChanged(input, g.Position.X);
+                b.Write(input, g.Position.X);
                 reads.Add((g.Position.X, b.Read(derived)));   // 深度优先:别的 Watch 已经算完
             };
             p.Set(rig, Line(150));
@@ -70,7 +70,7 @@ namespace Hevo.Charting.Tests
             public DataPort<double> Input { get; init; } = null!;
             public DataPort<double> Output { get; init; } = null!;
             protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
-                => flow.Watch(new object[] { Input }, b => { using (b.AcquireWriteLock()) b.WriteIfChanged(Output, b.Read(Input) * 2); });
+                => flow.Watch(new object[] { Input }, b => { using (b.WriteScope()) b.Write(Output, b.Read(Input) * 2); });
             protected override void OnProject(FeatureContext ctx) { }
         }
 

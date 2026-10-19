@@ -59,7 +59,7 @@ namespace Hevo.Charting.Tests
 
             public double[] Read(DataPort<ReadOnlyMemory<double>> port)
             {
-                using (Board.AcquireReadLock()) return Board.Read(port).ToArray();
+                using (Board.ReadScope()) return Board.Read(port).ToArray();
             }
         }
 
@@ -126,12 +126,12 @@ namespace Hevo.Charting.Tests
             var rig = new Rig();
             rig.Source.PublishRows(new Row(1, 2), new Row(3, 4));
             var foreign = new[] { 1.0, 3.0 };                                   // 内容跟摄入器发布的一样
-            using (rig.Board.AcquireWriteLock()) rig.Board.ForceWrite(rig.ColA, new ReadOnlyMemory<double>(foreign));
+            using (rig.Board.WriteScope()) rig.Board.ForceWrite(rig.ColA, new ReadOnlyMemory<double>(foreign));
 
             rig.Source.PublishRows(new Row(1, 2), new Row(3, 4));
 
             ReadOnlyMemory<double> now;
-            using (rig.Board.AcquireReadLock()) now = rig.Board.Read(rig.ColA);
+            using (rig.Board.ReadScope()) now = rig.Board.Read(rig.ColA);
             Assert.True(System.Runtime.InteropServices.MemoryMarshal.TryGetArray(now, out var seg));
             Assert.NotSame(foreign, seg.Array);
             Assert.Equal(new[] { 1.0, 3.0 }, now.ToArray());

@@ -68,7 +68,7 @@ namespace Hevo.Charting.Interaction
                     applyPxDelta: dx => _s.ApplyPanDelta(board, dx),
                     readActiveRange: () =>
                     {
-                        using (board.AcquireUpgradeableReadLock()) return board.Read(_s.Viewport.ActiveRange);
+                        using (board.UpdateScope()) return board.Read(_s.Viewport.ActiveRange);
                     });
             }
 

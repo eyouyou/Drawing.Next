@@ -450,7 +450,7 @@ namespace Hevo.Charting.Features
                         if (orderedPorts != null)
                         {
                             var argsBuf = new object?[orderedPorts.Length];
-                            using (board.AcquireReadLock())
+                            using (board.ReadScope())
                             {
                                 for (int i = 0; i < orderedPorts.Length; i++)
                                 {
@@ -467,7 +467,7 @@ namespace Hevo.Charting.Features
                         else
                         {
                             ReadOnlyMemory<double> input;
-                            using (board.AcquireReadLock())
+                            using (board.ReadScope())
                             {
                                 input = board.Read(InputPort);
                                 if (input.Length == 0) return;
@@ -496,7 +496,7 @@ namespace Hevo.Charting.Features
                     // ③ 写锁提交 outputs (μs 级,不影响 UI 渲染)
                     //    每条 line/bar series 各自写到自己的 _childPorts[i] —— 如果 JSON 焊到 SeriesOutputs.{name},
                     //    这里写的就是绑定端口本身,下游(AutoScale.ValuePorts / 其他 ComputeFeature 等)直接订阅生效。
-                    using (board.AcquireWriteLock())
+                    using (board.WriteScope())
                     {
                         for (int i = 0; i < _resolvedSpecs.Length; i++)
                         {
@@ -512,7 +512,7 @@ namespace Hevo.Charting.Features
         protected override void OnProject(FeatureContext ctx)
         {
             // 故意为空 —— 完全非蓝图模式 / first-class schema 子节点架构下:
-            // 数据流:Watch 回调写 _childPorts → board.WriteIfChanged 触发 NotifyPortUpdated
+            // 数据流:Watch 回调写 _childPorts → board.Write 触发 NotifyPortUpdated
             //         → registry 把订阅过这些 port 的子 feature 标脏 → schema.ProjectAll 自动 project 它们
             // YRange / Viewport 变也走同一通路(子 feature 的 UsePort 直接登记到 schema registry)。
         }
@@ -566,28 +566,28 @@ namespace Hevo.Charting.Features
                         double[] a              => a,
                         _                       => ReadOnlyMemory<double>.Empty,
                     };
-                    if (rom.Length > 0) { board.WriteIfChanged(p, rom); call.Written(p, rom); }
+                    if (rom.Length > 0) { board.Write(p, rom); call.Written(p, rom); }
                     break;
                 }
                 case "scatter":
                 {
                     if (port is not DataPort<ReadOnlyMemory<ScatterPoint>> p) return;
                     var spec = ParseScatterSpec(value);
-                    board.WriteIfChanged(p, spec);
+                    board.Write(p, spec);
                     break;
                 }
                 case "arrow_markers":
                 {
                     if (port is not DataPort<ReadOnlyMemory<ArrowMarker>> p) return;
                     var spec = ParseArrowSpec(value);
-                    board.WriteIfChanged(p, spec);
+                    board.Write(p, spec);
                     break;
                 }
                 case "text_markers":
                 {
                     if (port is not DataPort<ReadOnlyMemory<TextMarker>> p) return;
                     var spec = ParseTextSpec(value);
-                    board.WriteIfChanged(p, spec);
+                    board.Write(p, spec);
                     break;
                 }
             }

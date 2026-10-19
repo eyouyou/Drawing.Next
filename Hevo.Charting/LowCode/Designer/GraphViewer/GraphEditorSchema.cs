@@ -72,16 +72,16 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             //      让首帧 _mainFlow.StartWith(_board) 推出去时,features ctx.UsePort(StatePort) 能立即拿到值。
             //   2) 订阅 DataSource.Stream → 写 board → 推 _mainFlow,后续状态变化按这个路径上推。
             //   3) _mainFlow.StartWith(_board).BindTo(chart):跟 KLineSchema 的 Pipe().BindTo 调用层对齐。
-            using (_board.AcquireWriteLock())
+            using (_board.WriteScope())
             {
-                _board.WriteIfChanged(StatePort, DataSource.State);
+                _board.Write(StatePort, DataSource.State);
             }
 
             var sub = DataSource.Stream.Subscribe(state =>
             {
-                using (_board.AcquireWriteLock())
+                using (_board.WriteScope())
                 {
-                    _board.WriteIfChanged(StatePort, state);
+                    _board.Write(StatePort, state);
                 }
                 _mainFlow.Push(_board);
             });

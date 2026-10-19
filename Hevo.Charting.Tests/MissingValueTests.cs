@@ -32,11 +32,11 @@ namespace Hevo.Charting.Tests
             var ingestor = new ScatterIngestor<Bar, double>(port, () => 3, MissingValue<double>.Value, b => b.Index, b => b.Close);
             using var board = new DataBlackboard();
             var items = new[] { new Bar(0, 42) };
-            using (board.BeginTransaction())
+            using (board.WriteScope())
                 ingestor.Process(new DataSnapshot<Bar>(items, 1, new VersionToken(1)), board);
 
             double[] col;
-            using (board.AcquireReadLock()) col = board.Read(port).ToArray();
+            using (board.ReadScope()) col = board.Read(port).ToArray();
             Assert.Equal(3, col.Length);
             Assert.Equal(42, col[0]);
             Assert.True(double.IsNaN(col[1]));

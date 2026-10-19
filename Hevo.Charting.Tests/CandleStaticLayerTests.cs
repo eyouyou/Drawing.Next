@@ -76,15 +76,15 @@ namespace Hevo.Charting.Tests
             /// <summary>跟真实列发布一样 ForceWrite:即使底层数组 / 长度都没变也推一次(列版本每次都变)。</summary>
             public void Publish()
             {
-                using (Board.BeginTransaction())
+                using (Board.WriteScope())
                 {
                     Board.ForceWrite(Schema.Ports.Time, Slice(Time));
                     Board.ForceWrite(Schema.Ports.Open, Slice(Open));
                     Board.ForceWrite(Schema.Ports.High, Slice(High));
                     Board.ForceWrite(Schema.Ports.Low, Slice(Low));
                     Board.ForceWrite(Schema.Ports.Close, Slice(Close));
-                    Board.WriteIfChanged(_viewport.LogicalLength, Length);
-                    Board.WriteIfChanged(Schema.YRange, new RealRange(50, 200));
+                    Board.Write(_viewport.LogicalLength, Length);
+                    Board.Write(Schema.YRange, new RealRange(50, 200));
                 }
             }
 

@@ -33,7 +33,7 @@ namespace Hevo.Charting.Tests
         {
             _ctx._isFullPass = fullPass;
             _ctx.BeginProject(IncrementalTestKit.NewRenderContext(), _board);
-            using (_board.AcquireReadLock()) return _ctx.UsePort(port);
+            using (_board.ReadScope()) return _ctx.UsePort(port);
         }
 
         private bool PopDirty()
@@ -45,7 +45,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void FirstRead_IsChanged_AndSubscribesFeature()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
 
             var (value, changed) = Use(_a);
 
@@ -58,7 +58,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void RepeatedRead_WithoutWrite_IsNotChanged()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Use(_a);
 
             Assert.False(Use(_a).IsChanged);
@@ -68,13 +68,13 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void WriteSameValue_IsNotChanged_NewValue_IsChangedExactlyOnce()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Use(_a);
 
-            _board.Write(_a, 1.0); // WriteIfChanged 值防抖,令牌不动
+            _board.WriteLocked(_a, 1.0); // Write 值防抖,令牌不动
             Assert.False(Use(_a).IsChanged);
 
-            _board.Write(_a, 2.0);
+            _board.WriteLocked(_a, 2.0);
             var (value, changed) = Use(_a);
             Assert.Equal(2.0, value);
             Assert.True(changed);
@@ -84,10 +84,10 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void ForceWriteSameValue_IsChanged()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Use(_a);
 
-            using (_board.BeginTransaction()) _board.ForceWrite(_a, 1.0);
+            using (_board.WriteScope()) _board.ForceWrite(_a, 1.0);
 
             Assert.True(Use(_a).IsChanged);
         }
@@ -95,10 +95,10 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void UnrelatedPortWrite_DoesNotAffectIsChanged()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Use(_a);
 
-            _board.Write(_b, 5.0);
+            _board.WriteLocked(_b, 5.0);
 
             Assert.False(Use(_a).IsChanged);
         }
@@ -106,7 +106,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void FullPass_ForcesIsChanged_WithoutVersionChange()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Use(_a);
 
             Assert.True(Use(_a, fullPass: true).IsChanged);
@@ -122,14 +122,14 @@ namespace Hevo.Charting.Tests
             Assert.False(Use(_a).IsChanged);
 
             // 首次写入后照常判脏
-            _board.Write(_a, 3.0);
+            _board.WriteLocked(_a, 3.0);
             Assert.True(Use(_a).IsChanged);
         }
 
         [Fact]
         public void Subscription_IsRegisteredOnlyOnFirstSight_ResetReEnablesIt()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Use(_a);
 
             // 订阅被外部摘除(Transact 移除 Feature 时 Registry.UnsubscribeAll)后,
@@ -151,7 +151,7 @@ namespace Hevo.Charting.Tests
         {
             _ctx._isFullPass = false;
             _ctx.BeginProject(IncrementalTestKit.NewRenderContext(), _board);
-            using (_board.AcquireReadLock())
+            using (_board.ReadScope())
             {
                 _ctx.UsePort(_a);
                 if (readB) return _ctx.UsePort(_b);
@@ -168,23 +168,23 @@ namespace Hevo.Charting.Tests
             ProjectFrame(readB: false);
             PopDirty();
 
-            _board.Write(_b, 1.0);
+            _board.WriteLocked(_b, 1.0);
             Assert.False(PopDirty());
 
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Assert.True(PopDirty());
             var b = ProjectFrame(readB: true);
             Assert.Equal(1.0, b!.Value.Value);
             Assert.True(b.Value.IsChanged);
 
-            _board.Write(_b, 2.0);
+            _board.WriteLocked(_b, 2.0);
             Assert.True(PopDirty());
         }
 
         [Fact]
         public void ConditionalUsePort_SkippedFrames_IsChangedComparesWithLastRead()
         {
-            _board.Write(_b, 1.0);
+            _board.WriteLocked(_b, 1.0);
             Assert.True(ProjectFrame(readB: true)!.Value.IsChanged);
 
             // 跳过几帧、期间 B 没变:再读到时不算变
@@ -194,9 +194,9 @@ namespace Hevo.Charting.Tests
 
             // 跳过的帧里 B 变了两次:再读到时只报一次变化,拿到最新值
             ProjectFrame(readB: false);
-            _board.Write(_b, 2.0);
+            _board.WriteLocked(_b, 2.0);
             ProjectFrame(readB: false);
-            _board.Write(_b, 3.0);
+            _board.WriteLocked(_b, 3.0);
             ProjectFrame(readB: false);
             var b = ProjectFrame(readB: true)!.Value;
             Assert.Equal(3.0, b.Value);
@@ -205,20 +205,20 @@ namespace Hevo.Charting.Tests
 
             // 写回跳过前读到的同一个值也算变:比的是版本令牌,不是值
             ProjectFrame(readB: false);
-            _board.Write(_b, 4.0);
-            _board.Write(_b, 3.0);
+            _board.WriteLocked(_b, 4.0);
+            _board.WriteLocked(_b, 3.0);
             Assert.True(ProjectFrame(readB: true)!.Value.IsChanged);
         }
 
         [Fact]
         public void UsePort_CallOrderAcrossFrames_DoesNotAffectResult()
         {
-            _board.Write(_a, 1.0);
-            _board.Write(_b, 1.0);
+            _board.WriteLocked(_a, 1.0);
+            _board.WriteLocked(_b, 1.0);
             Use(_a);
             Use(_b);
 
-            _board.Write(_b, 2.0);
+            _board.WriteLocked(_b, 2.0);
 
             // 换个顺序读:令牌按端口对象存,B 变了 A 没变
             var b = Use(_b);
@@ -231,9 +231,9 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void UsePort_SamePortTwiceInOneFrame_OnlyFirstSeesChange()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             Use(_a);
-            _board.Write(_a, 2.0);
+            _board.WriteLocked(_a, 2.0);
 
             Assert.True(Use(_a).IsChanged);
             Assert.False(Use(_a).IsChanged);
@@ -381,7 +381,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void Hooks_OutsideProject_ThrowInDebug()
         {
-            _board.Write(_a, 1.0);
+            _board.WriteLocked(_a, 1.0);
             // 首帧之前(OnCompose / Watch 回调里)
             Assert.Throws<System.InvalidOperationException>(() => _ctx.UsePort(_a));
             Assert.Throws<System.InvalidOperationException>(() => _ctx.UseMemo(1, static d => d));
@@ -400,7 +400,7 @@ namespace Hevo.Charting.Tests
             FeatureContext? seen = null;
             var feature = new ProbeFeature("f") { OnProjectAction = (_, c) => { seen = c; c.UsePort(_a); } };
             var h = new SchemaHarness(feature);
-            h.Board.Write(_a, 1.0);
+            h.Board.WriteLocked(_a, 1.0);
             h.InvalidateEnvironment();
             h.ProjectOnly();
 

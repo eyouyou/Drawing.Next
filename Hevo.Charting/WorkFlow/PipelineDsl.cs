@@ -179,7 +179,7 @@ namespace Hevo.Charting.WorkFlow
 
         public ValueLinker<TContext, TItem, TValue, TSource> ForwardTo(DataPort<TValue> port)
         {
-            _ingestor.AddRouter((val, board) => board.WriteIfChanged(port, val));
+            _ingestor.AddRouter((val, board) => board.Write(port, val));
             return this;
         }
 
@@ -188,7 +188,7 @@ namespace Hevo.Charting.WorkFlow
             _ingestor.AddRouter((val, board) =>
             {
                 var currentMeta = board.Read(metaPort);
-                if (currentMeta != null) board.WriteIfChanged(metaPort, updater(currentMeta, val));
+                if (currentMeta != null) board.Write(metaPort, updater(currentMeta, val));
             });
             return this;
         }
@@ -272,7 +272,7 @@ namespace Hevo.Charting.WorkFlow
 
         /// <summary>
         /// 内容跟上一次发布的一样就不发布(缓冲还回轮换环),不一样才 ForceWrite。
-        /// 以前原地覆盖同一块数组再 WriteIfChanged:比的是 ROM(同数组同长度即相等),长度不变时内容变了也不通知(漏通知),
+        /// 以前原地覆盖同一块数组再 Write:比的是 ROM(同数组同长度即相等),长度不变时内容变了也不通知(漏通知),
         /// 长度一变就通知;现在按内容比:变了才通知、没变不通知 —— AutoMap 生成的就是这类 Map,
         /// tick 时 Time / 历史 OHLC 列不变,不能每次推送都把依赖它们的 Feature / 图层叫醒。
         /// </summary>

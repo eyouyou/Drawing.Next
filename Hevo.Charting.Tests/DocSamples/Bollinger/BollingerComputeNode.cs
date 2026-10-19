@@ -58,7 +58,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
         {
             // ① 读锁内只拿列引用(WatchAsync 回调本身是受保护的列读者,出锁后本回调内可继续读)
             ReadOnlyMemory<double> close;
-            using (board.AcquireReadLock())
+            using (board.ReadScope())
             {
                 close = board.Read(InputPort);
             }
@@ -75,11 +75,11 @@ namespace Hevo.Charting.DocSamples.Bollinger
             var u = new ReadOnlyMemory<double>(upper, 0, n);
             var m = new ReadOnlyMemory<double>(middle, 0, n);
             var l = new ReadOnlyMemory<double>(lower, 0, n);
-            using (board.AcquireWriteLock())
+            using (board.WriteScope())
             {
-                board.WriteIfChanged(UpperPort, u); call.Written(UpperPort, u);
-                board.WriteIfChanged(MiddlePort, m); call.Written(MiddlePort, m);
-                board.WriteIfChanged(LowerPort, l); call.Written(LowerPort, l);
+                board.Write(UpperPort, u); call.Written(UpperPort, u);
+                board.Write(MiddlePort, m); call.Written(MiddlePort, m);
+                board.Write(LowerPort, l); call.Written(LowerPort, l);
             }
         }
     }

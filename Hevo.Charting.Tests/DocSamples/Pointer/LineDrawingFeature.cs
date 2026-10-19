@@ -94,18 +94,18 @@ namespace Hevo.Charting.DocSamples.Pointer
                     break;
                 case PointerPhase.Move:
                 case PointerPhase.HoverMove:                     // 两次单击之间指针是抬起的:悬停也拉橡皮筋
-                    if (board.Read(_pendingPort) != null) board.WriteIfChanged(_rubberPort, Anchor(g.Position));
+                    if (board.Read(_pendingPort) != null) board.Write(_rubberPort, Anchor(g.Position));
                     break;
                 case PointerPhase.End:
                     Commit(board, Anchor(g.Position));
                     break;
                 case PointerPhase.Cancel:
                 case PointerPhase.Escape:                        // 退出工具,丢掉半截线
-                    using (board.BeginTransaction())
+                    using (board.WriteScope())
                     {
-                        board.WriteIfChanged(_pendingPort, null);
-                        board.WriteIfChanged(_rubberPort, null);
-                        board.WriteIfChanged(ArmedPort, false);
+                        board.Write(_pendingPort, null);
+                        board.Write(_rubberPort, null);
+                        board.Write(ArmedPort, false);
                     }
                     break;
             }
@@ -115,10 +115,10 @@ namespace Hevo.Charting.DocSamples.Pointer
 
         private void SetPending(DataBlackboard board, ChartAnchor a)
         {
-            using (board.BeginTransaction())
+            using (board.WriteScope())
             {
-                board.WriteIfChanged(_pendingPort, a);
-                board.WriteIfChanged(_rubberPort, a);
+                board.Write(_pendingPort, a);
+                board.Write(_rubberPort, a);
             }
         }
 
@@ -128,12 +128,12 @@ namespace Hevo.Charting.DocSamples.Pointer
             if (start == null) return;
             var old = board.Read(LinesPort);
             var lines = new List<DrawnLine>(old ?? Array.Empty<DrawnLine>()) { new DrawnLine(start, end) };
-            using (board.BeginTransaction())
+            using (board.WriteScope())
             {
-                board.WriteIfChanged(LinesPort, lines);
-                board.WriteIfChanged(_pendingPort, null);
-                board.WriteIfChanged(_rubberPort, null);
-                board.WriteIfChanged(ArmedPort, false);        // 下一帧撤掉模态区域
+                board.Write(LinesPort, lines);
+                board.Write(_pendingPort, null);
+                board.Write(_rubberPort, null);
+                board.Write(ArmedPort, false);        // 下一帧撤掉模态区域
             }
         }
 

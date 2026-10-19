@@ -87,10 +87,10 @@ namespace Hevo.Charting.Benchmarks
 
         public void WriteSeries()
         {
-            using (Board.BeginTransaction())
+            using (Board.WriteScope())
             {
-                Board.WriteIfChanged(TimeOf(), Master.Slice(Master.Data.Time));
-                Board.WriteIfChanged(Schema.VolumePort, Master.Slice(Master.Data.Volume));
+                Board.Write(TimeOf(), Master.Slice(Master.Data.Time));
+                Board.Write(Schema.VolumePort, Master.Slice(Master.Data.Volume));
             }
         }
 
@@ -103,7 +103,7 @@ namespace Hevo.Charting.Benchmarks
             int last = Master.Length - 1;
             // 取绝对值而不是累加:多轮测量之间不留痕迹(累加会让副图 AutoScale 每轮不同,计数跨轮不一致)
             d.Volume[last] = 1000 + 37 * (i % 11);
-            using (Board.BeginTransaction())
+            using (Board.WriteScope())
                 Board.ForceWrite(Schema.VolumePort, Master.Slice(d.Volume));
         }
     }

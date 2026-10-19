@@ -114,7 +114,7 @@ namespace Hevo.Charting.Features
 
                     // ① 瞬间读锁捞 inputs
                     var argsBuf = new object?[orderedPorts.Length];
-                    using (board.AcquireReadLock())
+                    using (board.ReadScope())
                     {
                         for (int i = 0; i < orderedPorts.Length; i++)
                         {
@@ -147,7 +147,7 @@ namespace Hevo.Charting.Features
 
                 // ① 瞬间读锁捞 input
                 ReadOnlyMemory<double> input;
-                using (board.AcquireReadLock())
+                using (board.ReadScope())
                 {
                     input = board.Read(InputPort);
                     if (input.Length == 0) return;

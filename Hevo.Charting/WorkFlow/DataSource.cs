@@ -242,7 +242,7 @@ namespace Hevo.Charting
         }
 
         // 列式 DS Resume 时推一份 fresh GetSnapshot() —— 比基类默认补推 _current(可能是同一引用)更稳:
-        // 拿到的 DataSnapshot 自带新 VersionToken,下游 Watch / WriteIfChanged 一定判脏。
+        // 拿到的 DataSnapshot 自带新 VersionToken,下游 Watch / Write 一定判脏。
         protected override void OnResumeRepublish()
         {
             _trigger.Push(GetSnapshot());
