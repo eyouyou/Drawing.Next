@@ -23,7 +23,14 @@ namespace Hevo.Charting.Interaction
         public long TimestampMs { get; }
     }
 
-    /// <summary>路由器对宿主(ChartCell)要的能力。WPF 实现在 <see cref="WpfPointerAdapter"/>。</summary>
+    /// <summary>路由器关心的键。</summary>
+    internal enum PointerKey { Other, Escape, Left, Right, Up, Down }
+
+    /// <summary>触屏 Manipulation 要开的模式(对应 WPF ManipulationModes 的子集)。</summary>
+    [Flags]
+    internal enum PointerManipulation { None = 0, TranslateX = 1, Scale = 2 }
+
+    /// <summary>路由器和兜底处理器对宿主(ChartCell)要的能力。WPF 实现在 <see cref="WpfPointerAdapter"/>。</summary>
     internal interface IPointerHost
     {
         bool HasPendingFrame { get; }
@@ -38,14 +45,32 @@ namespace Hevo.Charting.Interaction
         void SetCursor(PointerCursor cursor);
         HevoRect PlotArea { get; }
         DataBlackboard? Board { get; }
+
+        /// <summary>兜底处理器(平移 / 框选)抓鼠标。</summary>
+        void CaptureForBackground();
+        void ReleaseBackgroundCapture();
+
+        /// <summary>每个显示帧回调一次(惯性);null = 停。同一时间只有一个回调。</summary>
+        void SetFrameCallback(Action? callback);
     }
 
     /// <summary>
-    /// 路由器跟 <see cref="Features.ChartInteractionFeature"/> 之间的 internal 接口:区域认领了按下时,
-    /// 图表自带交互里"任意按下都要做的事"由路由器代为触发;认领的按下被 Preview 标了 Handled,它自己收不到。
+    /// 兜底处理器(<see cref="Features.ChartInteractionFeature"/>):路由器 → 兜底的单向分发,业务看不到。
+    /// 没被区域认领的按下 / 移动 / 松开 / 离开、全部滚轮、键盘、触屏都交给它;区域认领了按下时,
+    /// "任意按下都要做的事"(停惯性、武装 hover)也由路由器调它完成。
     /// </summary>
-    internal interface IPointerFallback
+    internal interface IPointerBackground
     {
+        void OnPointerDown(in PointerInput input);
+        void OnPointerUp(in PointerInput input);
+        void OnPointerMove(in PointerInput input);
+        void OnPointerLeave();
+        void OnWheel(in PointerInput input, int delta);
+        /// <summary>返回 true = 处理了(调用方标 Handled)。</summary>
+        bool OnKeyDown(PointerKey key, PointerModifiers modifiers);
+        PointerManipulation OnManipulationStarting();
+        void OnManipulationDelta(double translateX, double scaleX, HevoPoint origin);
+
         /// <summary>认领的按下:停惯性、武装 hover,并在按下点就地投影一次十字光标。</summary>
         void OnPressClaimed(HevoPoint canvasPosition);
 
@@ -55,6 +80,7 @@ namespace Hevo.Charting.Interaction
         /// <summary>手势进行中:屏蔽触屏 Manipulation、鼠标离开不清 hit;hideCrosshair 时清掉并暂停十字光标。</summary>
         void SetGestureActive(bool active, bool hideCrosshair);
 
+        float DragThreshold { get; }
         TimeSpan DoubleClickInterval { get; }
         double DoubleClickMaxMovement { get; }
     }
@@ -107,7 +133,7 @@ namespace Hevo.Charting.Interaction
             _ports = ports;
         }
 
-        private static float DragThreshold => PointerRouterFeature.DragThreshold;
+        private float DragThreshold => _store.Background?.DragThreshold ?? PointerRouterFeature.DragThreshold;
         private static bool FlushPendingFrameOnPress => PointerRouterFeature.FlushPendingFrameOnPress;
 
         internal bool IsActive => _state != State.Idle;
@@ -150,9 +176,9 @@ namespace Hevo.Charting.Interaction
                 LeaveHover(input.Position, input.Modifiers);
 
             host.Focus();
-            _store.Fallback?.OnPressClaimed(input.Position);
+            _store.Background?.OnPressClaimed(input.Position);
 
-            var fallback = _store.Fallback;
+            var fallback = _store.Background;
             var interval = fallback?.DoubleClickInterval ?? TimeSpan.FromMilliseconds(400);
             double maxMove = fallback?.DoubleClickMaxMovement ?? 6.0;
             _pressIsSecondClick = input.Button != PointerButton.Right
@@ -211,7 +237,7 @@ namespace Hevo.Charting.Interaction
                 _state = State.Dragging;
                 _lastPressOwner = null;    // 拖过的按下不算双击的第一下
                 ApplyCursor(region.DragCursor != PointerCursor.Default ? region.DragCursor : region.Cursor);
-                if (region.HideCrosshairWhileActive) _store.Fallback?.SetGestureActive(true, true);
+                if (region.HideCrosshairWhileActive) _store.Background?.SetGestureActive(true, true);
                 DispatchGuarded(PointerPhase.Begin, PointerCancelReason.None, input.Position, input.Modifiers);
                 return;
             }
@@ -318,7 +344,7 @@ namespace Hevo.Charting.Interaction
 
         private void SupersedeByPan(in PointerInput input)
         {
-            var fallback = _store.Fallback;
+            var fallback = _store.Background;
             var pressHost = _pressHostPos;
             var press = _pressPos;
             var button = _button;
@@ -371,7 +397,7 @@ namespace Hevo.Charting.Interaction
                 _capturing = false;
                 _host?.ReleaseCapture();
             }
-            if (wasActive) _store.Fallback?.SetGestureActive(false, false);
+            if (wasActive) _store.Background?.SetGestureActive(false, false);
             ApplyCursor(_hoverOwner != null ? HoverCursor() : PointerCursor.Default);
         }
 

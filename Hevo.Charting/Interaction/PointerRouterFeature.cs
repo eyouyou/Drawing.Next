@@ -47,7 +47,7 @@ namespace Hevo.Charting.Interaction
             _cell = chart;
             _router = new PointerRouter(store, _ports);
             store.Listener = _router;
-            _adapter = new WpfPointerAdapter(chart, _router, () => CurrentBoardOrNull(), () => ctx.GetPlotArea());
+            _adapter = new WpfPointerAdapter(chart, _router, store, () => CurrentBoardOrNull(), () => ctx.GetPlotArea());
             RegisterDisposable(_adapter);
         }
 

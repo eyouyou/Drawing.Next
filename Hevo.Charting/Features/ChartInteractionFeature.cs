@@ -4,9 +4,7 @@ using Hevo.Charting.Core;
 using Hevo.Charting.Layers;
 using Hevo.Charting.LowCode;
 using Hevo.Charting.WorkFlow;
-using System.Windows;
-using System.Windows.Input;
-using System.Windows.Media;
+using Hevo.Charting.Interaction;
 
 namespace Hevo.Charting.Features
 {
@@ -17,25 +15,6 @@ namespace Hevo.Charting.Features
     {
         /// <summary> 缩放灵敏度 (默认 0.15 即每次滚轮缩放 15% 的视口) </summary>
         public double Sensitivity { get; init; } = 0.15;
-    }
-
-    /// <summary>
-    /// 框选缩放配置 (Box-zoom / Rubber-band).
-    /// 默认 Shift+Drag 触发,与普通 Pan 共存;业务可改 ModifierKeys.None 让框选完全替代 Pan。
-    /// </summary>
-    public record BoxZoomOptions
-    {
-        /// <summary>激活修饰键。默认 Shift —— Shift+Drag 进入 box-zoom,无修饰走 Pan。</summary>
-        public System.Windows.Input.ModifierKeys ActivationModifier { get; init; } = System.Windows.Input.ModifierKeys.Shift;
-
-        /// <summary>选框最小有效像素。低于此值视为误操作丢弃,不写视口。</summary>
-        public double MinPixelSize { get; init; } = 8.0;
-
-        /// <summary>选框边框样式。null = 用默认浅灰虚线。</summary>
-        public LineStyle? BorderStyle { get; init; }
-
-        /// <summary>选框填充。null = 用默认半透明蓝。</summary>
-        public IHevoBrush? FillBrush { get; init; }
     }
 
     /// <summary>
@@ -109,6 +88,8 @@ namespace Hevo.Charting.Features
         InertiaPan = 1 << 5,
         /// <summary>双击复原视口。配套 <see cref="DoubleClickResetOptions"/>。</summary>
         DoubleClickReset = 1 << 6,
+        /// <summary>↑ 放大 / ↓ 缩小(跟一格滚轮同幅度)。不在 <see cref="All"/> / <see cref="Default"/> 里:默认不抢上下键,要用显式加上。</summary>
+        KeyboardZoom = 1 << 7,
         All = Hover | Pan | Zoom | Keyboard | BoxZoom | InertiaPan | DoubleClickReset,
         TimeShareDefault = Hover,
         Default = Hover | Keyboard
@@ -136,7 +117,7 @@ namespace Hevo.Charting.Features
     /// <b>数据流</b>:UI 事件(鼠标/触屏/键盘) → 手势翻译 → 写 <see cref="Viewport.UserRange"/> / <see cref="PointerHitPort"/> → ViewportManager 钳制成 ActiveRange → 全图 OnProject 重算。
     /// </para>
     /// </summary>
-    public class ChartInteractionFeature : ChartFeature, Interaction.IPointerFallback
+    public class ChartInteractionFeature : ChartFeature, IPointerBackground
     {
         // 铁律：交互运算必须在布局之前完成，确保后续的图层拿到的是最新视口
         public override FeaturePhase Phase => FeaturePhase.PreLayout;
@@ -195,6 +176,9 @@ namespace Hevo.Charting.Features
         /// </summary>
         public bool DismissOnEscape { get; init; } = false;
 
+        /// <summary>指针区域的拖动阈值(DIP):按下后移动不到这个距离松开算点击。默认 4。</summary>
+        public double DragThreshold { get; init; } = 4.0;
+
         private const double StandardWheelDelta = 120.0;
 
         // ==========================================
@@ -241,215 +225,14 @@ namespace Hevo.Charting.Features
             _isHoverArmed = !RequireClickToActivate;
             _composeCtx = ctx;
             _routerGestureActive = _routerHideCrosshair = false;
-            chart.PointerRegions.Fallback = this;
+            chart.PointerRegions.Background = this;
+            _chartForHost = chart;
 
             // 框选缩放图层 (Interaction 层级,与 CrosshairLayer 共栖)
             AttachLayer(_box.Layer);
 
-            // 1. 鼠标按下:分流 双击复原 / 框选 / 平移
-            WithBoard(this.OnMouse(UIElement.MouseDownEvent)).Subscribe(c =>
-            {
-                chart.Focusable = true; chart.Focus();
-
-                var wpfPos = c.Event.GetPosition(chart);
-                var chartPos = new HevoPoint((float)wpfPos.X, (float)wpfPos.Y);
-
-                // 任意按下都立刻打断惯性
-                _inertia.Stop();
-
-                // 任意按下都武装 hover (单击 / 拖拽 / 框选 / 双击 起手都从这里走,统一)
-                _isHoverArmed = true;
-
-                // ① 双击复原检测 (在 pan / box 路径之前判定,避免被吞)
-                long now = System.Diagnostics.Stopwatch.GetTimestamp() * 1000L / System.Diagnostics.Stopwatch.Frequency;
-                bool isDouble = SupportedModes.HasFlag(ChartInteractionMode.DoubleClickReset)
-                                && (now - _lastClickTimeMs) <= DoubleClickResetConfig.MaxInterval.TotalMilliseconds
-                                && Math.Abs(chartPos.X - _lastClickPos.X) <= DoubleClickResetConfig.MaxMovementPx
-                                && Math.Abs(chartPos.Y - _lastClickPos.Y) <= DoubleClickResetConfig.MaxMovementPx;
-                _lastClickTimeMs = now;
-                _lastClickPos = chartPos;
-                if (isDouble)
-                {
-                    HandleDoubleClickReset(ctx, c.Board);
-                    _lastClickTimeMs = 0; // 防止三连击退化成第二个双击
-                    return;
-                }
-
-                // ② 框选缩放分流:Modifier=None 任意按下进入,否则修饰键命中才进入
-                bool wantBoxZoom = SupportedModes.HasFlag(ChartInteractionMode.BoxZoom)
-                    && (BoxZoomConfig.ActivationModifier == ModifierKeys.None
-                        || (Keyboard.Modifiers & BoxZoomConfig.ActivationModifier) == BoxZoomConfig.ActivationModifier);
-                if (wantBoxZoom)
-                {
-                    var dcPos = c.Event.GetPosition(chart.DrawingCanvas);
-                    _box.Begin(new HevoPoint((float)dcPos.X, (float)dcPos.Y));
-                    using (c.Board.AcquireWriteLock())
-                    {
-                        c.Board.WriteIfChanged(PointerHitPort, null);
-                        c.Board.WriteIfChanged(_box.StatePort, _box.MakeActiveTrait(BoxZoomConfig));
-                    }
-                    chart.CaptureMouse();
-                    return;
-                }
-
-                // ③ 普通平移
-                if (!SupportedModes.HasFlag(ChartInteractionMode.Pan)) return;
-
-                _isPanning = true;
-                _lastPanPos = chartPos;
-                _inertia.ResetSamples();
-
-                using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(PointerHitPort, null);
-                chart.CaptureMouse();
-            }).OwnedBy(this);
-
-            // 2. 鼠标抬起:结算 框选 / 触发惯性
-            WithBoard(this.OnMouse(UIElement.MouseUpEvent)).Subscribe(c =>
-            {
-                if (_box.IsActive)
-                {
-                    _box.End();
-                    chart.ReleaseMouseCapture();
-                    FinalizeBoxZoom(ctx, c.Board);
-                    return;
-                }
-                if (_isPanning)
-                {
-                    _isPanning = false;
-                    chart.ReleaseMouseCapture();
-                    if (SupportedModes.HasFlag(ChartInteractionMode.InertiaPan))
-                    {
-                        var board = c.Board;
-                        _inertia.Start(InertiaPanConfig,
-                            applyPxDelta: dx => ApplyPanDelta(ctx, board, dx),
-                            readActiveRange: () =>
-                            {
-                                using (board.AcquireUpgradeableReadLock()) return board.Read(Viewport.ActiveRange);
-                            });
-                    }
-
-                    // 单击-武装-松手三连不挪鼠标的 UX 兜底:
-                    // MouseDown 路径会清 PointerHitPort 准备 Pan,如果用户其实没拖,松手后又不动鼠标,
-                    // 没人写新的 hit → 永远看不到光标。这里若 hover 已武装且无惯性接管,立刻在当前位置投影一次。
-                    if (!_inertia.IsRunning && _lastMousePos.HasValue && _isHoverArmed
-                        && SupportedModes.HasFlag(ChartInteractionMode.Hover))
-                    {
-                        using (c.Board.AcquireUpgradeableReadLock())
-                        {
-                            var activeRange = c.Board.Read(Viewport.ActiveRange);
-                            var scaleStrategy = ctx.Shared().Read<ScaleStrategyTrait>();
-                            if (activeRange.IsValid && scaleStrategy != null && !ctx.GetPlotArea().IsEmpty)
-                                UpdatePointerStateFromMouse(ctx.GetPlotArea(), scaleStrategy, c.Board, activeRange, _lastMousePos.Value);
-                        }
-                    }
-                }
-            }).OwnedBy(this);
-
-            // 3. 鼠标离开:清空光标缓存
-            WithBoard(this.OnMouse(UIElement.MouseLeaveEvent)).Subscribe(c =>
-            {
-                _lastMousePos = null;
-                if (!_isPanning && !_box.IsActive && !_routerGestureActive) using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(PointerHitPort, null);
-            }).OwnedBy(this);
-
-            // 4. 鼠标移动:框选刷新 / 平移采样 / Hover
-            WithBoard(this.OnMouse(UIElement.MouseMoveEvent)).Subscribe(c =>
-            {
-                var dcPos = c.Event.GetPosition(chart.DrawingCanvas);
-                _lastMousePos = new HevoPoint((float)dcPos.X, (float)dcPos.Y);
-
-                if (_box.IsActive)
-                {
-                    _box.UpdateCurrent(_lastMousePos.Value);
-                    using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(_box.StatePort, _box.MakeActiveTrait(BoxZoomConfig));
-                    return;
-                }
-
-                if (_isPanning)
-                {
-                    var wpfPanPos = c.Event.GetPosition(chart);
-                    HandlePan(ctx, c.Board, new HevoPoint((float)wpfPanPos.X, (float)wpfPanPos.Y));
-                    return;
-                }
-
-                if (SupportedModes.HasFlag(ChartInteractionMode.Hover) && _isHoverArmed && !_routerHideCrosshair)
-                {
-                    using (c.Board.AcquireUpgradeableReadLock())
-                    {
-                        var activeRange = c.Board.Read(Viewport.ActiveRange);
-                        var scaleStrategy = ctx.Shared().Read<ScaleStrategyTrait>();
-                        if (activeRange.IsValid && scaleStrategy != null && !ctx.GetPlotArea().IsEmpty)
-                            UpdatePointerStateFromMouse(ctx.GetPlotArea(), scaleStrategy, c.Board, activeRange, _lastMousePos.Value);
-                    }
-                }
-            }).OwnedBy(this);
-
-            // 5. 鼠标滚轮:Zoom
-            WithBoard(this.OnMouse(UIElement.MouseWheelEvent)).Subscribe(c =>
-            {
-                if (c.Event is not MouseWheelEventArgs wheelEvent || !SupportedModes.HasFlag(ChartInteractionMode.Zoom)) return;
-                _inertia.Stop();
-
-                var wpfPos = wheelEvent.GetPosition(chart.DrawingCanvas);
-                _lastMousePos = new HevoPoint((float)wpfPos.X, (float)wpfPos.Y);
-
-                HandleZoom(ctx, c.Board, _lastMousePos.Value, wheelEvent.Delta);
-            }).OwnedBy(this);
-
-            // 6. 键盘:Esc 解除 hover 武装(独立于 Keyboard mode);方向键导航(受 Keyboard mode 控)
-            WithBoard(this.OnKey(UIElement.PreviewKeyDownEvent)).Subscribe(c =>
-            {
-                if (c.Event is not KeyEventArgs keyEvent) return;
-
-                // Esc 处理优先,且不受 Keyboard mode 影响 —— 业务可能关 Keyboard 但仍想 Esc 能藏 hover。
-                if (keyEvent.Key == Key.Escape && DismissOnEscape)
-                {
-                    _isHoverArmed = false;
-                    using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(PointerHitPort, null);
-                    keyEvent.Handled = true;
-                    return;
-                }
-
-                if (!SupportedModes.HasFlag(ChartInteractionMode.Keyboard)) return;
-                _inertia.Stop();
-
-                if (keyEvent.Key == Key.Left) { HandleKeyboardNavigation(ctx, c.Board, -1); keyEvent.Handled = true; }
-                else if (keyEvent.Key == Key.Right) { HandleKeyboardNavigation(ctx, c.Board, 1); keyEvent.Handled = true; }
-            }).OwnedBy(this);
-
-            // 7. 触屏 Manipulation:Starting 配置容器 + 模式
-            WithBoard(this.OnUIEvent<ManipulationStartingEventArgs>(UIElement.ManipulationStartingEvent)).Subscribe(c =>
-            {
-                // 只在需要时配置:任何 Pan 或 Zoom 模式启用时挂上;否则保持 None 让 WPF 走 mouse promote
-                bool wantPan = SupportedModes.HasFlag(ChartInteractionMode.Pan);
-                bool wantZoom = SupportedModes.HasFlag(ChartInteractionMode.Zoom);
-                if ((!wantPan && !wantZoom) || _routerGestureActive) { c.Event.Mode = ManipulationModes.None; return; }
-
-                c.Event.ManipulationContainer = chart.DrawingCanvas;
-                var mode = ManipulationModes.None;
-                if (wantPan) mode |= ManipulationModes.TranslateX;
-                if (wantZoom) mode |= ManipulationModes.Scale;
-                c.Event.Mode = mode;
-            }).OwnedBy(this);
-
-            // 8. 触屏 Manipulation:Delta 翻译为 ApplyPan/ApplyZoom
-            WithBoard(this.OnUIEvent<ManipulationDeltaEventArgs>(UIElement.ManipulationDeltaEvent)).Subscribe(c =>
-            {
-                if (_routerGestureActive) return;
-                _inertia.Stop();
-                using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(PointerHitPort, null);
-
-                var delta = c.Event.DeltaManipulation;
-                var origin = c.Event.ManipulationOrigin; // DrawingCanvas 坐标 (Container)
-
-                double tx = delta.Translation.X;
-                if (tx != 0 && SupportedModes.HasFlag(ChartInteractionMode.Pan))
-                    ApplyPanDelta(ctx, c.Board, tx);
-
-                double sx = delta.Scale.X;
-                if (Math.Abs(sx - 1.0) > MathTolerance.ManipulationScale && SupportedModes.HasFlag(ChartInteractionMode.Zoom))
-                    ApplyZoom(ctx, c.Board, 1.0 / sx, (float)origin.X);
-            }).OwnedBy(this);
+            // 鼠标 / 滚轮 / 键盘 / 触屏不再在这里订 WPF 事件:路由器是 ChartCell 上唯一的输入入口,
+            // 没被指针区域认领的输入经 IPointerBackground 分发到下面的 On* 方法(时序跟原来的冒泡订阅一致)。
 
             // 9. 视口变更后刷新十字光标位置(分页判定已交给 DataPagingFeature 独立 Watch)
             flow.Watch(new object[] { Viewport.ActiveRange }, board =>
@@ -721,7 +504,7 @@ namespace Hevo.Charting.Features
         }
 
         // ==========================================
-        // 惯性 Pan 子系统:速度环形采样 + CompositionTarget.Rendering 衰减帧 + 撞墙自停。
+        // 惯性 Pan 子系统:速度环形采样 + 宿主帧时钟(WPF 下是 CompositionTarget.Rendering)衰减帧 + 撞墙自停。
         // 完全自洽 —— 通过两个回调(applyPxDelta / readActiveRange)与外层通信,
         // 不暴露任何状态字段。Feature 只持有一个 `_inertia` 引用即可调度全部能力。
         // ==========================================
@@ -749,7 +532,8 @@ namespace Hevo.Charting.Features
             private double _windowMs;
             private Action<double>? _applyDelta;
             private Func<RealRange>? _readActive;
-            private EventHandler? _tickHandler;
+            private IPointerHost? _clock;
+            private Action? _tickHandler;
 
             public bool IsRunning => _running;
 
@@ -763,7 +547,7 @@ namespace Hevo.Charting.Features
             }
 
             /// <summary>抬手时启动衰减循环;速度低于阈值则不启动。可重复调 Start —— 内部先 Stop 旧循环。</summary>
-            public void Start(InertiaPanOptions config, Action<double> applyPxDelta, Func<RealRange> readActiveRange)
+            public void Start(InertiaPanOptions config, IPointerHost clock, Action<double> applyPxDelta, Func<RealRange> readActiveRange)
             {
                 Stop();
                 _windowMs = config.VelocityWindowMs;
@@ -777,16 +561,17 @@ namespace Hevo.Charting.Features
                 _applyDelta = applyPxDelta;
                 _readActive = readActiveRange;
                 _lastTickMs = NowMs();
-                _tickHandler = (_, _) => Tick();
-                CompositionTarget.Rendering += _tickHandler;
+                _tickHandler ??= Tick;
+                _clock = clock;
+                clock.SetFrameCallback(_tickHandler);
             }
 
             public void Stop()
             {
                 if (!_running) return;
                 _running = false;
-                if (_tickHandler != null) CompositionTarget.Rendering -= _tickHandler;
-                _tickHandler = null;
+                _clock?.SetFrameCallback(null);
+                _clock = null;
                 _applyDelta = null;
                 _readActive = null;
             }
@@ -836,6 +621,15 @@ namespace Hevo.Charting.Features
             }
 
             private static long NowMs() => System.Diagnostics.Stopwatch.GetTimestamp() * 1000L / System.Diagnostics.Stopwatch.Frequency;
+        }
+
+        /// <summary>↑ 放大 / ↓ 缩小一档(同一次滚轮刻度),锚点跟滚轮一样取最后的指针位置。</summary>
+        private void HandleKeyboardZoom(RenderContext ctx, DataBlackboard board, bool zoomIn)
+        {
+            var plotArea = ctx.GetPlotArea();
+            if (plotArea.IsEmpty) return;
+            float anchorX = _lastMousePos?.X ?? plotArea.Right;
+            HandleZoom(ctx, board, new HevoPoint(anchorX, 0), zoomIn ? (int)StandardWheelDelta : -(int)StandardWheelDelta);
         }
 
         /// <summary> 
@@ -958,8 +752,10 @@ namespace Hevo.Charting.Features
 
         protected override void OnDecompose()
         {
-            if (ReferenceEquals(Chart.PointerRegions.Fallback, this)) Chart.PointerRegions.Fallback = null;
+            if (ReferenceEquals(Chart.PointerRegions.Background, this)) Chart.PointerRegions.Background = null;
+            _inertia.Stop();
             _composeCtx = null;
+            _chartForHost = null;
             base.OnDecompose();
         }
 
@@ -967,7 +763,7 @@ namespace Hevo.Charting.Features
         // 指针路由器的兜底接口(internal,业务看不到)
         // ==========================================
 
-        void Interaction.IPointerFallback.OnPressClaimed(HevoPoint canvasPosition)
+        void IPointerBackground.OnPressClaimed(HevoPoint canvasPosition)
         {
             // 跟 MouseDown 开头"任意按下都要做的事"一致:停惯性、武装 hover;
             // 再就地投影一次十字光标(RequireClickToActivate 时单击武装后不挪鼠标也看得到)
@@ -977,7 +773,7 @@ namespace Hevo.Charting.Features
             ProjectHoverAtLastPosition();
         }
 
-        bool Interaction.IPointerFallback.BeginPanFrom(HevoPoint hostPosition)
+        bool IPointerBackground.BeginPanFrom(HevoPoint hostPosition)
         {
             // 同 MouseDown 的 ③ 普通平移,只是起点是区域认领时的按下点
             if (!SupportedModes.HasFlag(ChartInteractionMode.Pan)) return false;
@@ -987,11 +783,11 @@ namespace Hevo.Charting.Features
             _lastPanPos = hostPosition;
             _inertia.ResetSamples();
             using (board.AcquireWriteLock()) board.WriteIfChanged(PointerHitPort, null);
-            Chart.CaptureMouse();
+            Host?.CaptureForBackground();
             return true;
         }
 
-        void Interaction.IPointerFallback.SetGestureActive(bool active, bool hideCrosshair)
+        void IPointerBackground.SetGestureActive(bool active, bool hideCrosshair)
         {
             _routerGestureActive = active;
             bool hide = active && hideCrosshair;
@@ -1003,8 +799,235 @@ namespace Hevo.Charting.Features
             else ProjectHoverAtLastPosition();   // 恢复十字光标:不用等下一次移动
         }
 
-        TimeSpan Interaction.IPointerFallback.DoubleClickInterval => DoubleClickResetConfig.MaxInterval;
-        double Interaction.IPointerFallback.DoubleClickMaxMovement => DoubleClickResetConfig.MaxMovementPx;
+        private IPointerHost? Host => _chartForHost?.PointerRegions.Host;
+        private ChartCell? _chartForHost;
+
+        // 1. 鼠标按下:分流 双击复原 / 框选 / 平移
+        void IPointerBackground.OnPointerDown(in PointerInput input)
+        {
+            var ctx = _composeCtx;
+            var board = CurrentBoard;
+            if (ctx == null || board == null) return;
+            Host?.Focus();
+
+            var chartPos = input.HostPosition;
+
+            // 任意按下都立刻打断惯性
+            _inertia.Stop();
+
+            // 任意按下都武装 hover (单击 / 拖拽 / 框选 / 双击 起手都从这里走,统一)
+            _isHoverArmed = true;
+
+            // ① 双击复原检测 (在 pan / box 路径之前判定,避免被吞)
+            long now = System.Diagnostics.Stopwatch.GetTimestamp() * 1000L / System.Diagnostics.Stopwatch.Frequency;
+            bool isDouble = SupportedModes.HasFlag(ChartInteractionMode.DoubleClickReset)
+                            && (now - _lastClickTimeMs) <= DoubleClickResetConfig.MaxInterval.TotalMilliseconds
+                            && Math.Abs(chartPos.X - _lastClickPos.X) <= DoubleClickResetConfig.MaxMovementPx
+                            && Math.Abs(chartPos.Y - _lastClickPos.Y) <= DoubleClickResetConfig.MaxMovementPx;
+            _lastClickTimeMs = now;
+            _lastClickPos = chartPos;
+            if (isDouble)
+            {
+                HandleDoubleClickReset(ctx, board);
+                _lastClickTimeMs = 0; // 防止三连击退化成第二个双击
+                return;
+            }
+
+            // ② 框选缩放分流:Activation=None 任意按下进入,否则修饰键命中才进入
+            var activation = BoxZoomConfig.Activation;
+            bool wantBoxZoom = SupportedModes.HasFlag(ChartInteractionMode.BoxZoom)
+                && (activation == PointerModifiers.None || (input.Modifiers & activation) == activation);
+            if (wantBoxZoom)
+            {
+                _box.Begin(input.Position);
+                using (board.AcquireWriteLock())
+                {
+                    board.WriteIfChanged(PointerHitPort, null);
+                    board.WriteIfChanged(_box.StatePort, _box.MakeActiveTrait(BoxZoomConfig));
+                }
+                Host?.CaptureForBackground();
+                return;
+            }
+
+            // ③ 普通平移
+            if (!SupportedModes.HasFlag(ChartInteractionMode.Pan)) return;
+
+            _isPanning = true;
+            _lastPanPos = chartPos;
+            _inertia.ResetSamples();
+
+            using (board.AcquireWriteLock()) board.WriteIfChanged(PointerHitPort, null);
+            Host?.CaptureForBackground();
+        }
+
+        // 2. 鼠标抬起:结算 框选 / 触发惯性
+        void IPointerBackground.OnPointerUp(in PointerInput input)
+        {
+            var ctx = _composeCtx;
+            var board = CurrentBoard;
+            if (ctx == null || board == null) return;
+            if (_box.IsActive)
+            {
+                _box.End();
+                Host?.ReleaseBackgroundCapture();
+                FinalizeBoxZoom(ctx, board);
+                return;
+            }
+            if (_isPanning)
+            {
+                _isPanning = false;
+                Host?.ReleaseBackgroundCapture();
+                var clock = Host;
+                if (SupportedModes.HasFlag(ChartInteractionMode.InertiaPan) && clock != null)
+                {
+                    _inertia.Start(InertiaPanConfig, clock,
+                        applyPxDelta: dx => ApplyPanDelta(ctx, board, dx),
+                        readActiveRange: () =>
+                        {
+                            using (board.AcquireUpgradeableReadLock()) return board.Read(Viewport.ActiveRange);
+                        });
+                }
+
+                // 单击-武装-松手三连不挪鼠标的 UX 兜底:
+                // MouseDown 路径会清 PointerHitPort 准备 Pan,如果用户其实没拖,松手后又不动鼠标,
+                // 没人写新的 hit → 永远看不到光标。这里若 hover 已武装且无惯性接管,立刻在当前位置投影一次。
+                if (!_inertia.IsRunning && _lastMousePos.HasValue && _isHoverArmed
+                    && SupportedModes.HasFlag(ChartInteractionMode.Hover))
+                {
+                    using (board.AcquireUpgradeableReadLock())
+                    {
+                        var activeRange = board.Read(Viewport.ActiveRange);
+                        var scaleStrategy = ctx.Shared().Read<ScaleStrategyTrait>();
+                        if (activeRange.IsValid && scaleStrategy != null && !ctx.GetPlotArea().IsEmpty)
+                            UpdatePointerStateFromMouse(ctx.GetPlotArea(), scaleStrategy, board, activeRange, _lastMousePos.Value);
+                    }
+                }
+            }
+        }
+
+        // 3. 鼠标离开:清空光标缓存
+        void IPointerBackground.OnPointerLeave()
+        {
+            var board = CurrentBoard;
+            if (board == null) return;
+            _lastMousePos = null;
+            if (!_isPanning && !_box.IsActive && !_routerGestureActive) using (board.AcquireWriteLock()) board.WriteIfChanged(PointerHitPort, null);
+        }
+
+        // 4. 鼠标移动:框选刷新 / 平移采样 / Hover
+        void IPointerBackground.OnPointerMove(in PointerInput input)
+        {
+            var ctx = _composeCtx;
+            var board = CurrentBoard;
+            if (ctx == null || board == null) return;
+            _lastMousePos = input.Position;
+
+            if (_box.IsActive)
+            {
+                _box.UpdateCurrent(_lastMousePos.Value);
+                using (board.AcquireWriteLock()) board.WriteIfChanged(_box.StatePort, _box.MakeActiveTrait(BoxZoomConfig));
+                return;
+            }
+
+            if (_isPanning)
+            {
+                HandlePan(ctx, board, input.HostPosition);
+                return;
+            }
+
+            if (SupportedModes.HasFlag(ChartInteractionMode.Hover) && _isHoverArmed && !_routerHideCrosshair)
+            {
+                using (board.AcquireUpgradeableReadLock())
+                {
+                    var activeRange = board.Read(Viewport.ActiveRange);
+                    var scaleStrategy = ctx.Shared().Read<ScaleStrategyTrait>();
+                    if (activeRange.IsValid && scaleStrategy != null && !ctx.GetPlotArea().IsEmpty)
+                        UpdatePointerStateFromMouse(ctx.GetPlotArea(), scaleStrategy, board, activeRange, _lastMousePos.Value);
+                }
+            }
+        }
+
+        // 5. 鼠标滚轮:Zoom
+        void IPointerBackground.OnWheel(in PointerInput input, int delta)
+        {
+            var ctx = _composeCtx;
+            var board = CurrentBoard;
+            if (ctx == null || board == null || !SupportedModes.HasFlag(ChartInteractionMode.Zoom)) return;
+            _inertia.Stop();
+
+            _lastMousePos = input.Position;
+
+            HandleZoom(ctx, board, _lastMousePos.Value, delta);
+        }
+
+        // 6. 键盘:Esc 解除 hover 武装(独立于 Keyboard mode);方向键导航(受 Keyboard mode 控)
+        bool IPointerBackground.OnKeyDown(PointerKey key, PointerModifiers modifiers)
+        {
+            var ctx = _composeCtx;
+            var board = CurrentBoard;
+            if (ctx == null || board == null) return false;
+
+            // Esc 处理优先,且不受 Keyboard mode 影响 —— 业务可能关 Keyboard 但仍想 Esc 能藏 hover。
+            if (key == PointerKey.Escape && DismissOnEscape)
+            {
+                _isHoverArmed = false;
+                using (board.AcquireWriteLock()) board.WriteIfChanged(PointerHitPort, null);
+                return true;
+            }
+
+            // ↑ / ↓ 缩放:单独的开关,不在 All / Default 里(默认不抢上下键)
+            if ((key == PointerKey.Up || key == PointerKey.Down) && SupportedModes.HasFlag(ChartInteractionMode.KeyboardZoom))
+            {
+                _inertia.Stop();
+                HandleKeyboardZoom(ctx, board, key == PointerKey.Up);
+                return true;
+            }
+
+            if (!SupportedModes.HasFlag(ChartInteractionMode.Keyboard)) return false;
+            _inertia.Stop();
+
+            if (key == PointerKey.Left) { HandleKeyboardNavigation(ctx, board, -1); return true; }
+            if (key == PointerKey.Right) { HandleKeyboardNavigation(ctx, board, 1); return true; }
+            return false;
+        }
+
+        // 7. 触屏 Manipulation:Starting 选模式(容器由适配器设为 DrawingCanvas)
+        PointerManipulation IPointerBackground.OnManipulationStarting()
+        {
+            // 只在需要时配置:任何 Pan 或 Zoom 模式启用时挂上;否则保持 None 让 WPF 走 mouse promote
+            bool wantPan = SupportedModes.HasFlag(ChartInteractionMode.Pan);
+            bool wantZoom = SupportedModes.HasFlag(ChartInteractionMode.Zoom);
+            if ((!wantPan && !wantZoom) || _routerGestureActive) return PointerManipulation.None;
+
+            var mode = PointerManipulation.None;
+            if (wantPan) mode |= PointerManipulation.TranslateX;
+            if (wantZoom) mode |= PointerManipulation.Scale;
+            return mode;
+        }
+
+        // 8. 触屏 Manipulation:Delta 翻译为 ApplyPan/ApplyZoom
+        void IPointerBackground.OnManipulationDelta(double translateX, double scaleX, HevoPoint origin)
+        {
+            if (_routerGestureActive) return;
+            var ctx = _composeCtx;
+            var board = CurrentBoard;
+            if (ctx == null || board == null) return;
+            _inertia.Stop();
+            using (board.AcquireWriteLock()) board.WriteIfChanged(PointerHitPort, null);
+
+            double tx = translateX;
+            if (tx != 0 && SupportedModes.HasFlag(ChartInteractionMode.Pan))
+                ApplyPanDelta(ctx, board, tx);
+
+            double sx = scaleX;
+            if (Math.Abs(sx - 1.0) > MathTolerance.ManipulationScale && SupportedModes.HasFlag(ChartInteractionMode.Zoom))
+                ApplyZoom(ctx, board, 1.0 / sx, origin.X);
+        }
+
+        float IPointerBackground.DragThreshold => (float)DragThreshold;
+
+        TimeSpan IPointerBackground.DoubleClickInterval => DoubleClickResetConfig.MaxInterval;
+        double IPointerBackground.DoubleClickMaxMovement => DoubleClickResetConfig.MaxMovementPx;
 
         private void ProjectHoverAtLastPosition()
         {

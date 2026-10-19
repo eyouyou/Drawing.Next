@@ -62,8 +62,11 @@ namespace Hevo.Charting.Interaction
 
         internal IPointerRegionListener? Listener { get; set; }
 
-        /// <summary>ChartInteractionFeature 登记的兜底接口(停惯性、武装 hover、从按下点平移、拖动中屏蔽)。</summary>
-        internal IPointerFallback? Fallback { get; set; }
+        /// <summary>兜底处理器(ChartInteractionFeature 装配时登记):没被区域认领的输入都交给它。</summary>
+        internal IPointerBackground? Background { get; set; }
+
+        /// <summary>宿主能力(WPF 适配器登记),兜底处理器抓鼠标、要帧时钟用。</summary>
+        internal IPointerHost? Host { get; set; }
 
         /// <summary>当前生效的区域数。</summary>
         internal int Count => _flatCount;
