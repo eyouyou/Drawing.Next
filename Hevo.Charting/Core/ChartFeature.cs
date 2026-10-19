@@ -279,11 +279,22 @@ namespace Hevo.Charting.Core
                 $"{GetType().Name}.Viewport 在 ComposeCore 之前被访问。" +
                 "ChartFeature 应仅在 OnCompose / OnProject / Watch 回调中读 viewport,不要在 ctor / OnAttached 中读。");
 
+        private Interaction.PointerPorts? _pointer;
+
+        /// <summary>
+        /// 当前 schema 的指针路由器端口(<see cref="Interaction.PointerPorts.GesturePort"/>)。同 <see cref="Viewport"/>:
+        /// InternalCompose 之后可用;不是图表 schema(没挂路由器)时访问抛 InvalidOperation。
+        /// </summary>
+        public Interaction.PointerPorts Pointer => _pointer
+            ?? throw new InvalidOperationException(
+                $"{GetType().Name}.Pointer 不可用:ComposeCore 之前访问,或者所在 schema 不是 ChartReactiveSchema(没有指针路由器)。");
+
         protected override void ComposeCore(ChartCell chart, RenderContext ctx)
         {
             base.ComposeCore(chart, ctx);
             // Decorate 已跑过,attached ports 此时是最终值(LinkedMaster/Pane 的 SharedViewport 或独立 schema 的私 ports)。
             _viewport = ViewportPorts.RequireAttached(chart);
+            _pointer = chart.PointerRegions.Ports;
         }
 
         protected override void OnDecompose()
@@ -292,6 +303,7 @@ namespace Hevo.Charting.Core
             // Transact 热插拔场景:同一 feature 实例 Decompose 后可能再次 Add → 再次 ComposeCore 重新注入。
             // 这里 reset null 让"未注入就读"的协议错误能被 throwing getter 捕获。
             _viewport = null;
+            _pointer = null;
         }
     }
 

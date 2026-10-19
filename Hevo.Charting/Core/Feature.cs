@@ -62,6 +62,21 @@ namespace Hevo.Charting.Core
 
         internal DataBlackboard? CurrentBoard => Schema.CurrentBoard;
 
+        /// <summary>本 Feature 挂的图层里最靠上的 <see cref="ChartLayerType"/>;没有图层为 -1。指针区域同档优先级时画在上层的先命中。</summary>
+        internal int TopLayerLevel
+        {
+            get
+            {
+                int top = -1;
+                for (int i = 0; i < _managedLayers.Count; i++)
+                    if (_managedLayers[i] is ChartLayer cl && (int)cl.Level > top) top = (int)cl.Level;
+                return top;
+            }
+        }
+
+        /// <summary>在 schema 执行顺序(先按 Phase)里的位置;未挂载为 -1。指针区域打平时用。</summary>
+        internal int AssemblyOrder => _schema?.OrderOf(this) ?? -1;
+
         /// <summary>
         /// 由 <see cref="ReactiveSchema.Add"/>(chart 就位时)或 <see cref="ReactiveSchema.InitializeRegistry"/>
         /// (补 attach ctor 阶段 add 的)调用,设置宿主引用并触达 <see cref="OnAttached"/> 钩子。
@@ -296,6 +311,10 @@ namespace Hevo.Charting.Core
         // ==========================================
         public sealed override void Decompose(ChartCell chart, RenderContext ctx)
         {
+            // 0. 指针:正在拖本 Feature 的区域时先发 Cancel(OwnerRemoved)——Watch 的生命周期令牌在下面第 2 步才结束,
+            //    此刻还能收到并回滚——再释放捕获、清掉它的区域
+            chart.PointerRegions.RemoveOwner(this);
+
             // 1. 清理图层
             foreach (var layer in _managedLayers)
             {
