@@ -51,21 +51,21 @@ namespace Hevo.Charting.Benchmarks
         public void MirroredWrite()
         {
             var b = _boards[0];
-            using (b.AcquireWriteLock()) b.WriteIfChanged(_mirrored, ++_v);
+            using (b.WriteScope()) b.Write(_mirrored, ++_v);
         }
 
         [Benchmark]
         public void MirroredWriteInTransaction()
         {
             var b = _boards[0];
-            using (b.BeginTransaction()) b.WriteIfChanged(_mirrored, ++_v);
+            using (b.WriteScope()) b.Write(_mirrored, ++_v);
         }
 
         [Benchmark]
         public void UnmirroredWrite()
         {
             var b = _boards[0];
-            using (b.AcquireWriteLock()) b.WriteIfChanged(_plain, ++_v);
+            using (b.WriteScope()) b.Write(_plain, ++_v);
         }
     }
 

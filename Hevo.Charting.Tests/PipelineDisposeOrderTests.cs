@@ -19,7 +19,7 @@ namespace Hevo.Charting.Tests
         {
             public void Process(DataSnapshot<int> snapshot, DataBlackboard board)
             {
-                if (snapshot.Count > 0) board.WriteIfChanged(Port, snapshot.AsSpan()[snapshot.Count - 1]);
+                if (snapshot.Count > 0) board.Write(Port, snapshot.AsSpan()[snapshot.Count - 1]);
             }
         }
 

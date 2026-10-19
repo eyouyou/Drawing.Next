@@ -95,7 +95,7 @@ namespace Hevo.Charting.Tests
             h.ProjectOnly(); // 首帧 FullPass:两个 Feature 都跑,顺带完成隐式订阅
             log.Clear();
 
-            h.Board.Write(pa, 1.0);
+            h.Board.WriteLocked(pa, 1.0);
             h.ProjectOnly();
             Assert.Equal(new[] { "a" }, log);
 
@@ -104,11 +104,11 @@ namespace Hevo.Charting.Tests
             Assert.Empty(log);
 
             // 同一事务写两个端口:各跑一次,不重复
-            using (h.Board.BeginTransaction())
+            using (h.Board.WriteScope())
             {
-                h.Board.WriteIfChanged(pa, 2.0);
-                h.Board.WriteIfChanged(pb, 2.0);
-                h.Board.WriteIfChanged(pa, 3.0);
+                h.Board.Write(pa, 2.0);
+                h.Board.Write(pb, 2.0);
+                h.Board.Write(pa, 3.0);
             }
             h.ProjectOnly();
             Assert.Equal(new[] { "a", "b" }, log.OrderBy(x => x));
@@ -128,13 +128,13 @@ namespace Hevo.Charting.Tests
             Assert.Equal(1, layerA.UpdateCount);
             Assert.Equal(1, layerB.UpdateCount);
 
-            h.Board.Write(pa, 1.0);
+            h.Board.WriteLocked(pa, 1.0);
             h.Frame();
             Assert.Equal(2, layerA.UpdateCount);
             Assert.Equal(1, layerB.UpdateCount);
 
-            // 写入同值:WriteIfChanged 防抖,Feature 不被标脏,图层也不动
-            h.Board.Write(pa, 1.0);
+            // 写入同值:Write 防抖,Feature 不被标脏,图层也不动
+            h.Board.WriteLocked(pa, 1.0);
             h.Frame();
             Assert.Equal(2, layerA.UpdateCount);
 
@@ -216,14 +216,14 @@ namespace Hevo.Charting.Tests
             {
                 // 去掉 Bag 短路只是多做引用比对,结果不变:B 不重绘
                 IncrementalRenderProbe.BypassBagShortCircuit = true;
-                h.Board.Write(pa, 1.0);
+                h.Board.WriteLocked(pa, 1.0);
                 h.Frame();
                 Assert.Equal(2, layerA.UpdateCount);
                 Assert.Equal(1, layerB.UpdateCount);
 
                 // 关掉图层侧判脏:B 也被重录
                 IncrementalRenderProbe.ForceLayerRedraw = true;
-                h.Board.Write(pa, 2.0);
+                h.Board.WriteLocked(pa, 2.0);
                 h.Frame();
                 Assert.Equal(3, layerA.UpdateCount);
                 Assert.Equal(2, layerB.UpdateCount);

@@ -363,7 +363,7 @@ namespace Hevo.Charting.Interaction
             _router.RequestCancel();
         }
 
-        // 每条记录的 Sequence 唯一:按它比就够,也让端口的 WriteIfChanged 走 IEquatable 不装箱
+        // 每条记录的 Sequence 唯一:按它比就够,也让端口的 Write 走 IEquatable 不装箱
         public bool Equals(PointerGesture other) => Sequence == other.Sequence && ReferenceEquals(Owner, other.Owner);
         public override bool Equals(object? obj) => obj is PointerGesture other && Equals(other);
         public override int GetHashCode() => Sequence.GetHashCode();

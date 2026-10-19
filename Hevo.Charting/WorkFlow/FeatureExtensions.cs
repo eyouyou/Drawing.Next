@@ -341,7 +341,7 @@ namespace Hevo.Charting.WorkFlow
             if (board.IsDisposed) return false;
             try
             {
-                using (board.AcquireReadLock())
+                using (board.ReadScope())
                 {
                     for (int i = 0; i < ports.Length; i++)
                     {

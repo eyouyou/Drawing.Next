@@ -52,11 +52,11 @@ namespace Hevo.Charting.Tests
                 var watch = new WatchFeature();
                 var h = new SchemaHarness(watch);
                 int start = watch.Calls;
-                h.Board.Write(Port, 1);
+                h.Board.WriteLocked(Port, 1);
                 Assert.Equal(start + 1, watch.Calls);
 
                 h.Schema.Transact(c => c.Remove(watch));
-                h.Board.Write(Port, 2);
+                h.Board.WriteLocked(Port, 2);
 
                 Assert.Equal(start + 1, watch.Calls);
             });
@@ -73,7 +73,7 @@ namespace Hevo.Charting.Tests
                 h.Schema.Transact(c => c.Add(watch));
                 int before = watch.Calls;
 
-                h.Board.Write(Port, 3);
+                h.Board.WriteLocked(Port, 3);
 
                 Assert.Equal(before + 1, watch.Calls);
             });

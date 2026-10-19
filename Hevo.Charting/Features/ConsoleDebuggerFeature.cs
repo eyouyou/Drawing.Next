@@ -32,7 +32,7 @@ namespace Hevo.Charting.Features
             // 只要 TargetPort 被写入，并且值真的变了，这里就会触发！
             flow.WatchAsync(new[] { TargetPort }, board =>
             {
-                using (board.AcquireReadLock())
+                using (board.ReadScope())
                 {
                     // 用反射暴力去黑板里捞值（反正是调试专用，不在乎这点性能）
                     dynamic? val = board.GetType().GetMethod("Read")?

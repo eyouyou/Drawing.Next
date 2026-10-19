@@ -38,10 +38,10 @@ namespace Hevo.Charting.Interaction
                     if (activation != PointerModifiers.None && (e.Input.Modifiers & activation) != activation) return false;
                     _s.IsBoxActive = true;
                     _start = _current = e.Input.Position;
-                    using (board.AcquireWriteLock())
+                    using (board.WriteScope())
                     {
-                        board.WriteIfChanged(_s.F.PointerHitPort, null);
-                        board.WriteIfChanged(_statePort, ActiveTrait(config));
+                        board.Write(_s.F.PointerHitPort, null);
+                        board.Write(_statePort, ActiveTrait(config));
                     }
                     _s.Host?.CaptureForBackground();
                     return true;
@@ -49,7 +49,7 @@ namespace Hevo.Charting.Interaction
                 case PointerEventKind.Move:
                     if (!_s.IsBoxActive) return false;
                     _current = e.Input.Position;
-                    using (board.AcquireWriteLock()) board.WriteIfChanged(_statePort, ActiveTrait(config));
+                    using (board.WriteScope()) board.Write(_statePort, ActiveTrait(config));
                     return true;
 
                 case PointerEventKind.Release:
@@ -65,7 +65,7 @@ namespace Hevo.Charting.Interaction
         /// <summary>Feature 卸载时:选框清掉。</summary>
         internal void Clear(DataBlackboard board)
         {
-            using (board.AcquireWriteLock()) board.WriteIfChanged(_statePort, BoxZoomTrait.Inactive);
+            using (board.WriteScope()) board.Write(_statePort, BoxZoomTrait.Inactive);
         }
 
         private BoxZoomTrait ActiveTrait(BoxZoomOptions config) => new(true, ComputeRect(), config.BorderStyle, config.FillBrush);
@@ -73,9 +73,9 @@ namespace Hevo.Charting.Interaction
         private void Finalize(DataBlackboard board, BoxZoomOptions config)
         {
             // 不管下面成不成,选框矩形必须立刻清掉
-            using (board.AcquireWriteLock()) board.WriteIfChanged(_statePort, BoxZoomTrait.Inactive);
+            using (board.WriteScope()) board.Write(_statePort, BoxZoomTrait.Inactive);
 
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var plotArea = _s.Ctx.GetPlotArea();
                 var scaleStrategy = _s.Ctx.Shared().Read<ScaleStrategyTrait>();
@@ -92,7 +92,7 @@ namespace Hevo.Charting.Interaction
                     if (sMax - sMin >= 1.0) newRange = new RealRange(sMin, sMax);
                 }
 
-                using (board.AcquireWriteLock()) board.WriteIfChanged(_s.Viewport.UserRange, newRange);
+                using (board.WriteScope()) board.Write(_s.Viewport.UserRange, newRange);
             }
         }
 

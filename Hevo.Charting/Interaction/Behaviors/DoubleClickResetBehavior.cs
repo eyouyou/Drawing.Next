@@ -41,7 +41,7 @@ namespace Hevo.Charting.Interaction
         {
             _s.Inertia.Stop();
             var viewport = _s.Viewport;
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 int logicalLength = board.Read(viewport.LogicalLength);
                 if (logicalLength <= 0) return;
@@ -68,7 +68,7 @@ namespace Hevo.Charting.Interaction
                 }
 
                 if (!resetRange.IsValid) return;
-                using (board.AcquireWriteLock()) board.WriteIfChanged(viewport.UserRange, resetRange);
+                using (board.WriteScope()) board.Write(viewport.UserRange, resetRange);
             }
         }
     }

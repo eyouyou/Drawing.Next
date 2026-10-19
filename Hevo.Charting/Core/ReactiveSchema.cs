@@ -576,21 +576,21 @@ namespace Hevo.Charting.Core
             //    旧 Schema 的 _latestBoard 在 DecomposeAll → ChartSession.Dispose → pipe.Dispose 链路里
             //    被 Dispose,_rwLock 已 Dispose;同时 ChartCell.SizeChanged 排队的 RequestUpdate 在下一帧
             //    OnCompositionTargetRendering 里跑,调 Template.InvalidateEnvironment()。如果它拿到的还是
-            //    旧 Schema 的引用(WPF DependencyProperty 异步路径下偶发)→ AcquireWriteLock 抛
+            //    旧 Schema 的引用(WPF DependencyProperty 异步路径下偶发)→ WriteScope 抛
             //    ObjectDisposedException。检 IsDisposed + 双重 catch 兜底,失效 schema 静默跳过。
             var board = _latestBoard;
             if (board == null || board.IsDisposed) return;
             try
             {
-                using (board.AcquireWriteLock())
+                using (board.WriteScope())
                 {
                     // 利用 Ticks 保证每次写入都是不相等的新值
-                    board.WriteIfChanged(EnvironmentEpochPort, DateTime.Now.Ticks);
+                    board.Write(EnvironmentEpochPort, DateTime.Now.Ticks);
                 }
             }
             catch (ObjectDisposedException)
             {
-                // board.IsDisposed 检查跟 AcquireWriteLock 之间的极小窗口内被 Decompose 抢先
+                // board.IsDisposed 检查跟 WriteScope 之间的极小窗口内被 Decompose 抢先
                 // (典型:Decompose 跑在 UI 线程同步路径,SizeChanged 排队的 update 跑在下一帧 ——
                 //  按理不会撞,但保险起见 catch 一层)
             }
@@ -627,7 +627,7 @@ namespace Hevo.Charting.Core
             // 在这一瞬间，我们冻结整个黑板的时间！
             // 保证在这把伞下，所有 Feature 画出来的这几千根 K 线、均线、指标，
             // 绝对处于同一个物理时空，绝不会发生高低点倒挂的”时空撕裂”！
-            using (_latestBoard.AcquireReadLock())
+            using (_latestBoard.ReadScope())
             {
                 foreach (var feature in _orderedFeatures)
                 {

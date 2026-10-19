@@ -25,7 +25,7 @@ namespace Hevo.Charting.Tests
 
         private static void WriteNow<T>(DataBlackboard board, DataPort<T> port, T value)
         {
-            using (board.AcquireWriteLock()) board.WriteIfChanged(port, value);
+            using (board.WriteScope()) board.Write(port, value);
         }
 
         [Fact]
@@ -56,10 +56,10 @@ namespace Hevo.Charting.Tests
             board.AddWatch(new object[] { _a, _b }, _ => order.Add("w2:ab"));
             board.AddWatch(new object[] { _a }, _ => order.Add("w3:a"));
 
-            using (board.BeginTransaction())
+            using (board.WriteScope())
             {
-                board.WriteIfChanged(_a, 1);
-                board.WriteIfChanged(_b, 1);
+                board.Write(_a, 1);
+                board.Write(_b, 1);
             }
 
             Assert.Equal(new[] { "w1:b", "w2:ab", "w3:a" }, order);
@@ -70,12 +70,13 @@ namespace Hevo.Charting.Tests
         {
             using var board = new DataBlackboard();
             // 下游先注册:外层扫表时它排在前面且还不脏,只能靠回调里嵌套提交跑到
-            board.AddWatch(new object[] { _b }, bb => bb.WriteIfChanged(_c, bb.Read(_b) + 1));
-            board.AddWatch(new object[] { _a }, bb => bb.WriteIfChanged(_b, bb.Read(_a) * 2));
+            board.AddWatch(new object[] { _b }, bb => bb.Write(_c, bb.Read(_b) + 1));
+            board.AddWatch(new object[] { _a }, bb => bb.Write(_b, bb.Read(_a) * 2));
 
-            using (board.AcquireWriteLock())
+            // 读后写:内层 WriteScope 结束就提交,外层接着读能读到 Watch 算出的派生值
+            using (board.UpdateScope())
             {
-                board.WriteIfChanged(_a, 5);
+                using (board.WriteScope()) board.Write(_a, 5);
                 Assert.Equal(11, board.Read(_c));
             }
         }
@@ -147,7 +148,7 @@ namespace Hevo.Charting.Tests
             int calls = 0;
             var handle = board.AddWatch(new object[] { _a }, _ => calls++);
 
-            using (board.AcquireReadLock())
+            using (board.ReadScope())
             {
                 Assert.Null(Record.Exception(() => handle.Dispose()));
             }
@@ -165,14 +166,14 @@ namespace Hevo.Charting.Tests
             var sub = source.Watch(new object[] { _a, _b }, _ => calls++).Subscribe(_ => { });
             Assert.Equal(1, calls); // 订阅时初跑一次
 
-            using (board.BeginTransaction())
+            using (board.WriteScope())
             {
-                board.WriteIfChanged(_a, 1);
-                board.WriteIfChanged(_b, 1);
+                board.Write(_a, 1);
+                board.Write(_b, 1);
             }
             Assert.Equal(2, calls); // 一次提交写了两个关心的端口也只跑一次
 
-            using (board.AcquireReadLock())
+            using (board.ReadScope())
             {
                 Assert.Null(Record.Exception(() => sub.Dispose()));
             }
@@ -191,15 +192,15 @@ namespace Hevo.Charting.Tests
             context.AttachBoard(pane);
             var vp = context.SharedViewport;
 
-            using (master.BeginTransaction())
+            using (master.WriteScope())
             {
-                master.WriteIfChanged(vp.LogicalLength, 100);
-                master.WriteIfChanged(vp.UserRange, new RealRange(10, 50));
-                master.WriteIfChanged(vp.ActiveRange, new RealRange(10, 40));
-                master.WriteIfChanged(vp.ActiveRange, new RealRange(20, 60));
+                master.Write(vp.LogicalLength, 100);
+                master.Write(vp.UserRange, new RealRange(10, 50));
+                master.Write(vp.ActiveRange, new RealRange(10, 40));
+                master.Write(vp.ActiveRange, new RealRange(20, 60));
             }
 
-            using (pane.AcquireReadLock())
+            using (pane.ReadScope())
             {
                 Assert.Equal(100, pane.Read(vp.LogicalLength));
                 Assert.Equal(new RealRange(10, 50), pane.Read(vp.UserRange));
@@ -242,10 +243,10 @@ namespace Hevo.Charting.Tests
                 .Subscribe(_ => { });
             trigger.Push(board);
 
-            board.Write(_a, 1.0);
+            board.WriteLocked(_a, 1.0);
             Assert.False(fired.Wait(200), "只写了一个端口不该放行");
 
-            board.Write(_b, 1.0);
+            board.WriteLocked(_b, 1.0);
             Assert.True(fired.Wait(5000), "两个端口都写过后应放行");
         }
 
@@ -258,11 +259,11 @@ namespace Hevo.Charting.Tests
             using var sub = new BareRenderFlow(trigger).Join(_a, _b).Subscribe(_ => passed++);
 
             trigger.Push(board); // 端口都没写:挡住
-            board.Write(_a, 1.0);
+            board.WriteLocked(_a, 1.0);
             trigger.Push(board); // 只写了一个:挡住
             Assert.Equal(0, passed);
 
-            board.Write(_b, 1.0);
+            board.WriteLocked(_b, 1.0);
             trigger.Push(board);
             Assert.Equal(1, passed);
         }
@@ -270,24 +271,24 @@ namespace Hevo.Charting.Tests
         // ── A3:事务作用域复用 ────────────────────────────────────────────────────
 
         [Fact]
-        public void BeginTransaction_Repeated_AllocatesNothing_AndNestingStillWorks()
+        public void WriteScope_Repeated_AllocatesNothing_AndNestingStillWorks()
         {
             using var board = new DataBlackboard();
-            using (board.BeginTransaction()) { } // 预热
+            using (board.WriteScope()) { } // 预热
 
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 1000; i++)
             {
-                using (board.BeginTransaction()) { }
+                using (board.WriteScope()) { }
             }
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.Equal(0, allocated);
 
             int commits = 0;
             board.AddWatch(new object[] { _a }, _ => commits++);
-            using (board.BeginTransaction())
+            using (board.WriteScope())
             {
-                using (board.BeginTransaction()) board.WriteIfChanged(_a, 1);
+                using (board.WriteScope()) board.Write(_a, 1);
                 Assert.Equal(0, commits);
             }
             Assert.Equal(1, commits);

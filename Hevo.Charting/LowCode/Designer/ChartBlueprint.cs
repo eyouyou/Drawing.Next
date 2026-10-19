@@ -591,7 +591,7 @@ namespace Hevo.Charting.LowCode.Designer
 
 #if DEBUG
             // 💥 first-publish 修复:DataPipe 内部 ContextIngestor / ColumnPublishIngestor 会调
-            // board.WriteIfChanged 写 DataSource 字段端口(Value/Time/Index 等)。RecordWrite 走
+            // board.Write 写 DataSource 字段端口(Value/Time/Index 等)。RecordWrite 走
             // TracerRegistry.Get(board) 取 tracer,所以**必须在第一次 Process 之前** attach,否则
             // 首推那一帧的所有 DataPipe 写入都不会进 LinkHits → inspector 看不到 DataPipe → port 的连线,
             // 也就拿不到 writer prefix。pipe.Board 是跨帧复用的 _persistentBoard 实例,attach 一次永久生效。

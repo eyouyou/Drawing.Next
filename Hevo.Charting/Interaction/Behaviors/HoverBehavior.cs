@@ -46,7 +46,7 @@ namespace Hevo.Charting.Interaction
         /// <summary>视口变更后刷新十字光标位置。</summary>
         public void OnActiveRangeChanged(DataBlackboard board)
         {
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var activeRange = board.Read(_s.Viewport.ActiveRange);
                 var plotArea = _s.Ctx.GetPlotArea();

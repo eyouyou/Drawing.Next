@@ -72,7 +72,7 @@ namespace Hevo.Charting.Interaction
         public double ApplyPanDelta(DataBlackboard board, double deltaPx)
         {
             if (deltaPx == 0) return 0;
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var plotArea = _ctx.GetPlotArea();
                 var scaleStrategy = _ctx.Shared().Read<ScaleStrategyTrait>();
@@ -96,8 +96,8 @@ namespace Hevo.Charting.Interaction
                     logicalDelta = snappedDelta;
                 }
 
-                using (board.AcquireWriteLock())
-                    board.WriteIfChanged(Viewport.UserRange, new RealRange(baseRange.Min - logicalDelta, baseRange.Max - logicalDelta));
+                using (board.WriteScope())
+                    board.Write(Viewport.UserRange, new RealRange(baseRange.Min - logicalDelta, baseRange.Max - logicalDelta));
 
                 return consumedPx;
             }
@@ -124,7 +124,7 @@ namespace Hevo.Charting.Interaction
         public void ApplyZoom(DataBlackboard board, double zoomFactor, double anchorPxX)
         {
             if (zoomFactor <= 0 || double.IsNaN(zoomFactor) || double.IsInfinity(zoomFactor)) return;
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var baseRange = board.Read(Viewport.ActiveRange);
                 int logicalLength = board.Read(Viewport.LogicalLength);
@@ -178,8 +178,8 @@ namespace Hevo.Charting.Interaction
                         newRange = new RealRange(snappedMin, snappedMax);
                 }
 
-                using (board.AcquireWriteLock())
-                    board.WriteIfChanged(Viewport.UserRange, newRange);
+                using (board.WriteScope())
+                    board.Write(Viewport.UserRange, newRange);
             }
         }
 
@@ -197,7 +197,7 @@ namespace Hevo.Charting.Interaction
         /// <summary>在给定位置投影一次十字光标(不看武装,调用方负责)。</summary>
         public void ProjectHover(DataBlackboard board, HevoPoint pos)
         {
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var activeRange = board.Read(Viewport.ActiveRange);
                 var scaleStrategy = _ctx.Shared().Read<ScaleStrategyTrait>();
@@ -209,7 +209,7 @@ namespace Hevo.Charting.Interaction
 
         public void ClearHit(DataBlackboard board)
         {
-            using (board.AcquireWriteLock()) board.WriteIfChanged(F.PointerHitPort, null);
+            using (board.WriteScope()) board.Write(F.PointerHitPort, null);
         }
 
         /// <summary>
@@ -221,7 +221,7 @@ namespace Hevo.Charting.Interaction
             // 若超出容差边缘,判定为离场,清空光标
             if (pos.X < plotArea.Left - margin || pos.X > plotArea.Right + margin || pos.Y < plotArea.Top - margin || pos.Y > plotArea.Bottom + margin)
             {
-                using (board.AcquireWriteLock()) board.WriteIfChanged(F.PointerHitPort, null);
+                using (board.WriteScope()) board.Write(F.PointerHitPort, null);
                 return;
             }
 
@@ -256,9 +256,9 @@ namespace Hevo.Charting.Interaction
             double centerX = CoordinateExtensions.ProjectDomainToScreen(plotArea, activeRange, scaleStrategy, globalIndex);
             var hit = new DomainHitResult(globalIndex, centerX, centerRelativeX);
 
-            using (board.AcquireWriteLock())
+            using (board.WriteScope())
             {
-                board.WriteIfChanged(F.PointerHitPort, new PointerHitState(
+                board.Write(F.PointerHitPort, new PointerHitState(
                     new HevoPoint((float)centerX, pos.Y),
                     hit,
                     centerX,

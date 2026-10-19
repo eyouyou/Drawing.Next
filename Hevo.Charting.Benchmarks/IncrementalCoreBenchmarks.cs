@@ -194,9 +194,9 @@ namespace Hevo.Charting.Benchmarks
         public int Transaction()
         {
             double v = Scenario == "Changed" ? ++_v : _v;
-            using (_board.BeginTransaction())
+            using (_board.WriteScope())
             {
-                for (int i = 0; i < _ports.Length; i++) _board.WriteIfChanged(_ports[i], v);
+                for (int i = 0; i < _ports.Length; i++) _board.Write(_ports[i], v);
             }
             _dirty.Clear();
             _registry.PopDirtyFeatures(_dirty);
@@ -207,7 +207,7 @@ namespace Hevo.Charting.Benchmarks
         public double ReadUnderLock()
         {
             double sum = 0;
-            using (_board.AcquireReadLock())
+            using (_board.ReadScope())
             {
                 for (int i = 0; i < _ports.Length; i++) sum += _board.Read(_ports[i]);
             }
@@ -311,8 +311,8 @@ namespace Hevo.Charting.Benchmarks
         /// <summary>一个事务里给前 count 个端口写入同一个值。</summary>
         public void Write(int count, double value)
         {
-            using (Board.BeginTransaction())
-                for (int i = 0; i < count; i++) Board.WriteIfChanged(Ports[i], value);
+            using (Board.WriteScope())
+                for (int i = 0; i < count; i++) Board.Write(Ports[i], value);
         }
     }
 }

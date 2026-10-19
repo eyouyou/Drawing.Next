@@ -38,21 +38,21 @@ namespace Hevo.Charting.Tests
             => new(new VisualDataBag(), new ConditionalWeakTable<IChartLayer, VisualDataBag>());
 
         /// <summary>事务内写一个端口(DataBlackboard 要求写操作持写锁)。</summary>
-        public static void Write<T>(this DataBlackboard board, DataPort<T> port, T value)
+        public static void WriteLocked<T>(this DataBlackboard board, DataPort<T> port, T value)
         {
-            using (board.BeginTransaction()) board.WriteIfChanged(port, value);
+            using (board.WriteScope()) board.Write(port, value);
         }
 
         /// <summary>读锁内取版本号(GetVersion 要求持锁)。</summary>
         public static VersionToken VersionOf(this DataBlackboard board, object port)
         {
-            using (board.AcquireReadLock()) return board.GetVersion(port);
+            using (board.ReadScope()) return board.GetVersion(port);
         }
 
         /// <summary>读锁内取引用版本(GetIdentityVersion 要求持锁)。</summary>
         public static VersionToken IdentityOf(this DataBlackboard board, object port)
         {
-            using (board.AcquireReadLock()) return board.GetIdentityVersion(port);
+            using (board.ReadScope()) return board.GetIdentityVersion(port);
         }
 
         /// <summary>挂一个端口写入观察者(跟 Schema 判脏同一条通道);Dispose 摘掉。</summary>

@@ -120,7 +120,7 @@ namespace Hevo.Charting.DevTools
         private void UpdateRadar()
         {
             if (_monitoredBoard == null || _vp == null || this.ActualWidth == 0) return;
-            using (_monitoredBoard.AcquireReadLock())
+            using (_monitoredBoard.ReadScope())
             {
                 int logicalLength = _monitoredBoard.Read(_vp.LogicalLength);
                 var activeRange = _monitoredBoard.Read(_vp.ActiveRange);

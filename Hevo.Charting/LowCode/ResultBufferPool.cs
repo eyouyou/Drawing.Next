@@ -85,7 +85,7 @@ namespace Hevo.Charting.LowCode
                 double[]? arr = MemoryMarshal.TryGetArray(value, out var seg) ? seg.Array : null;
                 bool pooled = arr != null && _rented.Remove(arr);
                 if (!pooled && arr != null && _publishedByPort.TryGetValue(port, out var same) && ReferenceEquals(same, arr))
-                    return; // 同一块又写一次(WriteIfChanged 不会真写)
+                    return; // 同一块又写一次(Write 不会真写)
                 if (_publishedByPort.Remove(port, out var old)) Release(old);
                 if (pooled || (arr != null && _publishedRefs.ContainsKey(arr)))
                 {

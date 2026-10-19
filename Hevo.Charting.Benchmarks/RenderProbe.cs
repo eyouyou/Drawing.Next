@@ -476,7 +476,7 @@ namespace Hevo.Charting.Benchmarks
 
             var board = ch.Board;
             var schema = ch.Schema;
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var active = board.Read(schema.Viewport.ActiveRange);
                 if (!active.IsValid) return;
@@ -490,8 +490,8 @@ namespace Hevo.Charting.Benchmarks
                 double cRel = ds.Normalize(idx, active);
                 double cx = plot.Left + plot.Width * cRel;
 
-                using (board.AcquireWriteLock())
-                    board.WriteIfChanged(schema.HitPortForProbe, new PointerHitState(
+                using (board.WriteScope())
+                    board.Write(schema.HitPortForProbe, new PointerHitState(
                         new HevoPoint((float)cx, y), new DomainHitResult(idx, cx, cRel), cx, idx, false));
             }
         }
@@ -501,12 +501,12 @@ namespace Hevo.Charting.Benchmarks
         {
             double delta = (i / 100) % 2 == 0 ? -1 : 1;
             var board = ch.Board;
-            using (board.AcquireUpgradeableReadLock())
+            using (board.UpdateScope())
             {
                 var active = board.Read(ch.Schema.Viewport.ActiveRange);
                 if (!active.IsValid) return;
-                using (board.AcquireWriteLock())
-                    board.WriteIfChanged(ch.Schema.Viewport.UserRange, new RealRange(active.Min + delta, active.Max + delta));
+                using (board.WriteScope())
+                    board.Write(ch.Schema.Viewport.UserRange, new RealRange(active.Min + delta, active.Max + delta));
             }
         }
 
@@ -521,11 +521,11 @@ namespace Hevo.Charting.Benchmarks
             if (e > k) e = 2 * k - e;
             double span = Math.Min(maxSpan, minSpan * Math.Pow(factor, e));
             double max = ch.Length - 1;
-            using (ch.Board.AcquireWriteLock())
-                ch.Board.WriteIfChanged(ch.Schema.Viewport.UserRange, new RealRange(Math.Round(max - span), max));
+            using (ch.Board.WriteScope())
+                ch.Board.Write(ch.Schema.Viewport.UserRange, new RealRange(Math.Round(max - span), max));
         }
 
-        // 行情心跳:最后一根 K 线收盘价跳动。数组原地改 + ForceWrite(ROM 同底层数组同长度,WriteIfChanged 判不出变化,
+        // 行情心跳:最后一根 K 线收盘价跳动。数组原地改 + ForceWrite(ROM 同底层数组同长度,Write 判不出变化,
         // 真实数据管线也是这样推送的)。
         private static void TickStep(ProbeChart ch, int i)
         {
@@ -537,7 +537,7 @@ namespace Hevo.Charting.Benchmarks
             data.Low[last] = Math.Min(data.Low[last], c);
             var board = ch.Board;
             var p = ch.Schema.Ports;
-            using (board.BeginTransaction())
+            using (board.WriteScope())
             {
                 board.ForceWrite(p.High, ch.Slice(data.High));
                 board.ForceWrite(p.Low, ch.Slice(data.Low));
@@ -1082,26 +1082,26 @@ namespace Hevo.Charting.Benchmarks
         public void WriteSeries(bool follow)
         {
             var p = Schema.Ports;
-            using (Board.BeginTransaction())
+            using (Board.WriteScope())
             {
-                Board.WriteIfChanged(p.Time, Slice(Data.Time));
-                Board.WriteIfChanged(p.Open, Slice(Data.Open));
-                Board.WriteIfChanged(p.High, Slice(Data.High));
-                Board.WriteIfChanged(p.Low, Slice(Data.Low));
-                Board.WriteIfChanged(p.Close, Slice(Data.Close));
-                Board.WriteIfChanged(Schema.SmaPort, Slice(Data.Sma));
+                Board.Write(p.Time, Slice(Data.Time));
+                Board.Write(p.Open, Slice(Data.Open));
+                Board.Write(p.High, Slice(Data.High));
+                Board.Write(p.Low, Slice(Data.Low));
+                Board.Write(p.Close, Slice(Data.Close));
+                Board.Write(Schema.SmaPort, Slice(Data.Sma));
                 if (Schema.Options.Markers)
                 {
-                    Board.WriteIfChanged(Schema.ScatterPort, Data.MarkersUpTo(Data.Scatter, Length));
-                    Board.WriteIfChanged(Schema.ArrowPort, Data.MarkersUpTo(Data.Arrows, Length));
-                    Board.WriteIfChanged(Schema.TextPort, Data.MarkersUpTo(Data.Texts, Length));
+                    Board.Write(Schema.ScatterPort, Data.MarkersUpTo(Data.Scatter, Length));
+                    Board.Write(Schema.ArrowPort, Data.MarkersUpTo(Data.Arrows, Length));
+                    Board.Write(Schema.TextPort, Data.MarkersUpTo(Data.Texts, Length));
                 }
-                Board.WriteIfChanged(Schema.Viewport.LogicalLength, Length);
+                Board.Write(Schema.Viewport.LogicalLength, Length);
                 if (follow)
                 {
                     var active = Board.Read(Schema.Viewport.ActiveRange);
                     double span = active.IsValid ? active.Max - active.Min : 119;
-                    Board.WriteIfChanged(Schema.Viewport.UserRange, new RealRange(Length - 1 - span, Length - 1));
+                    Board.Write(Schema.Viewport.UserRange, new RealRange(Length - 1 - span, Length - 1));
                 }
             }
         }
@@ -1113,10 +1113,10 @@ namespace Hevo.Charting.Benchmarks
                 Length = InitialLength;
                 WriteSeries(follow: false);
             }
-            using (Board.AcquireWriteLock())
+            using (Board.WriteScope())
             {
-                Board.WriteIfChanged(Schema.HitPortForProbe, null);
-                Board.WriteIfChanged(Schema.Viewport.UserRange, new RealRange(Length - 120, Length - 1));
+                Board.Write(Schema.HitPortForProbe, null);
+                Board.Write(Schema.Viewport.UserRange, new RealRange(Length - 120, Length - 1));
             }
         }
     }

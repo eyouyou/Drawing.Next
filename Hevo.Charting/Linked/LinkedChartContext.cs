@@ -187,7 +187,7 @@ namespace Hevo.Charting.Linked
             board.AddWatch(_ports, OnOriginWritten);
         }
 
-        // 调用栈:Commit ← ForceWrite(非事务写当下)/ EndTransaction(事务里所有端口通知完之后),均持源板写锁。
+        // 调用栈:Commit ← ForceWrite(Watch 回调里的写入当下)/ EndWriteScope(WriteScope 里所有端口通知完之后),均持源板写锁。
         // 事务里比"逐端口通知时"晚一点,但这里只记最新值、跨板写在锁外,结果相同。
         private void OnOriginWritten(DataBlackboard origin)
         {
@@ -214,13 +214,13 @@ namespace Hevo.Charting.Linked
                 if (ReferenceEquals(b, origin) || b.IsDisposed) continue;
                 try
                 {
-                    using (b.AcquireWriteLock())
+                    using (b.WriteScope())
                     {
                         T value;
                         lock (_gate) value = _latest;
                         var prev = PortMirror.Applying;
                         PortMirror.Applying = this;
-                        try { b.WriteIfChanged(_port, value); }
+                        try { b.Write(_port, value); }
                         finally { PortMirror.Applying = prev; }
                     }
                 }

@@ -272,12 +272,12 @@ namespace Hevo.Charting.Tests
             Assert.Equal(cells, h.Dashboard.Cells);   // 拖拽只改行高,不重建 cell
             Assert.Equal(3, h.Context.AttachedBoards.Length);
             var port = h.Context.SharedViewport.LogicalLength;
-            h.Boards[0].Write(port, 4242);
+            h.Boards[0].WriteLocked(port, 4242);
             for (int i = 1; i < 3; i++)
-                using (h.Boards[i].AcquireReadLock()) Assert.Equal(4242, h.Boards[i].Read(port));
+                using (h.Boards[i].ReadScope()) Assert.Equal(4242, h.Boards[i].Read(port));
 
-            h.Boards[2].Write(port, 777);
-            using (h.Boards[0].AcquireReadLock()) Assert.Equal(777, h.Boards[0].Read(port));
+            h.Boards[2].WriteLocked(port, 777);
+            using (h.Boards[0].ReadScope()) Assert.Equal(777, h.Boards[0].Read(port));
         });
 
         [Fact]

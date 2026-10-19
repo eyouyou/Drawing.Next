@@ -118,7 +118,7 @@ namespace Hevo.Charting.Interaction
             return flow.Watch(new object[] { port }, board =>
             {
                 PointerGesture g;
-                using (board.AcquireReadLock()) g = board.Read(port);
+                using (board.ReadScope()) g = board.Read(port);
                 if (!g.IsFor(owner)) return;
                 later.Board = board;
                 try { handler(board, g, post); }

@@ -77,10 +77,10 @@ namespace Hevo.Charting.Features
             switch (g.Phase)
             {
                 case PointerPhase.HoverEnter:
-                    board.WriteIfChanged(_hotPort, true);
+                    board.Write(_hotPort, true);
                     break;
                 case PointerPhase.HoverLeave:
-                    if (!_dragging) board.WriteIfChanged(_hotPort, false);
+                    if (!_dragging) board.Write(_hotPort, false);
                     break;
                 case PointerPhase.Press:
                     // 按用户看到的位置抓线:抓点跟线的偏移在拖动中保持不变,线不会跳到指针下
@@ -94,11 +94,11 @@ namespace Hevo.Charting.Features
                     _dragging = true;
                     _dragPointerY = g.Position.Y;
                     _dragPrice = _projection.ScreenToValue(g.Position.Y - _grabOffset);
-                    using (board.BeginTransaction())
+                    using (board.WriteScope())
                     {
-                        board.WriteIfChanged(_hotPort, true);
-                        if (Options.LiveWrite) board.WriteIfChanged(PricePort, _dragPrice);
-                        else board.WriteIfChanged(_draftPort, _dragPrice);
+                        board.Write(_hotPort, true);
+                        if (Options.LiveWrite) board.Write(PricePort, _dragPrice);
+                        else board.Write(_draftPort, _dragPrice);
                     }
                     break;
                 case PointerPhase.End:
@@ -107,10 +107,10 @@ namespace Hevo.Charting.Features
                     _dragging = false;
                     // 按最新投影换算松手点:最后一次移动之后量程可能又变了(拖着线滚轮)
                     double committed = _projection.IsValid ? _projection.ScreenToValue(g.Position.Y - _grabOffset) : _dragPrice;
-                    using (board.BeginTransaction())
+                    using (board.WriteScope())
                     {
-                        board.WriteIfChanged(PricePort, committed);
-                        board.WriteIfChanged(_draftPort, null);
+                        board.Write(PricePort, committed);
+                        board.Write(_draftPort, null);
                     }
                     var onCommitted = Options.OnCommitted;
                     if (onCommitted != null) later(() => onCommitted(committed));
@@ -119,11 +119,11 @@ namespace Hevo.Charting.Features
                 case PointerPhase.Cancel:
                     if (!_dragging) break;
                     _dragging = false;
-                    using (board.BeginTransaction())
+                    using (board.WriteScope())
                     {
-                        if (Options.LiveWrite) board.WriteIfChanged(PricePort, _startPrice);
-                        board.WriteIfChanged(_draftPort, null);
-                        board.WriteIfChanged(_hotPort, false);
+                        if (Options.LiveWrite) board.Write(PricePort, _startPrice);
+                        board.Write(_draftPort, null);
+                        board.Write(_hotPort, false);
                     }
                     break;
             }

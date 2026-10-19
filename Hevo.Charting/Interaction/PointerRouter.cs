@@ -307,7 +307,7 @@ namespace Hevo.Charting.Interaction
         {
             var board = _host?.Board;
             if (board == null || board.IsDisposed) return;
-            using (board.AcquireWriteLock()) board.WriteIfChanged(_ports.IsPointerOver, over);
+            using (board.WriteScope()) board.Write(_ports.IsPointerOver, over);
         }
 
         /// <summary>业务在回调里请求取消(<see cref="PointerGesture.CancelGesture"/>):先记下,这次分发结束后再取消。</summary>
@@ -527,7 +527,7 @@ namespace Hevo.Charting.Interaction
         }
 
         // 分发 = 持写锁写一次端口。同步 Watch 在锁内、同一调用栈里跑完;Watch 里经 later(...) 登记的锁外回调
-        // 在最后一层锁退出后执行。Sequence 每次递增,值总会变,WriteIfChanged 一定触发 Watch。
+        // 在最后一层锁退出后执行。Sequence 每次递增,值总会变,Write 一定触发 Watch。
         private void Dispatch(in PointerGesture g)
         {
             var board = _host?.Board;
@@ -546,7 +546,7 @@ namespace Hevo.Charting.Interaction
 #endif
             try
             {
-                using (board.AcquireWriteLock()) board.WriteIfChanged(_ports.GesturePort, g);
+                using (board.WriteScope()) board.Write(_ports.GesturePort, g);
             }
             finally
             {

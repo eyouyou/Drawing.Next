@@ -112,7 +112,7 @@ namespace Hevo.Charting.Features
             // 计算为纯 CPU min/max 扫描（240~4000 op 数量级），亚毫秒级，无 I/O，UI 不会被阻塞。
             flow.Watch(listenPorts.ToArray(), board =>
             {
-                using (board.AcquireUpgradeableReadLock())
+                using (board.UpdateScope())
                 {
                     var xRange = board.Read(Viewport.ActiveRange);
 
@@ -139,21 +139,21 @@ namespace Hevo.Charting.Features
                     double finalMax = finalRange.Max;
 
                     // 💥 原子级写回黑板
-                    using (board.AcquireWriteLock())
+                    using (board.WriteScope())
                     {
                         // 1. 写入绝对物理量程 (DoubleRange 结构体保持纯洁，仅含 Min/Max)
-                        board.WriteIfChanged(YRangePort, new RealRange(finalMin, finalMax));
+                        board.Write(YRangePort, new RealRange(finalMin, finalMax));
 
                         // 2. 如果外界传入了 BaseLinePort 且算出了有效基准，单独推入辅助引脚
                         if (BaseLinePort != null && !double.IsNaN(baseLine))
                         {
-                            board.WriteIfChanged(BaseLinePort, baseLine);
+                            board.Write(BaseLinePort, baseLine);
                         }
 
                         // 3. 视口内的真实 high/low（未经对称扩展），供 AnchoredTick 消费
                         if (RawExtremaPort != null)
                         {
-                            board.WriteIfChanged(RawExtremaPort, new RealRange(globalMin, globalMax));
+                            board.Write(RawExtremaPort, new RealRange(globalMin, globalMax));
                         }
                     }
                 }

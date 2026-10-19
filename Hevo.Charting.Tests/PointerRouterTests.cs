@@ -99,15 +99,15 @@ namespace Hevo.Charting.Tests
                     time[i] = new DateTime(2026, 1, 1).AddMinutes(i);
                     open[i] = 100 + i % 7; close[i] = 101 + i % 5; high[i] = 110; low[i] = 95;
                 }
-                using (board.BeginTransaction())
+                using (board.WriteScope())
                 {
                     board.ForceWrite(schema.Ports.Time, new ReadOnlyMemory<DateTime>(time));
                     board.ForceWrite(schema.Ports.Open, new ReadOnlyMemory<double>(open));
                     board.ForceWrite(schema.Ports.High, new ReadOnlyMemory<double>(high));
                     board.ForceWrite(schema.Ports.Low, new ReadOnlyMemory<double>(low));
                     board.ForceWrite(schema.Ports.Close, new ReadOnlyMemory<double>(close));
-                    board.WriteIfChanged(viewport.LogicalLength, Length);
-                    board.WriteIfChanged(schema.YRange, new RealRange(80, 120));
+                    board.Write(viewport.LogicalLength, Length);
+                    board.Write(schema.YRange, new RealRange(80, 120));
                 }
             }
 
@@ -118,8 +118,8 @@ namespace Hevo.Charting.Tests
             public void Frame() => Cell.RunFrameNow(PlotMode.Sync);
             public void Close() => _window.Close();
 
-            public T Read<T>(DataPort<T> port) { using (Board.AcquireReadLock()) return Board.Read(port); }
-            public void Write<T>(DataPort<T> port, T value) { using (Board.AcquireWriteLock()) Board.WriteIfChanged(port, value); }
+            public T Read<T>(DataPort<T> port) { using (Board.ReadScope()) return Board.Read(port); }
+            public void Write<T>(DataPort<T> port, T value) { using (Board.WriteScope()) Board.Write(port, value); }
 
             public RealRange ActiveRange => Read(_viewport.ActiveRange);
             public PointerHitState? Hit => Read(Schema.Hit);
@@ -567,7 +567,7 @@ namespace Hevo.Charting.Tests
             var seen = new List<(PointerPhase Phase, long Seq, long PortSeq)>();
             p.OnGesture = (b, g, later) =>
             {
-                b.WriteIfChanged(own, b.Read(own) + 1);
+                b.Write(own, b.Read(own) + 1);
                 // 回调执行时端口上就是这一条:同一调用栈,路由器还没往下走
                 seen.Add((g.Phase, g.Sequence, b.Read(rig.Router.Ports.GesturePort).Sequence));
             };

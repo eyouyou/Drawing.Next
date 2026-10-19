@@ -62,7 +62,7 @@ namespace Hevo.Charting.CodeAnalysis
             // §root-cause-fix 2026-05-13:这里以前是 `public readonly struct {groupName}`,
             // 但 struct 的 `new T()`(零参)永远走隐式 zero-init,**完全绕过用户的 [CallerMemberName]
             // 默认参 ctor**,导致所有 DataPort 字段是 null。下游 FastSourceMapIngestor.Process 拿
-            // null port 去 board.WriteIfChanged → TypedBucketMap.TryGetValue(null) → ArgumentNullException →
+            // null port 去 board.Write → TypedBucketMap.TryGetValue(null) → ArgumentNullException →
             // Select 内部 catch → Plot.onError → 业务 Plot.onNext 永远不 fire → _latestBoard 永远 null →
             // ProjectAll 永远 bail → 所有 feature 的 OnProject 都跑不起来 → 蜡烛图永远空白。
             //

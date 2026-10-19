@@ -25,7 +25,7 @@ namespace Hevo.Charting.LowCode
             if (snapshot.Version == _lastVersion) return;
             _lastVersion = snapshot.Version;
 
-            board.WriteIfChanged(_port, _selector(_source));
+            board.Write(_port, _selector(_source));
         }
     }
 

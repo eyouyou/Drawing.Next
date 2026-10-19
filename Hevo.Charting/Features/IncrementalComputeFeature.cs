@@ -178,7 +178,7 @@ namespace Hevo.Charting.Features
             // 如果业务需要 stateful + heavy compute,需自己在 handler 内加 mutex + 切线程。
             flow.Watch(new object[] { InputPort }, board =>
             {
-                using (board.AcquireUpgradeableReadLock())
+                using (board.UpdateScope())
                 {
                     var input = board.Read(InputPort);
                     if (input.Length == 0) return;
@@ -197,8 +197,8 @@ namespace Hevo.Charting.Features
 
                     _state = nextState;
 
-                    using (board.AcquireWriteLock())
-                        board.WriteIfChanged(OutputPort, output);
+                    using (board.WriteScope())
+                        board.Write(OutputPort, output);
                 }
             });
         }
@@ -237,7 +237,7 @@ namespace Hevo.Charting.Features
 
             flow.Watch(watchKeys, board =>
             {
-                using (board.AcquireUpgradeableReadLock())
+                using (board.UpdateScope())
                 {
                     for (int i = 0; i < orderedPorts.Length; i++)
                     {
@@ -274,8 +274,8 @@ namespace Hevo.Charting.Features
 
                     _state = nextState;
 
-                    using (board.AcquireWriteLock())
-                        board.WriteIfChanged(OutputPort, output);
+                    using (board.WriteScope())
+                        board.Write(OutputPort, output);
                 }
             });
         }

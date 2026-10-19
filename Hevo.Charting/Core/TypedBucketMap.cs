@@ -67,7 +67,7 @@ namespace Hevo.Charting.Core
 
         /// <summary>
         /// DEBUG dump 路径专用:枚举所有桶里的 (key, value),装箱 OK,只供 Inspector 抓快照。
-        /// 调用方需自行加好读锁(走 DataBlackboard.AcquireReadLock),迭代 Dictionary 期间不要并发结构写。
+        /// 调用方需自行加好读锁(走 DataBlackboard.ReadScope),迭代 Dictionary 期间不要并发结构写。
         /// </summary>
         public IEnumerable<(object Key, object? Value)> EnumerateAll()
         {

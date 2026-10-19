@@ -14,7 +14,7 @@ namespace Hevo.Charting.Tests
 
         private static void Write<T>(DataBlackboard board, DataPort<T> port, T value)
         {
-            using (board.AcquireWriteLock()) board.ForceWrite(port, value);
+            using (board.WriteScope()) board.ForceWrite(port, value);
         }
 
         [Fact]

@@ -103,7 +103,7 @@ namespace Hevo.Charting.Features
 
             flow.Watch(new object[] { Viewport.LogicalLength, Viewport.UserRange }, board =>
             {
-                using (board.AcquireUpgradeableReadLock())
+                using (board.UpdateScope())
                 {
                     int currentLength = board.Read(Viewport.LogicalLength);
                     var userRange = board.Read(Viewport.UserRange);
@@ -121,7 +121,7 @@ namespace Hevo.Charting.Features
                         // 写 default 让所有消费者通过 !IsValid 跳过该帧，等新数据到位后走首次 layout。
                         _lastLogicalLength = -1;
                         _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
-                        using (board.AcquireWriteLock()) board.WriteIfChanged(Viewport.ActiveRange, default);
+                        using (board.WriteScope()) board.Write(Viewport.ActiveRange, default);
                         return;
                     }
 
@@ -184,7 +184,7 @@ namespace Hevo.Charting.Features
                     }
 
                     // 💥 绝对单向流：管家只负责输出现实，不再管意图！打破一切死锁。
-                    using (board.AcquireWriteLock()) board.WriteIfChanged(Viewport.ActiveRange, new RealRange(min, max));
+                    using (board.WriteScope()) board.Write(Viewport.ActiveRange, new RealRange(min, max));
                 }
             });
 
