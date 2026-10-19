@@ -75,5 +75,7 @@ namespace Hevo.Charting.Interaction
 
         /// <summary>测试与诊断用:当前是否有手势进行中。</summary>
         internal bool IsGestureActive => _router?.IsActive ?? false;
+
+        internal PointerRouter? Router => _router;
     }
 }
