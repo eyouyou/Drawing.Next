@@ -52,8 +52,8 @@ namespace Hevo.Charting.Tests
                     {
                         if (Board != null) return;
                         Board = b;
-                        b.Subscribe(ColA, _ => NotifyA++);
-                        b.Subscribe(ColB, _ => NotifyB++);
+                        b.AddWatch(new object[] { ColA }, _ => NotifyA++);
+                        b.AddWatch(new object[] { ColB }, _ => NotifyB++);
                     });
             }
 

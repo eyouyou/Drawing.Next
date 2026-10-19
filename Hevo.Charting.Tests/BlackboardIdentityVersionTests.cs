@@ -23,14 +23,14 @@ namespace Hevo.Charting.Tests
             using var board = new DataBlackboard();
             var a = new double[8];
             Write(board, Column, new ReadOnlyMemory<double>(a, 0, 5));
-            var id = board.GetIdentityVersion(Column);
-            var ver = board.GetVersion(Column);
+            var id = board.IdentityOf(Column);
+            var ver = board.VersionOf(Column);
 
             a[4] = 1; // 原地改最后一根
             Write(board, Column, new ReadOnlyMemory<double>(a, 0, 5));
 
-            Assert.Equal(id, board.GetIdentityVersion(Column));
-            Assert.NotEqual(ver, board.GetVersion(Column));
+            Assert.Equal(id, board.IdentityOf(Column));
+            Assert.NotEqual(ver, board.VersionOf(Column));
         }
 
         [Fact]
@@ -40,15 +40,15 @@ namespace Hevo.Charting.Tests
             var a = new double[8];
             var b = new double[8];
             Write(board, Column, new ReadOnlyMemory<double>(a, 0, 5));
-            var id0 = board.GetIdentityVersion(Column);
+            var id0 = board.IdentityOf(Column);
 
             Write(board, Column, new ReadOnlyMemory<double>(a, 0, 6)); // 追加
-            var id1 = board.GetIdentityVersion(Column);
+            var id1 = board.IdentityOf(Column);
             Assert.NotEqual(id0, id1);
 
             Write(board, Column, new ReadOnlyMemory<double>(b, 0, 6)); // 换块
             Write(board, Column, new ReadOnlyMemory<double>(a, 0, 6)); // 换回同一块
-            Assert.NotEqual(id1, board.GetIdentityVersion(Column));
+            Assert.NotEqual(id1, board.IdentityOf(Column));
         }
 
         [Fact]
@@ -57,7 +57,7 @@ namespace Hevo.Charting.Tests
             using var board = new DataBlackboard();
             Write(board, Scalar, 1.0);
             Write(board, Scalar, 2.0);
-            Assert.Equal(default, board.GetIdentityVersion(Scalar));
+            Assert.Equal(default, board.IdentityOf(Scalar));
         }
     }
 }

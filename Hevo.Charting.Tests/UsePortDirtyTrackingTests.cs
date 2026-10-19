@@ -164,7 +164,7 @@ namespace Hevo.Charting.Tests
         {
             // 订阅在"首次读取"时登记:分支没走到过,这个 Feature 还用不到 B,B 的写入不唤醒它是对的。
             // 分支一旦走到(被别的端口唤醒后),B 首次读到 IsChanged = true,之后照常订阅。
-            _board.OnPortUpdated += p => _registry.NotifyPortUpdated(p);
+            _board.ObservePorts(p => _registry.NotifyPortUpdated(p));
             ProjectFrame(readB: false);
             PopDirty();
 
