@@ -25,7 +25,7 @@ namespace Hevo.Charting.Linked
     /// </para>
     ///
     /// <para>
-    /// pane 高度:相邻 pane 之间有 <see cref="PaneSplitter"/>,拖动只改两侧 pane,其余不动;
+    /// pane 高度:<see cref="IsPaneResizeEnabled"/> 打开后(默认关,保持旧布局)相邻 pane 之间有 <see cref="PaneSplitter"/>,拖动只改两侧 pane,其余不动;
     /// 高度以比例保存(<see cref="GetPaneRatios"/> / <see cref="TrySetPaneRatios"/>),窗口缩放时按比例重排;
     /// 双击分隔条或 <see cref="ResetPaneRatios"/> 回到装配时给的 heightRatio。
     /// 宿主要记住用户布局就在 <see cref="PaneRatiosChanged"/> 里存 <see cref="GetPaneRatios"/>,下次装配完调 <see cref="TrySetPaneRatios"/>。
@@ -60,6 +60,7 @@ namespace Hevo.Charting.Linked
         private double _dragUpperPx, _dragLowerPx, _dragUpperRatio, _dragLowerRatio;
         private bool _dragChanged;
 
+        private bool _paneResizeEnabled;
         private double _minPaneHeight = 48;
         private double _splitterThickness = 5;
         private Brush _splitterBrush = Frozen(Color.FromArgb(0x40, 0x80, 0x80, 0x80));
@@ -83,7 +84,24 @@ namespace Hevo.Charting.Linked
         public IReadOnlyList<PaneSplitter> Splitters => _splitters.ToArray();
 
         /// <summary>
-        /// 拖拽时单个 pane 至少保留的高度(DIP)。也作为行的 MinHeight,窗口缩得很小时 pane 不会被压成 0。
+        /// 是否在 pane 之间放可拖拽的分隔条。<b>默认关</b>:已有 dashboard 的行布局、pane 高度、可视树保持原样
+        /// (只有 pane 行,没有分隔条行,行无 MinHeight)。打开后分隔条各占 <see cref="SplitterThickness"/> 高度,
+        /// pane 行加 <see cref="MinPaneHeight"/>。可随时切换;比例(<see cref="GetPaneRatios"/> 等)开关与否都可用。
+        /// </summary>
+        public bool IsPaneResizeEnabled
+        {
+            get => _paneResizeEnabled;
+            set
+            {
+                if (_paneResizeEnabled == value) return;
+                CancelSplitterDrag();
+                _paneResizeEnabled = value;
+                RebuildRows();
+            }
+        }
+
+        /// <summary>
+        /// 拖拽时单个 pane 至少保留的高度(DIP)。分隔条打开时也作为行的 MinHeight,窗口缩得很小时 pane 不会被压成 0。
         /// 默认 48:再小就只剩坐标轴、看不出图了。
         /// </summary>
         public double MinPaneHeight
@@ -93,6 +111,7 @@ namespace Hevo.Charting.Linked
             {
                 if (!(value >= 0) || double.IsInfinity(value)) throw new ArgumentOutOfRangeException(nameof(value));
                 _minPaneHeight = value;
+                if (!_paneResizeEnabled) return;
                 for (int i = 0; i < _slots.Count; i++) _slots[i].Row.MinHeight = value;
             }
         }
@@ -296,21 +315,23 @@ namespace Hevo.Charting.Linked
             return this;
         }
 
-        // 行布局:pane0, splitter0, pane1, splitter1, ... —— pane 用星号行(窗口缩放按比例重排),分隔条用固定行。
+        // 分隔条打开:pane0, splitter0, pane1, splitter1, ... —— pane 用星号行(窗口缩放按比例重排),分隔条用 Auto 行。
+        // 分隔条关闭:只有 pane 行,和加分隔条之前的布局逐行一致。
         // cell 只改 Grid.Row 不移出 Children:移出会触发 Unloaded,cell 会暂停 / 重新装配。
         private void RebuildRows()
         {
+            int stride = _paneResizeEnabled ? 2 : 1;
             _grid.RowDefinitions.Clear();
             for (int i = 0; i < _slots.Count; i++)
             {
-                if (i > 0) _grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                if (i > 0 && _paneResizeEnabled) _grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
                 var slot = _slots[i];
-                slot.Row.MinHeight = _minPaneHeight;
+                slot.Row.MinHeight = _paneResizeEnabled ? _minPaneHeight : 0;
                 _grid.RowDefinitions.Add(slot.Row);
-                Grid.SetRow(slot.Cell, i * 2);
+                Grid.SetRow(slot.Cell, i * stride);
             }
 
-            int needed = Math.Max(0, _slots.Count - 1);
+            int needed = _paneResizeEnabled ? Math.Max(0, _slots.Count - 1) : 0;
             while (_splitters.Count > needed)
             {
                 var last = _splitters[_splitters.Count - 1];

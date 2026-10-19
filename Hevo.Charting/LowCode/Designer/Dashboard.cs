@@ -43,6 +43,13 @@ namespace Hevo.Charting.LowCode.Designer
         public double HorizontalRightPixel { get; set; } = 0;
 
         /// <summary>
+        /// pane 之间是否放可拖拽的分隔条(<see cref="Hevo.Charting.Linked.LinkedChartDashboard.IsPaneResizeEnabled"/>)。
+        /// 默认 false:不写这一项的蓝图布局和以前完全一样;为 false 时也不写进 JSON,已有蓝图序列化结果不变。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool EnablePaneResize { get; set; }
+
+        /// <summary>
         /// dashboard 级共享端口声明 —— 每项实例化成 <see cref="Hevo.Charting.LowCode.DataPort{T}"/>,挂到
         /// <see cref="Hevo.Charting.Linked.LinkedChartContext.SharedPorts"/> 注册表 + RegisterMirror。
         /// <para>

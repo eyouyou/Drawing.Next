@@ -24,9 +24,9 @@ namespace Hevo.Charting.Tests
             public DataBlackboard[] Boards { get; } = { new(), new(), new() };
             public Window Window { get; }
 
-            public Host()
+            public Host(bool enableResize = true)
             {
-                Dashboard = new LinkedChartDashboard(Context)
+                Dashboard = new LinkedChartDashboard(Context) { IsPaneResizeEnabled = enableResize }
                     .AddMaster(Schemas[0], 3)
                     .AddPane(Schemas[1], 1)
                     .AddPane(Schemas[2], 1);
@@ -63,12 +63,77 @@ namespace Hevo.Charting.Tests
             }
         }
 
-        private static void WithHost(Action<Host> body) => IncrementalTestKit.RunOnSta(() =>
+        private static void WithHost(Action<Host> body, bool enableResize = true) => IncrementalTestKit.RunOnSta(() =>
         {
-            var h = new Host();
+            var h = new Host(enableResize);
             try { body(h); }
             finally { h.Window.Close(); }
         });
+
+        // 默认不开分隔条:行布局必须和加分隔条之前逐项一致(每个 pane 一行、星号 = heightRatio、无 MinHeight、Children 只有 cell)
+        [Fact]
+        public void Default_Off_LayoutMatchesLegacy() => WithHost(h =>
+        {
+            Assert.False(h.Dashboard.IsPaneResizeEnabled);
+            Assert.Empty(h.Dashboard.Splitters);
+            var grid = Assert.IsType<Grid>(h.Dashboard.Content);
+            Assert.Equal(3, grid.Children.Count);
+            Assert.Equal(3, grid.RowDefinitions.Count);
+            double[] stars = { 3, 1, 1 };
+            for (int i = 0; i < 3; i++)
+            {
+                Assert.Same(h.Dashboard.Cells[i], grid.Children[i]);
+                Assert.Equal(i, Grid.GetRow(h.Dashboard.Cells[i]));
+                Assert.Equal(new GridLength(stars[i], GridUnitType.Star), grid.RowDefinitions[i].Height);
+                Assert.Equal(0, grid.RowDefinitions[i].MinHeight);
+            }
+            Assert.InRange(h.PaneHeight(0), 360 - Tolerance, 360 + Tolerance);
+            Assert.InRange(h.PaneHeight(1), 120 - Tolerance, 120 + Tolerance);
+            Assert.InRange(h.PaneHeight(2), 120 - Tolerance, 120 + Tolerance);
+        }, enableResize: false);
+
+        // 默认不开时运行期删 / 加 pane 和以前一样:删掉的行消失、后面的 cell 行号前移、新 pane 追加一行
+        [Fact]
+        public void Default_Off_RemoveAppendMatchLegacy() => WithHost(h =>
+        {
+            var grid = (Grid)h.Dashboard.Content;
+            Assert.False(h.Dashboard.RemovePaneAtRuntime(h.Schemas[0]));   // 主图不让删
+            Assert.True(h.Dashboard.RemovePaneAtRuntime(h.Schemas[1]));
+            Assert.False(h.Dashboard.RemovePaneAtRuntime(h.Schemas[1]));
+            h.Window.UpdateLayout();
+
+            Assert.Equal(2, grid.Children.Count);
+            Assert.Equal(2, grid.RowDefinitions.Count);
+            Assert.Equal(1, Grid.GetRow(h.Dashboard.Cells[1]));
+            Assert.Equal(new GridLength(1, GridUnitType.Star), grid.RowDefinitions[1].Height);
+            Assert.InRange(h.PaneHeight(0), 450 - Tolerance, 450 + Tolerance);
+
+            h.Dashboard.AppendPaneAtRuntime(new ProbeSchema(), 2);
+            h.Window.UpdateLayout();
+            Assert.Equal(3, grid.Children.Count);
+            Assert.Equal(3, grid.RowDefinitions.Count);
+            Assert.Equal(2, Grid.GetRow(h.Dashboard.Cells[2]));
+            Assert.Equal(new GridLength(2, GridUnitType.Star), grid.RowDefinitions[2].Height);
+            Assert.Empty(h.Dashboard.Splitters);
+        }, enableResize: false);
+
+        [Fact]
+        public void Toggle_OnThenOff_RestoresLegacyRows() => WithHost(h =>
+        {
+            var grid = (Grid)h.Dashboard.Content;
+            h.Dashboard.IsPaneResizeEnabled = true;
+            h.Window.UpdateLayout();
+            Assert.Equal(2, h.Dashboard.Splitters.Count);
+            Assert.Equal(5, grid.RowDefinitions.Count);
+
+            h.Dashboard.IsPaneResizeEnabled = false;
+            h.Window.UpdateLayout();
+            Assert.Empty(h.Dashboard.Splitters);
+            Assert.Equal(3, grid.Children.Count);
+            Assert.Equal(3, grid.RowDefinitions.Count);
+            for (int i = 0; i < 3; i++) Assert.Equal(i, Grid.GetRow(h.Dashboard.Cells[i]));
+            Assert.InRange(h.PaneHeight(0), 360 - Tolerance, 360 + Tolerance);
+        }, enableResize: false);
 
         [Fact]
         public void Splitters_SitBetweenPanes_OutsideCells_WithSizeNsCursor() => WithHost(h =>
@@ -241,6 +306,18 @@ namespace Hevo.Charting.Tests
             Assert.Equal(2, h.Dashboard.Splitters.Count);
             Assert.Equal(3, h.Dashboard.GetPaneRatios().Length);
         });
+
+        // 蓝图开关默认不写进 JSON:已有蓝图的序列化结果不变
+        [Fact]
+        public void DashboardJson_EnablePaneResize_OmittedWhenDefault_RoundTripsWhenOn()
+        {
+            var opts = Hevo.Charting.LowCode.Designer.Converters.BlueprintJsonOptions.Default;
+            var off = System.Text.Json.JsonSerializer.Serialize(new Hevo.Charting.LowCode.Designer.Dashboard(), opts);
+            Assert.DoesNotContain("EnablePaneResize", off);
+
+            var on = System.Text.Json.JsonSerializer.Serialize(new Hevo.Charting.LowCode.Designer.Dashboard { EnablePaneResize = true }, opts);
+            Assert.True(System.Text.Json.JsonSerializer.Deserialize<Hevo.Charting.LowCode.Designer.Dashboard>(on, opts)!.EnablePaneResize);
+        }
 
         private sealed class DoubleComparer : IEqualityComparer<double>
         {
