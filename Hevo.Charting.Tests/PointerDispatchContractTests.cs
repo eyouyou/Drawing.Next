@@ -128,7 +128,7 @@ namespace Hevo.Charting.Tests
             for (int i = 0; i < 2; i++) { masterCell.RunFrameNow(PlotMode.Sync); paneCell.RunFrameNow(PlotMode.Sync); }
 
             var panePort = pane.ListFeatures().OfType<PointerRouterFeature>().Single().Ports.GesturePort;
-            var paneVersion = paneBoard.GetVersion(panePort);
+            var paneVersion = paneBoard.VersionOf(panePort);
             var mouse = new RawMouse(window);
             var canvas = masterCell.DrawingCanvas;
             mouse.Move(canvas, new Point(100, 60));
@@ -136,7 +136,7 @@ namespace Hevo.Charting.Tests
             mouse.Move(canvas, new Point(160, 60));
             masterCell.RunFrameNow(PlotMode.Sync); paneCell.RunFrameNow(PlotMode.Sync);
             mouse.Up(canvas, new Point(160, 60));
-            var paneAfter = paneBoard.GetVersion(panePort);
+            var paneAfter = paneBoard.VersionOf(panePort);
             window.Close();
 
             Assert.Contains(pm.Log, g => g.Phase == PointerPhase.End);

@@ -343,11 +343,11 @@ namespace Hevo.Charting.Tests
             bool downHandled = false, upHandled = false;
             rig.Cell.AddHandler(UIElement.MouseDownEvent, new MouseButtonEventHandler((_, e) => downHandled = e.Handled), true);
             rig.Cell.AddHandler(UIElement.MouseUpEvent, new MouseButtonEventHandler((_, e) => upHandled = e.Handled), true);
-            var portVersion = rig.Board.GetVersion(rig.Router.Ports.GesturePort);
+            var portVersion = rig.Board.VersionOf(rig.Router.Ports.GesturePort);
             rig.Drag(100, 220);
             rig.Move(200, 120);
             rig.Escape();
-            var after = rig.Board.GetVersion(rig.Router.Ports.GesturePort);
+            var after = rig.Board.VersionOf(rig.Router.Ports.GesturePort);
             var cursor = rig.Cell.Cursor;
             rig.Close();
             Assert.False(downHandled);
