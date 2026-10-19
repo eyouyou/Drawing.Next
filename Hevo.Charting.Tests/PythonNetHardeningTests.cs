@@ -236,15 +236,21 @@ namespace Hevo.Charting.Tests
             Assert.Equal(2, PerCallTimeoutWatchdog.RunWithTimeout(10_000, () => 2, breaker));
         }
 
+        // 超时的那次调用卡在事件上,断言超时之后才放行:不靠 20ms / 200ms 的时间差,
+        // 2 核 CI 上等待线程被挂起超过 200ms 时 sleep 已经睡完,Wait 会拿到"已完成"而不超时
+        private static void TimeOutOnce(PythonCallBreaker breaker)
+        {
+            using var release = new ManualResetEventSlim(false);
+            Assert.Throws<TimeoutException>(() => PerCallTimeoutWatchdog.RunWithTimeout(20, () => { release.Wait(TimeSpan.FromSeconds(10)); return 0; }, breaker));
+            release.Set();
+            SpinWait.SpinUntil(() => !breaker.HasOrphan, TimeSpan.FromSeconds(10));
+        }
+
         [Fact]
         public void Breaker_TripsAfterConsecutiveTimeouts()
         {
             var breaker = new PythonCallBreaker();
-            for (int i = 0; i < PythonCallBreaker.TripAfterConsecutiveTimeouts; i++)
-            {
-                Assert.Throws<TimeoutException>(() => PerCallTimeoutWatchdog.RunWithTimeout(20, () => { Thread.Sleep(200); return 0; }, breaker));
-                SpinWait.SpinUntil(() => !breaker.HasOrphan, TimeSpan.FromSeconds(10));
-            }
+            for (int i = 0; i < PythonCallBreaker.TripAfterConsecutiveTimeouts; i++) TimeOutOnce(breaker);
 
             Assert.True(breaker.IsTripped);
             Assert.Throws<PythonCallRejectedException>(() => PerCallTimeoutWatchdog.RunWithTimeout(10_000, () => 1, breaker));
@@ -254,13 +260,9 @@ namespace Hevo.Charting.Tests
         public void Breaker_SuccessResetsConsecutiveCount()
         {
             var breaker = new PythonCallBreaker();
-            for (int i = 0; i < PythonCallBreaker.TripAfterConsecutiveTimeouts - 1; i++)
-            {
-                Assert.Throws<TimeoutException>(() => PerCallTimeoutWatchdog.RunWithTimeout(20, () => { Thread.Sleep(200); return 0; }, breaker));
-                SpinWait.SpinUntil(() => !breaker.HasOrphan, TimeSpan.FromSeconds(10));
-            }
+            for (int i = 0; i < PythonCallBreaker.TripAfterConsecutiveTimeouts - 1; i++) TimeOutOnce(breaker);
             Assert.Equal(1, PerCallTimeoutWatchdog.RunWithTimeout(10_000, () => 1, breaker));
-            Assert.Throws<TimeoutException>(() => PerCallTimeoutWatchdog.RunWithTimeout(20, () => { Thread.Sleep(200); return 0; }, breaker));
+            TimeOutOnce(breaker);
             Assert.False(breaker.IsTripped);
         }
 
@@ -268,8 +270,10 @@ namespace Hevo.Charting.Tests
         public void Timeout_InvokesOnTimeoutCallback()
         {
             int called = 0;
-            Assert.Throws<TimeoutException>(() => PerCallTimeoutWatchdog.RunWithTimeout(20, () => { Thread.Sleep(300); return 0; },
+            using var release = new ManualResetEventSlim(false);
+            Assert.Throws<TimeoutException>(() => PerCallTimeoutWatchdog.RunWithTimeout(20, () => { release.Wait(TimeSpan.FromSeconds(10)); return 0; },
                 new PythonCallBreaker(), onTimeout: () => Interlocked.Increment(ref called)));
+            release.Set();
             Assert.Equal(1, called);
         }
 
