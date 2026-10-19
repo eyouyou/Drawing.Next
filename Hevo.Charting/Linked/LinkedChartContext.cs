@@ -141,6 +141,10 @@ namespace Hevo.Charting.Linked
             // 关键:每个被镜像 port 各订阅一次。仅这几个 port 写入触发回调,
             // 数据列(Times/Closes/Volumes 等)写入零开销——不挂全局 OnPortUpdated。
             foreach (var m in _mirrors) m.SubscribeOn(board, this);
+
+            // 运行期加进来的 pane:别的板早就写过视口 / hit,镜像只在"下一次写"时分发,
+            // 不补的话新板一直停在默认值(视口 [0,0]、图画不出来),直到用户动一下视口。
+            foreach (var m in _mirrors) m.SeedTo(board);
         }
     }
 
@@ -151,6 +155,9 @@ namespace Hevo.Charting.Linked
     internal interface IPortMirror
     {
         void SubscribeOn(DataBlackboard board, LinkedChartContext owner);
+
+        /// <summary>把已经镜像过的最新值写进新挂上的板(还没有值就不写)。</summary>
+        void SeedTo(DataBlackboard board);
     }
 
     /// <summary>
@@ -185,6 +192,25 @@ namespace Hevo.Charting.Linked
         {
             _owner = owner;
             board.AddWatch(_ports, OnOriginWritten);
+        }
+
+        public void SeedTo(DataBlackboard board)
+        {
+            T value;
+            lock (_gate)
+            {
+                if (!_hasLatest) return;
+                value = _latest;
+            }
+            if (board.IsDisposed) return;
+            using (board.WriteScope())
+            {
+                // 补写不是新的真实写入,按回声处理,不再分发回其它板
+                var prev = PortMirror.Applying;
+                PortMirror.Applying = this;
+                try { board.Write(_port, value); }
+                finally { PortMirror.Applying = prev; }
+            }
         }
 
         // 调用栈:Commit ← ForceWrite(Watch 回调里的写入当下)/ EndWriteScope(WriteScope 里所有端口通知完之后),均持源板写锁。

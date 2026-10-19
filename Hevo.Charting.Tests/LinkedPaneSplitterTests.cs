@@ -1,6 +1,7 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using Hevo.Charting.Abstractions;
 using Hevo.Charting.Linked;
 using Hevo.Charting.LowCode;
 using Xunit;
@@ -278,6 +279,36 @@ namespace Hevo.Charting.Tests
 
             h.Boards[2].WriteLocked(port, 777);
             using (h.Boards[0].ReadScope()) Assert.Equal(777, h.Boards[0].Read(port));
+        });
+
+        // 运行期加的副图:别的板早写过的联动端口(视口、长度)要补进新板,不能等到下一次写
+        [Fact]
+        public void RuntimePane_ReceivesAlreadyMirroredValues() => WithHost(h =>
+        {
+            h.ActivateBoards();
+            var len = h.Context.SharedViewport.LogicalLength;
+            var active = h.Context.SharedViewport.ActiveRange;
+            h.Boards[0].WriteLocked(len, 300);
+            h.Boards[0].WriteLocked(active, new RealRange(160, 299));
+
+            var pane = new ProbeSchema();
+            h.Dashboard.AppendPaneAtRuntime(pane, 1);
+            h.Window.UpdateLayout();   // 新 cell 上屏才装配
+            var board = new DataBlackboard();
+            pane.Trigger.Push(board);
+
+            Assert.Equal(4, h.Context.AttachedBoards.Length);
+            using (board.ReadScope())
+            {
+                Assert.Equal(300, board.Read(len));
+                Assert.Equal(new RealRange(160, 299), board.Read(active));
+            }
+            // 补写不回灌:别的板的值没被新板的默认值盖掉
+            using (h.Boards[1].ReadScope()) Assert.Equal(300, h.Boards[1].Read(len));
+
+            // 之后照常双向镜像
+            board.WriteLocked(len, 301);
+            using (h.Boards[0].ReadScope()) Assert.Equal(301, h.Boards[0].Read(len));
         });
 
         [Fact]
