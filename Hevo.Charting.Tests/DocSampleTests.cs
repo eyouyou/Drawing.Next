@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
+using Hevo.Charting.DocSamples.BareCell;
 using Hevo.Charting.DocSamples.Bollinger;
 using Hevo.Charting.DocSamples.QuickStart;
 using Hevo.Charting.Features;
@@ -176,6 +177,61 @@ namespace Hevo.Charting.Tests
                 Assert.All(lists, pts => Assert.Equal(n - 19, pts.Count));
                 // 三条线各用一块点缓冲,不能互相覆盖
                 Assert.Equal(3, lists.Distinct(ReferenceEqualityComparer.Instance).Count());
+            });
+        }
+
+        // ── 06 号文档「填充」:DrawBand 区间填色 ───────────────────────────
+
+        private struct FigureCount : IFigureWriter
+        {
+            public int Figures;
+            public void Begin(HevoPoint p) => Figures++;
+            public void LineTo(HevoPoint p) { }
+            public void End() { }
+        }
+
+        [Fact]
+        public void RangeShadeLayer_RecordsOneClippedBand_WithGapAndTwoSides()
+        {
+            // 价格围绕阈值 100 上下穿越;前 10 根暖机期 NaN,第 30 根停牌缺口
+            var close = Prices(60);
+            int n = close.Length;
+            var threshold = new double[n];
+            for (int i = 0; i < n; i++) threshold[i] = 100;
+            for (int i = 0; i < 10; i++) close[i] = double.NaN;
+            close[30] = double.NaN;
+
+            IncrementalTestKit.RunOnSta(() =>
+            {
+                var layer = new Hevo.Charting.DocSamples.Fill.RangeShadeLayer();
+                var data = new TraitBag()
+                    .With(new Hevo.Charting.DocSamples.Fill.RangeShadeTrait(close, threshold))
+                    .With(Hevo.Charting.DocSamples.Fill.RangeShadeStyle.Create(System.Windows.Media.Colors.Green, System.Windows.Media.Colors.Red))
+                    .With(ScaleStrategyTrait.LineMode)
+                    .With(new PlotAreaTrait(new HevoRect(0, 0, 400, 200)))
+                    .With(new XAxisTrait(new RealRange(0, n - 1)))
+                    .With(new YAxisTrait(new RealRange(80, 130)));
+
+                layer.MarkDirty();
+                layer.Update(data);
+                layer.SwapBuffer();
+
+                var cmds = ((LayerBuffer)layer.Buffer).Drawing.Commands;
+                Assert.Equal(new[] { DrawOp.PushClip, DrawOp.DrawBand, DrawOp.Pop }, cmds.Select(c => c.Op));
+                var band = Assert.IsType<HevoBand>(cmds[1].RefData);
+                Assert.Equal(n, band.Count); // NaN 原样留在带子里(断带),不跳过
+                Assert.NotNull(band.CrossedBrush);
+
+                var up = band.Upper.ToArray();
+                var lo = band.Lower.ToArray();
+                var whole = new FigureCount();
+                FillGeometry.Band(up, lo, 0, ref whole);
+                Assert.Equal(2, whole.Figures); // 缺口两侧各一段
+                var above = new FigureCount();
+                var below = new FigureCount();
+                FillGeometry.Band(up, lo, +1, ref above);
+                FillGeometry.Band(up, lo, -1, ref below);
+                Assert.True(above.Figures > 0 && below.Figures > 0, "价格在阈值上下都有,两种颜色都该出图形");
             });
         }
 
@@ -381,6 +437,27 @@ namespace Hevo.Charting.Tests
             h.Frame();
             Assert.Equal(3, layout.ProjectCount);
             Assert.Equal(3, feature.PublishCount);
+        });
+
+        // ── 裸 ChartCell(不用 Feature):喂了才画,再喂再画 ──────────────────
+
+        [Fact]
+        public void BareCell_FedLayerDraws_AndRedrawsOnNextFeed() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var cell = new ChartCell();
+            var layer = new LevelLineLayer();
+            var feed = BareCellSample.AddLevelLine(cell, layer, y: 40);
+
+            cell.RunFrameNow(PlotMode.Sync);
+            var first = ((LayerBuffer)layer.Buffer).Drawing.Commands.Count;
+            Assert.True(first > 0, "喂了数据的图层应在下一帧录出指令");
+            Assert.True(layer.IsDiscovered);
+
+            var style = feed.Read<LevelLineTrait>()!;
+            feed.PublishData(style with { Y = 60 });
+            cell.RunFrameNow(PlotMode.Sync);
+            Assert.Equal(60, feed.Read<LevelLineTrait>()!.Y);
+            Assert.Equal(1, cell.LastFrameDirtyLayers);
         });
     }
 }

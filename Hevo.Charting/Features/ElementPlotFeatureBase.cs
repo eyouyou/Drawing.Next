@@ -1,8 +1,7 @@
 using System;
-using System.Windows;
-using System.Windows.Input;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
+using Hevo.Charting.Interaction;
 using Hevo.Charting.LowCode;
 using Hevo.Charting.WorkFlow;
 
@@ -58,8 +57,14 @@ namespace Hevo.Charting.Features
         /// <summary>Hover 命中事件。args 携带强类型 spec 元素 + Index,业务侧自管 hover UI(WPF popup 等)。</summary>
         public event EventHandler<PlotElementEvent<TSpec>>? ElementHovered;
 
-        /// <summary>双击命中事件(<c>MouseLeftButtonDown ClickCount==2</c>)。</summary>
+        /// <summary>双击命中事件(第二次按下时,按平台的连击判定)。</summary>
         public event EventHandler<PlotElementEvent<TSpec>>? ElementDoubleClicked;
+
+        /// <summary>
+        /// true = 元素上的双击只归元素:发 <see cref="ElementDoubleClicked"/>,不再同时触发图表的双击复原(第二次按下被认领)。
+        /// 默认 false,跟原来一样两者都触发。第一次按下始终不认领,元素上按住拖照常平移。
+        /// </summary>
+        public bool DoubleClickClaimsPress { get; init; }
 
         // ── runtime ─────────────────────────────────────────────
         private TLayer? _layer;
@@ -68,6 +73,10 @@ namespace Hevo.Charting.Features
         private readonly object _specLock = new();
         private ReadOnlyMemory<TSpec> _cachedSpec;
         private int _lastHoverIdx = -1;   // 上一帧命中 idx,用于"hit→no-hit"边界写 out-of-bounds 状态
+
+        // 指针:一块"现算命中"的区域(命中那一刻按当前投影找最近元素,跟原来在 MouseMove 里现算一致)
+        private ElementHitTester? _tester;
+        private PointerRegion? _region;
 
         protected TLayer? Layer => _layer;
         protected VisualProxy<TLayer> Proxy => _proxy;
@@ -80,7 +89,9 @@ namespace Hevo.Charting.Features
             _proxy = AttachLayer(_layer);
 
             OnAfterAttachLayer(ctx);
-            HookMouse(chart, ctx);
+            _tester = new ElementHitTester(this, ctx);
+            _region = null;
+            flow.WatchPointer(this, OnGesture);
         }
 
         protected override void OnProject(FeatureContext ctx)
@@ -94,6 +105,27 @@ namespace Hevo.Charting.Features
             // ctx.For(_layer) 返回的才是 base=live + draft=transaction 的正确 proxy,Publish 走 transaction,
             // SubmitSync 合并 draft 时检测到 trait 变化 → MarkDirty → 下一帧 OnUpdate 被调。
             PublishSpecTrait(ctx.For(_layer), spec);
+
+            // 区域只发一次:命中是现算的,数据 / 视口变了不用重发
+            if (_region == null && _tester != null)
+            {
+                _region = new PointerRegion
+                {
+                    Shape = PointerShape.Custom(_tester),
+                    Accepts = PointerAccepts.DoubleClick,
+                    PassThrough = !DoubleClickClaimsPress,
+                };
+                ctx.Pointer().Publish(_region);
+            }
+        }
+
+        protected override void OnDecompose()
+        {
+            // 同一实例拔了再插:区域表已随卸载清掉,重装后首帧重发
+            _region = null;
+            _tester = null;
+            _lastHoverIdx = -1;
+            base.OnDecompose();
         }
 
         // ── 派生类钩子 ────────────────────────────────────────────────────
@@ -114,20 +146,20 @@ namespace Hevo.Charting.Features
 
         // ── 鼠标 / hit-test(完全通用)─────────────────────────────────────────
 
-        private void HookMouse(ChartCell chart, RenderContext ctx)
+        // 悬停命中 → 发 ElementHovered + 写 HitStatePort(命中);离开 → 写 HitStatePort(IsOutOfBounds=true)。
+        // 回调在路由器的写锁里:端口直接写,业务事件放 later(...) 到锁外。
+        private void OnGesture(DataBlackboard board, PointerGesture g, Action<Action> later)
         {
-            // hover:命中 → fire ElementHovered + 写 HitStatePort(命中);no-hit → 写 HitStatePort(IsOutOfBounds=true)。
-            // 用 WithBoard 拿到 board 才能 WriteIfChanged HitStatePort。
-            WithBoard(this.OnMouse(UIElement.MouseMoveEvent)).Subscribe(t =>
+            if (_layer == null) return;
+            switch (g.Phase)
             {
-                if (_layer == null) return;
-                var (args, board) = t;
-                var pos = args.GetPosition(chart.DrawingCanvas);
-                var (idx, hit) = HitTest(ctx, new HevoPoint((float)pos.X, (float)pos.Y));
-
-                if (idx >= 0)
+                case PointerPhase.HoverEnter:
+                case PointerPhase.HoverMove:
                 {
-                    ElementHovered?.Invoke(this, new PlotElementEvent<TSpec>(idx, GetCachedElement(idx)));
+                    int idx = g.RegionId;
+                    var hit = _tester != null ? _tester.LastHit : g.Position;
+                    var element = GetCachedElement(idx);
+                    later(() => ElementHovered?.Invoke(this, new PlotElementEvent<TSpec>(idx, element)));
                     WriteHitState(board, new PointerHitState(
                         MousePos: hit,
                         Hit: default,
@@ -135,42 +167,45 @@ namespace Hevo.Charting.Features
                         LocalIndex: idx,
                         IsOutOfBounds: false));
                     _lastHoverIdx = idx;
+                    break;
                 }
-                else if (_lastHoverIdx >= 0)
-                {
-                    // 上次命中,这次 no-hit → 下发"已离开" 状态让 tooltip 隐藏
+                case PointerPhase.HoverLeave:
+                    if (_lastHoverIdx < 0) break;
+                    // 上次命中,这次 no-hit / 鼠标离开 chart → 下发"已离开" 状态让 tooltip 隐藏
                     WriteHitState(board, new PointerHitState(
-                        MousePos: new HevoPoint((float)pos.X, (float)pos.Y),
+                        MousePos: g.Position,
                         Hit: default,
-                        CenterX: (float)pos.X,
+                        CenterX: g.Position.X,
                         LocalIndex: -1,
                         IsOutOfBounds: true));
                     _lastHoverIdx = -1;
+                    break;
+                case PointerPhase.DoubleClick:
+                {
+                    int idx = g.RegionId;
+                    var element = GetCachedElement(idx);
+                    later(() => ElementDoubleClicked?.Invoke(this, new PlotElementEvent<TSpec>(idx, element)));
+                    break;
                 }
-            }).OwnedBy(this);
+            }
+        }
 
-            // 鼠标离开 chart 整体 → 强制下发 out-of-bounds(覆盖 hover 残留)
-            WithBoard(this.OnMouse(UIElement.MouseLeaveEvent)).Subscribe(t =>
-            {
-                if (_layer == null || _lastHoverIdx < 0) return;
-                var (_, board) = t;
-                WriteHitState(board, new PointerHitState(
-                    MousePos: default,
-                    Hit: default,
-                    CenterX: 0,
-                    LocalIndex: -1,
-                    IsOutOfBounds: true));
-                _lastHoverIdx = -1;
-            }).OwnedBy(this);
+        private sealed class ElementHitTester : IPointerHitTester
+        {
+            private readonly ElementPlotFeatureBase<TSpec, TLayer> _owner;
+            private readonly RenderContext _ctx;
+            public HevoPoint LastHit;
 
-            this.OnUIEvent<MouseButtonEventArgs>(UIElement.MouseLeftButtonDownEvent).Subscribe(args =>
+            public ElementHitTester(ElementPlotFeatureBase<TSpec, TLayer> owner, RenderContext ctx) { _owner = owner; _ctx = ctx; }
+
+            public float HitTest(HevoPoint p, out int id)
             {
-                if (_layer == null || args.ClickCount != 2) return;
-                var pos = args.GetPosition(chart.DrawingCanvas);
-                var (idx, _) = HitTest(ctx, new HevoPoint((float)pos.X, (float)pos.Y));
-                if (idx < 0) return;
-                ElementDoubleClicked?.Invoke(this, new PlotElementEvent<TSpec>(idx, GetCachedElement(idx)));
-            }).OwnedBy(this);
+                var (idx, hit, d2) = _owner.HitTest(_ctx, p);
+                id = idx;
+                if (idx < 0) return float.NaN;
+                LastHit = hit;
+                return (float)Math.Sqrt(d2);
+            }
         }
 
         private void WriteHitState(DataBlackboard board, PointerHitState? state)
@@ -180,11 +215,11 @@ namespace Hevo.Charting.Features
                 board.WriteIfChanged(HitStatePort, state);
         }
 
-        private (int Index, HevoPoint Hit) HitTest(RenderContext ctx, HevoPoint screen)
+        private (int Index, HevoPoint Hit, double DistSq) HitTest(RenderContext ctx, HevoPoint screen)
         {
             ReadOnlyMemory<TSpec> spec;
             lock (_specLock) spec = _cachedSpec;
-            if (spec.Length == 0) return (-1, default);
+            if (spec.Length == 0) return (-1, default, 0);
 
             var span = spec.Span;
             int bestIdx = -1;
@@ -198,7 +233,7 @@ namespace Hevo.Charting.Features
                 double d2 = dx * dx + dy * dy;
                 if (d2 < bestDist) { bestDist = d2; bestIdx = i; bestHit = p.Value; }
             }
-            return (bestIdx, bestHit);
+            return (bestIdx, bestHit, bestDist);
         }
 
         private TSpec GetCachedElement(int idx)

@@ -634,6 +634,8 @@ namespace Hevo.Charting.Core
             }
             // 1. 提交与标脏
             ctx.SubmitSync(ActiveLayers);
+            // 指针区域跟图层 Trait 同一帧提交:命中用的位置 = 这一帧画出来的位置
+            PointerRegions.Commit();
 
             // 修复 H4-c：手写 for 循环 + 跨帧复用 _dirtyLayerBuffer，消除每帧 LINQ 迭代器 + List 分配。
             var active = ActiveLayers;
@@ -772,6 +774,12 @@ namespace Hevo.Charting.Core
             RunSwappedFrame(mode);
             return LastFrameDirtyLayers;
         }
+
+        /// <summary>有排队没跑的帧。指针路由器按下时据此决定要不要先同步跑一帧(让命中用的区域是最新的)。</summary>
+        internal bool HasPendingFrame { get { lock (_updateLock) return _isUpdateRequested; } }
+
+        /// <summary>本 cell 上各 Feature 发布的指针区域(纯数据,路由器在输入时读)。</summary>
+        internal Interaction.PointerRegionStore PointerRegions { get; } = new();
 
         /// <summary>微基准用:丢掉排队的事务(只测 ProjectAll 时,黑板写入排进来的空回调不跑帧也不能越积越多)。</summary>
         internal void DiscardPendingUpdates()
@@ -998,6 +1006,8 @@ namespace Hevo.Charting.Core
         /// </summary>
         public void Shutdown()
         {
+            // 拖动中的手势先以 ChartUnloaded 取消(此时各 Feature 的 Watch 还活着,能回滚)
+            PointerRegions.NotifyUnloading();
             if (Template is ChartSchema schema && GetValue(ChartLifecycle.ActiveSessionProperty) != null)
             {
                 using var ctx = CreateContext();
@@ -1032,9 +1042,30 @@ namespace Hevo.Charting.Core
         /// ⚠️ 添加非托管图层 (高危操作！)
         /// 此方法脱离了 Schema 的生命周期管理与 Transact 事务。
         /// 调用此方法的开发者，必须自行在适当的时机调用 RemoveUnmanagedLayer，否则会导致严重的内存泄漏与图层重影！
-        /// 推荐做法：在 Schema 的 DefineFeatures 中使用 canvas.AddLayer()。
+        /// <para>
+        /// 不用 Feature 时这是给裸 ChartCell 挂层的入口:图层的数据要通过返回的代理喂(<c>PublishData</c> /
+        /// <c>UpdateData</c>,任何线程都可以),喂进去的算本层数据,下一帧唤醒图层并录制,之后再喂就按引用判脏重录。
+        /// 没人喂的图层一直不画(深度睡眠,见 00 号文档 §16.1)。用 Schema 时改在 Feature 里挂层、在 OnProject 里
+        /// <c>ctx.For(layer)</c> 发数据。
+        /// </para>
         /// </summary>
         public VisualProxy<TLayer> AddUnmanagedLayer<TLayer>(TLayer layer) where TLayer : IChartLayer
+        {
+            var localBag = AttachLayerVisual(layer);
+            return new VisualProxy<TLayer>(layer, localBag, new LayerFeed(this, layer, localBag));
+        }
+
+        /// <summary>
+        /// Feature.AttachLayer 用:返回的代理直写本层 live 袋、不唤醒图层。Feature 在 OnCompose 里经它发静态样式,
+        /// 图层要等 OnProject 里 ctx.For(layer) 发的数据到了才第一次录 —— [RequiredTrait] 图层不会在数据到齐前被叫起。
+        /// </summary>
+        internal VisualProxy<TLayer> AttachFeatureLayer<TLayer>(TLayer layer) where TLayer : IChartLayer
+        {
+            var localBag = AttachLayerVisual(layer);
+            return new VisualProxy<TLayer>(layer, localBag, localBag);
+        }
+
+        private VisualDataBag AttachLayerVisual(IChartLayer layer)
         {
             // 路由策略:
             //   Level == Interaction       → _overlayVisualRegistry (_overlayCanvas,跟静态层 dirty 隔离)
@@ -1064,10 +1095,7 @@ namespace Hevo.Charting.Core
             }
             UpdateActiveLayersCache();
 
-            var localBag = _localData.GetValue(layer, _ => new VisualDataBag());
-
-            // 包装成 0-GC 结构体返回，供后续链式调用
-            return new VisualProxy<TLayer>(layer, localBag, localBag);
+            return _localData.GetValue(layer, _ => new VisualDataBag());
         }
 
         // 跨帧缓存:Add/RemoveUnmanagedLayer 内部维护,避免 ActiveLayers 每次访问都拼一个 List。

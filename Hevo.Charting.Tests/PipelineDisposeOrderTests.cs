@@ -52,15 +52,17 @@ namespace Hevo.Charting.Tests
         }
 
         [Fact]
-        public void SubscribeAndUnsubscribe_OnDisposedBoard_AreSilent()
+        public void AddAndRemoveWatch_OnDisposedBoard_AreSilent()
         {
             var board = new DataBlackboard();
             Action<DataBlackboard> cb = _ => { };
-            board.Subscribe(Port, cb);
+            var watch = board.AddWatch(new object[] { Port }, cb);
             board.Dispose();
 
-            Assert.Null(Record.Exception(() => board.Unsubscribe(Port, cb)));
-            Assert.Null(Record.Exception(() => board.Subscribe(Port, cb)));
+            Assert.Null(Record.Exception(() => watch.Dispose()));
+            IDisposable? late = null;
+            Assert.Null(Record.Exception(() => late = board.AddWatch(new object[] { Port }, cb)));
+            Assert.Null(Record.Exception(() => late!.Dispose()));
         }
 
         [Fact]

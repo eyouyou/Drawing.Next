@@ -85,6 +85,13 @@ namespace Hevo.Charting.Renderers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float CenterEdge(float v, float k) => MathF.Floor(v * k + 0.5f) / k;
 
+        /// <summary>
+        /// 填充多边形 / 带子的顶点:跟 <see cref="FillRect"/> 的边同一条取整(设备像素边界)。
+        /// 横平竖直的边因此跟填充矩形、位图后端逐像素一致;斜边顶点最多挪半个设备像素,仍由抗锯齿画平滑。
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float FillVertex(float v, float k) => MathF.Floor(v * k + 0.5f) / k;
+
         // ==========================================
         // 设备像素版(k = PixelsPerDip)。规则同 Skia 后端:先乘 k 在设备像素上取整,再除回 DIP。
         // k = 1 时与上面的 DIP 版逐位相同。全图抗锯齿下靠它保证横竖线 / 矩形描边在任意 DPI 都落在整像素上不发虚。

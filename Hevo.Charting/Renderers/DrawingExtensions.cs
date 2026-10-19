@@ -116,6 +116,35 @@ namespace Hevo.Charting.Renderers
         public static void DrawRectangles(this IDrawingSink sink, IHevoBrush? brush, HevoPen? pen, IList<HevoRect> rects)
             => sink.Push(new DrawCmd(DrawOp.DrawRectangles, pen, brush, default, rects));
 
+        /// <summary>
+        /// 绘制闭合多边形(填充 + 可选描边)。实心箭头、三角标记、矩形 / 平行四边形画线工具都走这里,
+        /// 取代拼 SVG 字符串的 <see cref="DrawGeometry"/>(数据一变就要重新解析)。
+        /// <para>非零环绕填充;首尾自动闭合,不用重复首点;NaN / ∞ 顶点跳过,有效顶点不足 3 个不画。
+        /// 填充的横竖边跟 <see cref="DrawRectangle"/> 一样落在设备像素边界上,描边顶点同 <see cref="DrawPolyline"/>。</para>
+        /// </summary>
+        /// <param name="brush">填充;null 只描边。</param>
+        /// <param name="pen">描边;null 只填充。</param>
+        /// <param name="points">顶点(屏幕坐标)。直接引用不拷贝,做成图层的跨帧字段复用。</param>
+        public static void DrawPolygon(this IDrawingSink sink, IHevoBrush? brush, HevoPen? pen, List<HevoPoint> points)
+            => sink.Push(new DrawCmd(DrawOp.DrawPolygon, pen, brush, default, points));
+
+        /// <summary>
+        /// 绘制两条折线之间的带状填充:区间填色、布林带 / 通道填充、云图。
+        /// <para>每段连续有效样本围成一个闭合图形(上边正向 + 下边反向);任一边是 NaN / ∞ 的样本把带子断开。</para>
+        /// <para>给了 <paramref name="crossedBrush"/> 时按上下关系分段:上边在上(屏幕 y 更小)的部分用 <paramref name="brush"/>,
+        /// 穿越后的部分用 <paramref name="crossedBrush"/>,穿越点在相邻样本间线性插值(阈值分段:下边全填阈值线的 y 即可)。
+        /// 不给就整条带子一个颜色,不管谁在上。</para>
+        /// </summary>
+        /// <param name="brush">填充;null 时只画 <paramref name="crossedBrush"/> 那部分 / 只描边。</param>
+        /// <param name="pen">描边上下两条边(不描两端的竖边);null 不描。中轨等其它线照常用 DrawPolyline 另画。</param>
+        /// <param name="band">上下边数据。直接引用不拷贝,做成图层的跨帧字段复用。</param>
+        /// <param name="crossedBrush">穿越部分的填充;null = 不分段。</param>
+        public static void DrawBand(this IDrawingSink sink, IHevoBrush? brush, HevoPen? pen, HevoBand band, IHevoBrush? crossedBrush = null)
+        {
+            band.CrossedBrush = crossedBrush;
+            sink.Push(new DrawCmd(DrawOp.DrawBand, pen, brush, default, band));
+        }
+
         // ==========================================
         // 3. 文本处理 (Text - 支持 Late Binding)
         // ==========================================

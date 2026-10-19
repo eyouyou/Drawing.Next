@@ -87,6 +87,8 @@ namespace Hevo.Charting
         public bool RequireClickToActivate { get; init; } = false;
         /// <summary>true = 按下 Esc 立即解除 hover(隐藏 crosshair / tooltip),直至下次单击。</summary>
         public bool DismissOnEscape { get; init; } = false;
+        /// <summary>指针区域的拖动阈值(DIP):按下后移动不到这个距离松开算点击。默认 4。</summary>
+        public double DragThreshold { get; init; } = 4.0;
 
         // 💥 允许业务层注入自定义缩放策略
         public IZoomStrategy? ZoomStrategy { get; init; }
@@ -379,6 +381,9 @@ namespace Hevo.Charting
                 });
             }
 
+            // 指针区域的拖动阈值:唯一来源是这里的 InteractionOptions,路由器从共享区读
+            builder.Canvas.Seed(new Interaction.PointerSettingsTrait(options.DragThreshold));
+
             builder.Canvas.Add(new CrosshairFeature<TX> { HitStatePort = hitPort, XAxisDataPort = domainDataPort, XMeta = domainMeta, ShowIntersectionDots = options.ShowIntersectionDots });
             builder.Canvas.Add(new TooltipWidgetFeature<TX> { HitStatePort = hitPort, XAxisDataPort = domainDataPort, XMeta = options.TooltipXMeta ?? domainMeta });
 
@@ -442,6 +447,41 @@ namespace Hevo.Charting
                 });
             }
 
+            return builder;
+        }
+
+        /// <summary>
+        /// 可拖水平线(委托价、止损、预警线):价格存在 <paramref name="pricePort"/>,悬停变上下箭头,拖动改价,
+        /// 松手调 <see cref="DraggableLineOptions.OnCommitted"/>,Esc / 丢捕获时回滚。
+        /// </summary>
+        /// <param name="valueRangePort">线所在 Y 轴的量程(同 K 线的 YRangePort)。</param>
+        public static InteractionBuilder AddDraggableLine(
+            this InteractionBuilder builder,
+            DataPort<double> pricePort,
+            DataPort<RealRange> valueRangePort,
+            DraggableLineOptions? options = null)
+        {
+            builder.Canvas.Add(new DraggableLineFeature
+            {
+                PricePort = pricePort,
+                ValueRangePort = valueRangePort,
+                Options = options ?? new DraggableLineOptions(),
+            });
+            return builder;
+        }
+
+        /// <summary>测量:按住修饰键(默认 Ctrl)拖出测量框(根数、价差、涨跌幅);不按时照常平移。</summary>
+        /// <param name="valueRangePort">价格所在 Y 轴的量程。</param>
+        public static InteractionBuilder AddMeasure(
+            this InteractionBuilder builder,
+            DataPort<RealRange> valueRangePort,
+            MeasureOptions? options = null)
+        {
+            builder.Canvas.Add(new MeasureFeature
+            {
+                ValueRangePort = valueRangePort,
+                Options = options ?? new MeasureOptions(),
+            });
             return builder;
         }
 

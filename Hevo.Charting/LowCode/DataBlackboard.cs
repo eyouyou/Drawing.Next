@@ -1,5 +1,4 @@
 ﻿using Hevo.Charting.Core;
-using System.Collections.Concurrent;
 
 namespace Hevo.Charting.LowCode
 {
@@ -13,9 +12,9 @@ namespace Hevo.Charting.LowCode
         private volatile bool _isDisposed;
         public bool IsDisposed => _isDisposed;
         private readonly TypedBucketMap _memory = new();
-        private readonly Dictionary<object, Action<DataBlackboard>?> _subscriptions = new();
         private readonly StateClock _boardClock = new();
-        private readonly ConcurrentDictionary<object, VersionToken> _portTokens = new();
+        // 只在写锁内写、持锁读(GetVersion 有 Debug 断言),普通字典即可(00 号文档:内部不用 ConcurrentDictionary)
+        private readonly Dictionary<object, VersionToken> _portTokens = new();
 
         // ==========================================
         // 🛡️ 核心装甲升级：工业级读写分离锁
@@ -30,26 +29,42 @@ namespace Hevo.Charting.LowCode
         // _portsSnapshot 在首次事务提交后增长到足够容量，之后复用，热路径零分配。
         private readonly List<object> _portsSnapshot = new();
 
-        public event Action<object>? OnPortUpdated;
-        public event Action<DataBlackboard>? OnTransactionCommitted;
+        // 事务复用同一个作用域对象:它的 Dispose 只转调 EndTransaction,没有自己的状态
+        private readonly TransactionScope _transactionScope;
 
-        public VersionToken GetVersion(object port)
+        public DataBlackboard()
         {
+            _transactionScope = new TransactionScope(this);
+        }
+
+        /// <summary>端口最新写入的版本令牌;没写过返回 default。须持锁调用(同 <see cref="Read{T}"/>)。</summary>
+        internal VersionToken GetVersion(object port)
+        {
+            AssertLockHeld(port);
             return _portTokens.TryGetValue(port, out var token) ? token : default;
+        }
+
+        [System.Diagnostics.Conditional("DEBUG")]
+        private void AssertLockHeld(object port)
+        {
+            if (!_rwLock.IsReadLockHeld && !_rwLock.IsWriteLockHeld && !_rwLock.IsUpgradeableReadLockHeld)
+                throw new InvalidOperationException($"[黑板越权访问] 读引脚 {port} 的版本号失败！必须先调用 AcquireReadLock() 开启快照边界！");
         }
 
         // 列端口(ReadOnlyMemory<T>)的"引用版本":只在新值的底层引用(数组 / 起点 / 长度)跟当前值不同时才变。
         // 实时 tick 原地改最后一根再 ForceWrite 同一块 ROM → 版本号(GetVersion)变、引用版本不变;
         // 追加 / 写时复制 / 缓冲池换块(包括 A → B → A 换回同一块数组)→ 引用版本变。
         // 消费者只存这个令牌、不存列引用,不违反"列只在当帧有效"(缓冲会被纪元回收重写)。
-        private readonly ConcurrentDictionary<object, VersionToken> _identityTokens = new();
+        // 跟 _portTokens 分开存:实时 tick 原地改最后一根只写 _portTokens,合并成一本这条最热路径要多一次查找
+        private readonly Dictionary<object, VersionToken> _identityTokens = new();
 
         /// <summary>
         /// 列端口的引用版本:底层引用(数组 / 起点 / 长度)换了才变。非列端口、没写过的端口返回 default。
         /// 用于"版本变了但引用没变 = 只有最后一根被原地改"这类判断(如 CandleFeature 静态层)。
         /// </summary>
-        public VersionToken GetIdentityVersion(object port)
+        internal VersionToken GetIdentityVersion(object port)
         {
+            AssertLockHeld(port);
             return _identityTokens.TryGetValue(port, out var token) ? token : default;
         }
 
@@ -145,34 +160,176 @@ namespace Hevo.Charting.LowCode
         }
 
         // ==========================================
-        // 字典修改属于结构性变化，必须上排他写锁
+        // Watch 表:按注册顺序的一张表 + 每项一个脏标志。
+        // 写入时把关心该端口的项标脏,提交时(非事务写的末尾 / 最外层事务结束)按注册顺序只跑脏的。
+        // 顺序、重入(回调里再写再提交 = 嵌套再扫一遍,深度优先)、异常(标志调用前清,后面的留到下次提交)
+        // 都跟以前"每次提交把所有 Watch 的提交回调调一遍、各自看自己脏没脏"一致,只是不再进两把锁。
+        // 脏标志、_dirtyCount、两张表只在写锁内碰;退订只置 Removed 不拿锁,写锁内不在扫表时再压缩。
         // ==========================================
-        // 已释放的板上订阅 / 退订静默返回:管线销毁时订阅链从上游往下游释放,
-        // pipe(连同黑板)先于下游 Watch 的清理被释放,这里抛异常会截断后面的清理。
-        public void Subscribe(object port, Action<DataBlackboard> callback)
+        private sealed class WatchEntry : IDisposable
         {
-            if (!TryEnterWriteLockUnlessDisposed()) return;
-            try
+            public readonly DataBlackboard Board;
+            public readonly object[] Ports;
+            public readonly Action<DataBlackboard> OnCommit;
+            public bool Dirty;
+            public volatile bool Removed;
+
+            public WatchEntry(DataBlackboard board, object[] ports, Action<DataBlackboard> onCommit)
             {
-                if (_subscriptions.TryGetValue(port, out var existingAction)) _subscriptions[port] = existingAction + callback;
-                else _subscriptions[port] = callback;
+                Board = board;
+                Ports = ports;
+                OnCommit = onCommit;
             }
-            finally { _rwLock.ExitWriteLock(); }
+
+            // 不拿锁:持读锁时、在别的 Watch 回调里、黑板已释放时退订都不会撞锁。
+            // 别的线程正在跑的那次提交仍可能再调一次(调用方自己复查,见 AttachWatchCore)。
+            public void Dispose()
+            {
+                if (Removed) return;
+                Removed = true;
+                Board._hasRemovedWatches = true;
+            }
         }
 
-        public void Unsubscribe(object port, Action<DataBlackboard> callback)
+        private readonly List<WatchEntry> _watches = new();                         // 注册顺序
+        private readonly Dictionary<object, WatchEntry[]> _watchersByPort = new();   // 增删时整组换新数组
+        private int _dirtyCount;
+        private int _commitDepth;                                                    // >0 = 正在扫表,不能压缩
+        private volatile bool _hasRemovedWatches;
+
+        /// <summary>
+        /// 登记一个 Watch:<paramref name="ports"/> 里任一端口被写过,下一次提交时调用一次 <paramref name="onCommit"/>
+        /// (一次提交里写了它关心的多个端口也只调一次)。返回的句柄 Dispose 即退订,不拿锁。
+        /// 已释放的黑板上登记静默返回空句柄:管线销毁时订阅链从上游往下游释放,
+        /// pipe(连同黑板)先于下游 Watch 的清理被释放,这里抛异常会截断后面的清理。
+        /// </summary>
+        internal IDisposable AddWatch(object[] ports, Action<DataBlackboard> onCommit)
         {
-            if (!TryEnterWriteLockUnlessDisposed()) return;
+            if (!TryEnterWriteLockUnlessDisposed()) return DisposableAction.Empty;
             try
             {
-                if (_subscriptions.TryGetValue(port, out var existingAction))
+                if (_commitDepth == 0) CompactWatches();
+                var entry = new WatchEntry(this, ports, onCommit);
+                _watches.Add(entry);
+                for (int i = 0; i < ports.Length; i++) AppendWatcher(ports[i], entry);
+                return entry;
+            }
+            finally
+            {
+                var pending = TakeAfterUnlockIfLastHold();
+                _rwLock.ExitWriteLock();
+                RunAfterUnlock(pending);
+            }
+        }
+
+        private void AppendWatcher(object port, WatchEntry entry)
+        {
+            if (!_watchersByPort.TryGetValue(port, out var old))
+            {
+                _watchersByPort[port] = new[] { entry };
+                return;
+            }
+            if (Array.IndexOf(old, entry) >= 0) return; // 同一端口在 ports 里出现两次
+            var next = new WatchEntry[old.Length + 1];
+            Array.Copy(old, next, old.Length);
+            next[old.Length] = entry;
+            _watchersByPort[port] = next;
+        }
+
+        // 写锁内、不在扫表时调用:把已退订的项从两张表里拿掉
+        private void CompactWatches()
+        {
+            if (!_hasRemovedWatches) return;
+            _hasRemovedWatches = false;
+            int kept = 0;
+            for (int i = 0; i < _watches.Count; i++)
+            {
+                var e = _watches[i];
+                if (e.Removed)
                 {
-                    var newAction = (Action<DataBlackboard>?)Delegate.Remove(existingAction, callback);
-                    if (newAction == null) _subscriptions.Remove(port);
-                    else _subscriptions[port] = newAction;
+                    if (e.Dirty) { e.Dirty = false; _dirtyCount--; }
+                    continue;
+                }
+                _watches[kept++] = e;
+            }
+            if (kept == _watches.Count) return;
+            _watches.RemoveRange(kept, _watches.Count - kept);
+
+            _watchersByPort.Clear();
+            for (int i = 0; i < _watches.Count; i++)
+            {
+                var e = _watches[i];
+                for (int j = 0; j < e.Ports.Length; j++) AppendWatcher(e.Ports[j], e);
+            }
+        }
+
+        // 写锁内:非事务写的末尾、最外层事务结束
+        private void Commit()
+        {
+            if (_dirtyCount > 0)
+            {
+                _commitDepth++;
+                try
+                {
+                    // 每轮重读 Count:回调里登记的新 Watch 追加在末尾,本轮照样扫到
+                    for (int i = 0; i < _watches.Count; i++)
+                    {
+                        var e = _watches[i];
+                        if (!e.Dirty) continue;
+                        e.Dirty = false;            // 调用前清:抛异常也不会下次重跑
+                        _dirtyCount--;
+                        if (!e.Removed) e.OnCommit(this);
+                    }
+                }
+                finally
+                {
+                    _commitDepth--;
                 }
             }
-            finally { _rwLock.ExitWriteLock(); }
+            if (_hasRemovedWatches && _commitDepth == 0) CompactWatches();
+        }
+
+        // ==========================================
+        // 端口写入观察者:Schema 判脏占固定槽,DevTools 内存雷达等其余观察者进可选数组。
+        // 写入热路径只多一次字段读 + 空检查。增删很少(切板 / 挂卸雷达),在 _observerGate 里换新数组。
+        // ==========================================
+        private volatile IBoardObserver? _observer;
+        private volatile IBoardObserver[]? _extraObservers;
+        private readonly object _observerGate = new();
+
+        internal void AddObserver(IBoardObserver observer)
+        {
+            lock (_observerGate)
+            {
+                if (_observer == null) { _observer = observer; return; }
+                var old = _extraObservers;
+                if (old == null) { _extraObservers = new[] { observer }; return; }
+                var next = new IBoardObserver[old.Length + 1];
+                Array.Copy(old, next, old.Length);
+                next[old.Length] = observer;
+                _extraObservers = next;
+            }
+        }
+
+        internal void RemoveObserver(IBoardObserver observer)
+        {
+            lock (_observerGate)
+            {
+                if (ReferenceEquals(_observer, observer))
+                {
+                    _observer = null;
+                    return;
+                }
+                var old = _extraObservers;
+                if (old == null) return;
+                int idx = Array.IndexOf(old, observer);
+                if (idx < 0) return;
+                if (old.Length == 1) { _extraObservers = null; return; }
+                var next = new IBoardObserver[old.Length - 1];
+                Array.Copy(old, 0, next, 0, idx);
+                Array.Copy(old, idx + 1, next, idx, old.Length - idx - 1);
+                _extraObservers = next;
+            }
         }
 
         private bool TryEnterWriteLockUnlessDisposed()
@@ -248,17 +405,24 @@ namespace Hevo.Charting.LowCode
             else
             {
                 NotifyPort(port); // 非事务裸写，依然在业务层的写锁控制下
-                OnTransactionCommitted?.Invoke(this);
+                Commit();
             }
         }
 
         private void NotifyPort(object port)
         {
-            if (_subscriptions.TryGetValue(port, out var action) && action != null)
+            if (_watchersByPort.TryGetValue(port, out var watchers))
             {
-                action.Invoke(this);
+                for (int i = 0; i < watchers.Length; i++)
+                {
+                    var e = watchers[i];
+                    if (!e.Dirty) { e.Dirty = true; _dirtyCount++; }
+                }
             }
-            OnPortUpdated?.Invoke(port);
+            _observer?.OnPortWritten(port);
+            var extra = _extraObservers;
+            if (extra != null)
+                for (int i = 0; i < extra.Length; i++) extra[i].OnPortWritten(port);
         }
 
 #if DEBUG
@@ -267,7 +431,7 @@ namespace Hevo.Charting.LowCode
         /// 之类的工具一键导出。读锁内迭代,迭代期间不会跟事务写并发。
         /// 仅枚举 key 实现 IDataPort 的桶 —— 黑板里其它非 DataPort 的 key(如果有)不应当出现在这层视图。
         /// </summary>
-        public List<(string Id, string DisplayName, string TypeName, object? Value)> DumpAllPortValues()
+        internal List<(string Id, string DisplayName, string TypeName, object? Value)> DumpAllPortValues()
         {
             var result = new List<(string, string, string, object?)>();
             // Inspector 寿命可能比 board 长(切 template、关图时 schema.Decompose 会先 Dispose 旧 board);
@@ -296,7 +460,7 @@ namespace Hevo.Charting.LowCode
         ///   - TotalEntries>0 且 PortEntries=0 → key 不是 IDataPort,DumpAllPortValues 的过滤把它筛掉了
         ///   - TotalEntries>0 且 PortEntries>0 → DumpAllPortValues 应该有内容,如果空说明枚举链路出 bug
         /// </summary>
-        public (int TotalEntries, int PortEntries, int NonPortEntries) DumpMemoryStats()
+        internal (int TotalEntries, int PortEntries, int NonPortEntries) DumpMemoryStats()
         {
             if (IsDisposed) return (0, 0, 0);
             int total = 0, port = 0, nonPort = 0;
@@ -321,7 +485,7 @@ namespace Hevo.Charting.LowCode
             ThrowIfDisposed();
             _rwLock.EnterWriteLock(); // 💥 显式上排他写锁，确保事务期间绝对无人能读写
             _transactionDepth++;
-            return new TransactionScope(this);
+            return _transactionScope;
         }
 
         // 修改 EndTransaction：
@@ -345,7 +509,7 @@ namespace Hevo.Charting.LowCode
                         foreach (var port in _portsSnapshot) NotifyPort(port);
                     }
                     // 💥 事务所有引脚通知完毕，触发最终结算！
-                    OnTransactionCommitted?.Invoke(this);
+                    Commit();
                 }
             }
             finally
@@ -356,7 +520,7 @@ namespace Hevo.Charting.LowCode
             }
         }
 
-        private class TransactionScope : IDisposable
+        private sealed class TransactionScope : IDisposable
         {
             private readonly DataBlackboard _board;
             public TransactionScope(DataBlackboard board) => _board = board;
@@ -380,14 +544,28 @@ namespace Hevo.Charting.LowCode
                 catch (SynchronizationLockException) { /* 仍有线程排队等锁:不拆,留给 GC */ }
             }
 
-            _subscriptions.Clear();
+            _watches.Clear();
+            _watchersByPort.Clear();
+            _dirtyCount = 0;
             _afterUnlock.Clear();
             _dirtyPorts.Clear();
             _portTokens.Clear();
             _identityTokens.Clear();
-            OnPortUpdated = null;
-            OnTransactionCommitted = null;
+            lock (_observerGate)
+            {
+                _observer = null;
+                _extraObservers = null;
+            }
         }
+    }
+
+    /// <summary>
+    /// 黑板端口写入观察者(框架内部:Schema 判脏 Feature、DevTools 内存雷达)。
+    /// 在写入线程上、持写锁时调用(非事务写当下 / 事务结束时逐端口),实现里不要去拿别的板的锁。
+    /// </summary>
+    internal interface IBoardObserver
+    {
+        void OnPortWritten(object port);
     }
 
     /// <summary>见 <see cref="DataBlackboard.PostAfterUnlock"/>:登记它的板作参数,在锁外、同一线程上执行。</summary>
