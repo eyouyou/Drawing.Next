@@ -127,11 +127,7 @@ namespace Hevo.Charting.Tests
 
             public bool InertiaRunning
             {
-                get
-                {
-                    var runner = typeof(ChartInteractionFeature).GetField("_inertia", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Interaction)!;
-                    return (bool)runner.GetType().GetProperty("IsRunning")!.GetValue(runner)!;
-                }
+                get => Cell.PointerRegions.Behaviors.StateOf<ChartInteractionState>(Interaction)!.Inertia.IsRunning;
             }
 
             /// <summary>加一个 Feature 并跑一帧,让它的区域生效。</summary>

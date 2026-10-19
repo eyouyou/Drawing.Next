@@ -211,10 +211,8 @@ namespace Hevo.Charting.Features
         private readonly List<AxisLabel> _yLabelBuffer = new();
         private readonly List<CrosshairDotInfo> _dotBuffer = new();
 
-        // 💥 本 cell 是否正持有鼠标:hit 端口在联动 dashboard 下被镜像同步,无法回答
-        // "这次 hit 是不是我自己产生的"。直接订阅本 cell 的 MouseEnter/Leave 是最就近的判定源——
-        //   Y 方向(水平线/Y 标签)的可见性由它单独把关,与 hit 数据流解耦。
-        //   单 cell 场景下鼠标在图内即为 true,行为与改造前一致。
+        // 本 cell 是否正持有鼠标:hit 端口在联动 dashboard 下被镜像同步,无法回答"这次 hit 是不是我自己产生的"。
+        // 读路由器的 IsPointerOver(本 cell 的进出,不进镜像)—— Y 方向(水平线 / Y 标签)的可见性由它单独把关。
         private bool _isMouseOverChart;
 
         protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
@@ -222,14 +220,14 @@ namespace Hevo.Charting.Features
             _trackingPorts = YTrackers.Select(x => x.Port).ToArray();
             _rangeBuffer = new RealRange[_trackingPorts.Length];
             AttachLayer(_layer);
-
-            WithBoard(this.OnMouse(UIElement.MouseEnterEvent)).Subscribe(_ => { _isMouseOverChart = true; }).OwnedBy(this);
-            WithBoard(this.OnMouse(UIElement.MouseLeaveEvent)).Subscribe(_ => { _isMouseOverChart = false; }).OwnedBy(this);
         }
 
         protected override void OnProject(FeatureContext ctx)
         {
             var (hitState, _) = ctx.UsePort(HitStatePort);
+            // 没有路由器(不是 ChartReactiveSchema)就没有进出信号,当作不在图上(同原来没收到 MouseEnter)
+            var pointer = Chart.PointerRegions.Ports;
+            if (pointer != null) (_isMouseOverChart, _) = ctx.UsePort(pointer.IsPointerOver);
             var (xData, _) = ctx.UsePort(XAxisDataPort);
 
             bool isRangesChanged = ctx.UsePorts(_trackingPorts, _rangeBuffer);

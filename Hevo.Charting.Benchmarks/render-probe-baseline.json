@@ -26,7 +26,7 @@
       "DrawCmdsPerFrame": 22.63
     },
     "bars=2000|charts=1|Resize|inc": {
-      "FeaturesPerFrame": 12,
+      "FeaturesPerFrame": 13,
       "LayersPerFrame": 10,
       "DrawCmdsPerFrame": 40
     },

@@ -33,7 +33,7 @@ namespace Hevo.Charting.Interaction
     [Flags]
     internal enum PointerManipulation { None = 0, TranslateX = 1, Scale = 2 }
 
-    /// <summary>路由器和兜底处理器对宿主(ChartCell)要的能力。WPF 实现在 <see cref="WpfPointerAdapter"/>。</summary>
+    /// <summary>路由器和行为链对宿主(ChartCell)要的能力。WPF 实现在 <see cref="WpfPointerAdapter"/>。</summary>
     internal interface IPointerHost
     {
         bool HasPendingFrame { get; }
@@ -51,47 +51,20 @@ namespace Hevo.Charting.Interaction
         /// <summary>拖动阈值(DIP),来自 <c>InteractionOptions.DragThreshold</c>。</summary>
         double DragThreshold { get; }
 
-        /// <summary>兜底处理器(平移 / 框选)抓鼠标。</summary>
+        /// <summary>行为(平移 / 框选)抓鼠标。每抓一次 <see cref="BackgroundCaptureCount"/> 加一。</summary>
         void CaptureForBackground();
         void ReleaseBackgroundCapture();
+        int BackgroundCaptureCount { get; }
 
-        /// <summary>每个显示帧回调一次(惯性);null = 停。同一时间只有一个回调。</summary>
-        void SetFrameCallback(Action? callback);
+        /// <summary>每个显示帧回调一次(惯性);可以同时挂多个。</summary>
+        void AddFrameCallback(Action callback);
+        void RemoveFrameCallback(Action callback);
     }
 
     /// <summary>
-    /// 兜底处理器(<see cref="Features.ChartInteractionFeature"/>):路由器 → 兜底的单向分发,业务看不到。
-    /// 没被区域认领的按下 / 移动 / 松开 / 离开、全部滚轮、键盘、触屏都交给它;区域认领了按下时,
-    /// "任意按下都要做的事"(停惯性、武装 hover)也由路由器调它完成。
-    /// </summary>
-    internal interface IPointerBackground
-    {
-        void OnPointerDown(in PointerInput input);
-        void OnPointerUp(in PointerInput input);
-        void OnPointerMove(in PointerInput input);
-        void OnPointerLeave();
-        void OnWheel(in PointerInput input, int delta);
-        /// <summary>返回 true = 处理了(调用方标 Handled)。</summary>
-        bool OnKeyDown(PointerKey key, PointerModifiers modifiers);
-        PointerManipulation OnManipulationStarting();
-        void OnManipulationDelta(double translateX, double scaleX, HevoPoint origin);
-
-        /// <summary>认领的按下:停惯性、武装 hover,并在按下点就地投影一次十字光标。</summary>
-        void OnPressClaimed(HevoPoint canvasPosition);
-
-        /// <summary>只接受点击的区域被拖出阈值:从按下点开始平移(宿主坐标)。返回 false = 没开平移(Pan 关闭)。</summary>
-        bool BeginPanFrom(HevoPoint hostPosition);
-
-        /// <summary>手势进行中:屏蔽触屏 Manipulation、鼠标离开不清 hit;hideCrosshair 时清掉并暂停十字光标。</summary>
-        void SetGestureActive(bool active, bool hideCrosshair);
-
-        TimeSpan DoubleClickInterval { get; }
-        double DoubleClickMaxMovement { get; }
-    }
-
-    /// <summary>
-    /// 指针路由器的状态机(不含任何平台类型)。按下时裁决点中了谁,之后的移动 / 松开 / 取消都发给它;
-    /// 没点中就什么都不做,事件照常流到 <see cref="Features.ChartInteractionFeature"/>。
+    /// 指针路由器(不含任何平台类型)。一次输入依次走:捕获者(进行中的区域手势)→ 区域裁决 → 行为链(<see cref="PointerBehaviorChain"/>,
+    /// 内置的平移 / 缩放 / 十字光标等)。按下时裁决点中了谁,之后的移动 / 松开 / 取消都发给它;没点中就交给行为链。
+    /// 被区域认领的按下行为链也会收到(带 <see cref="PointerRoute.ClaimedAbove"/>),只做停惯性、武装 hover 这类"任何按下都要做的事"。
     /// <para>
     /// 每一步往 <see cref="PointerPorts.GesturePort"/> 写一条 <see cref="PointerGesture"/>:持写锁 ForceWrite,
     /// 同步 Watch 在写的当下、同一调用栈里跑完(不慢一帧)。分发途中不允许再分发(防重入);
@@ -133,6 +106,9 @@ namespace Hevo.Charting.Interaction
         private bool _dispatching;
         private bool _cancelPending;
         private long _dispatchingSequence;
+
+        // 最近一次通知行为链的路由状态(区域手势进行中 / 藏十字光标),变了才再通知
+        private bool _notifiedActive, _notifiedHide;
 
         internal bool IsDispatching(long sequence) => _dispatching && _dispatchingSequence == sequence;
 
@@ -177,9 +153,7 @@ namespace Hevo.Charting.Interaction
             var owner = f.Owner;
             var region = f.Region;
 
-            var fallback = _store.Background;
-            var interval = fallback?.DoubleClickInterval ?? TimeSpan.FromMilliseconds(400);
-            double maxMove = fallback?.DoubleClickMaxMovement ?? 6.0;
+            _store.Behaviors.GetDoubleClickWindow(out var interval, out double maxMove);
             bool isSecond = input.Button != PointerButton.Right
                 && _lastPressOwner != null && ReferenceEquals(_lastPressOwner, owner)
                 && _lastPressId == hitId && _lastPressPart == region.Part
@@ -215,7 +189,9 @@ namespace Hevo.Charting.Interaction
                 LeaveHover(input.Position, input.Modifiers);
 
             host.Focus();
-            fallback?.OnPressClaimed(input.Position);
+            // 行为链照样收到这次按下(标明已被认领):停惯性、武装 hover、就地投影十字光标
+            var claimed = PointerEvent.Of(PointerEventKind.Press, input);
+            _store.Behaviors.Dispatch(ref claimed, new PointerRoute(claimedAbove: true, gestureActive: false, hideCrosshair: false));
 
             _pressIsSecondClick = isSecond;
             _state = State.Pressed;
@@ -229,7 +205,7 @@ namespace Hevo.Charting.Interaction
             // 认领的按下一律捕获:拖出图表外仍收得到 Move / 松开,点击也不会因为在外面松手而悬空
             host.Capture();
             _capturing = true;
-            fallback?.SetGestureActive(true, false);
+            NotifyRoute();
 
             DispatchGuarded(PointerPhase.Press, PointerCancelReason.None, input.Position, input.Modifiers);
             return true;
@@ -266,7 +242,7 @@ namespace Hevo.Charting.Interaction
                 _state = State.Dragging;
                 _lastPressOwner = null;    // 拖过的按下不算双击的第一下
                 ApplyCursor(region.DragCursor != PointerCursor.Default ? region.DragCursor : region.Cursor);
-                if (region.HideCrosshairWhileActive) _store.Background?.SetGestureActive(true, true);
+                NotifyRoute();
                 DispatchGuarded(PointerPhase.Begin, PointerCancelReason.None, input.Position, input.Modifiers);
                 return;
             }
@@ -326,6 +302,14 @@ namespace Hevo.Charting.Interaction
             LeaveHover(default, _lastModifiers);
         }
 
+        /// <summary>指针进出宿主,写 <see cref="PointerPorts.IsPointerOver"/>。</summary>
+        internal void SetPointerOver(bool over)
+        {
+            var board = _host?.Board;
+            if (board == null || board.IsDisposed) return;
+            using (board.AcquireWriteLock()) board.WriteIfChanged(_ports.IsPointerOver, over);
+        }
+
         /// <summary>业务在回调里请求取消(<see cref="PointerGesture.CancelGesture"/>):先记下,这次分发结束后再取消。</summary>
         internal void RequestCancel()
         {
@@ -379,15 +363,14 @@ namespace Hevo.Charting.Interaction
 
         private void SupersedeByPan(in PointerInput input)
         {
-            var fallback = _store.Background;
             var pressHost = _pressHostPos;
             var press = _pressPos;
             var button = _button;
             var owner = _owner; var region = _region!; int regionId = _regionId;
-            // 先回空闲再分发。捕获先不放:平移接手就转给它(由 ChartInteractionFeature 松手时释放),接不了再释放
+            // 先回空闲再分发。捕获先不放:行为链接手(平移 / 框选)就转给它(它松手时释放),没人接再释放
             bool hadCapture = _capturing;
             _state = State.Idle; _owner = null; _region = null; _capturing = false;
-            fallback?.SetGestureActive(false, false);
+            NotifyRoute();
             ApplyCursor(PointerCursor.Default);
             _lastPressOwner = null;
 
@@ -402,8 +385,31 @@ namespace Hevo.Charting.Interaction
                 throw;
             }
 
-            if (fallback != null && fallback.BeginPanFrom(pressHost)) _host?.HandOverCapture();
-            else if (hadCapture) _host?.ReleaseCapture();
+            // 区域输了:把这次按下原样(按下点、按下的键、现在的修饰键)重放给行为链,跟没点中区域一样走双击 / 框选 / 平移
+            var host = _host;
+            int captures = host?.BackgroundCaptureCount ?? 0;
+            var replay = PointerEvent.Of(PointerEventKind.Press, new PointerInput(press, pressHost, button, input.Modifiers, input.TimestampMs));
+            RouteToBehaviors(ref replay);
+            if (host != null && host.BackgroundCaptureCount != captures) host.HandOverCapture();
+            else if (hadCapture) host?.ReleaseCapture();
+        }
+
+        /// <summary>交给行为链,带上当前的路由状态。返回 true = 有行为拦下了(键盘据此标 Handled)。</summary>
+        internal bool RouteToBehaviors(ref PointerEvent e)
+            => _store.Behaviors.Dispatch(ref e, new PointerRoute(claimedAbove: false, gestureActive: _state != State.Idle, hideCrosshair: HideCrosshairNow));
+
+        private bool HideCrosshairNow => _state == State.Dragging && _region != null && _region.HideCrosshairWhileActive;
+
+        /// <summary>区域手势开始 / 结束、要不要藏十字光标变了,通知行为链(触屏屏蔽、离开不清 hit、十字光标暂停 / 恢复)。</summary>
+        private void NotifyRoute()
+        {
+            bool active = _state != State.Idle;
+            bool hide = HideCrosshairNow;
+            if (active == _notifiedActive && hide == _notifiedHide) return;
+            _notifiedActive = active;
+            _notifiedHide = hide;
+            var e = new PointerEvent { Kind = PointerEventKind.RouteChanged };
+            _store.Behaviors.Dispatch(ref e, new PointerRoute(claimedAbove: false, gestureActive: active, hideCrosshair: hide));
         }
 
         private void CancelActive(PointerCancelReason reason, HevoPoint position, PointerModifiers modifiers)
@@ -433,7 +439,7 @@ namespace Hevo.Charting.Interaction
                 _capturing = false;
                 _host?.ReleaseCapture();
             }
-            if (wasActive) _store.Background?.SetGestureActive(false, false);
+            if (wasActive) NotifyRoute();
             ApplyCursor(_hoverOwner != null ? HoverCursor() : PointerCursor.Default);
         }
 

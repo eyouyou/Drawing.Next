@@ -380,5 +380,9 @@ namespace Hevo.Charting.Interaction
         /// <summary>只由路由器写。Watch 它,再用 <see cref="PointerGesture.IsFor"/> 挑出自己的。</summary>
         [PortDirection(PortDirection.Output)]
         public DataPort<PointerGesture> GesturePort { get; } = new("Pointer_Gesture");
+
+        /// <summary>指针是否在本图表上(进入 true、离开 false)。只由路由器写;想知道"这次十字光标是不是我这张图产生的"读它(联动 dashboard 里 hit 端口是镜像的)。</summary>
+        [PortDirection(PortDirection.Output)]
+        public DataPort<bool> IsPointerOver { get; } = new("Pointer_IsOver");
     }
 }
