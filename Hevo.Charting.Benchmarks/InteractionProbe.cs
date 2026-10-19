@@ -368,7 +368,7 @@ namespace Hevo.Charting.Benchmarks
         /// <summary>一次读到的可观测状态。</summary>
         private readonly record struct Snap(
             RealRange Active, PointerHitState? Hit, double Price, bool LineHot, bool MeasureActive, bool BoxActive,
-            string Cursor, int Commits, double LastCommit, float LineY, string Focus, bool Foreground)
+            string Cursor, int Commits, double LastCommit, float LineY, string Focus, bool Foreground, Point WpfMouse)
         {
             public int? HitIndex => Hit?.Hit.LogicalIndex;
         }
@@ -542,7 +542,8 @@ namespace Hevo.Charting.Benchmarks
                 var focus = Keyboard.FocusedElement;
                 string focusName = focus == null ? "(无)" : ReferenceEquals(focus, _rig.Cell) ? "主图" : focus.GetType().Name;
                 return new Snap(active, hit, price, hot, measure, box, cursor, s.Commits.Count,
-                    s.Commits.Count > 0 ? s.Commits[^1] : double.NaN, lineY, focusName, Native.GetForegroundWindow() == _hwnd);
+                    s.Commits.Count > 0 ? s.Commits[^1] : double.NaN, lineY, focusName, Native.GetForegroundWindow() == _hwnd,
+                    Mouse.GetPosition(_rig.Cell.DrawingCanvas));
             });
 
             private (double Domain, RealRange Range) DomainAt(double x) => Ui(() =>
@@ -775,6 +776,7 @@ namespace Hevo.Charting.Benchmarks
                 var (d1, _) = DomainAt(x1);
                 bool boxMid = false;
                 RealRange midRange = default;
+                Point wpfMid = default;
                 string? shotMid = null;
                 KeyDown(Native.VK_SHIFT);
                 Thread.Sleep(50);
@@ -783,6 +785,7 @@ namespace Hevo.Charting.Benchmarks
                     var s = Read();
                     boxMid = s.BoxActive;
                     midRange = s.Active;
+                    wpfMid = s.WpfMouse;
                     shotMid = Shot(id, "drag");
                 });
                 Thread.Sleep(30);
@@ -793,7 +796,7 @@ namespace Hevo.Charting.Benchmarks
                 bool fit = Math.Abs(after.Active.Min - d0) <= 1.5 && Math.Abs(after.Active.Max - d1) <= 1.5;
                 bool pass = boxMid && Same(midRange, range0) && !after.BoxActive && fit;
                 return Res(id, pass, $"拖动中有选框、视口不动;松手缩放到选框 ≈ [{d0:F1}, {d1:F1}]",
-                    $"拖动中 选框={boxMid},视口 {R(midRange)};松手后 选框={after.BoxActive},视口 {R(after.Active)}(原 {R(range0)})", shotMid ?? shot);
+                    $"拖动中 选框={boxMid},视口 {R(midRange)},指针 x={x1:F1}(WPF 看到 {wpfMid.X:F1});松手后 选框={after.BoxActive},视口 {R(after.Active)}(原 {R(range0)})", shotMid ?? shot);
             }
 
             private CheckResult C5(int id)
@@ -920,7 +923,7 @@ namespace Hevo.Charting.Benchmarks
                             && after.Commits == 1 && Math.Abs(after.LastCommit - after.Price) < 1e-9
                             && Same(after.Active, s0.Active);
                 return Res(id, pass, "拖动中价格跟着变、线在指针下、视口不动;松手 OnCommitted 调一次,值 = 最终价格",
-                    $"价格 {s0.Price:F3} → 拖动中 {mid.Price:F3}(线 y={mid.LineY:F1},指针 y={y1:F1})→ 松手 {after.Price:F3};" +
+                    $"价格 {s0.Price:F3} → 拖动中 {mid.Price:F3}(线 y={mid.LineY:F1},指针 y={y1:F1},WPF 看到的指针 y={mid.WpfMouse.Y:F1})→ 松手 {after.Price:F3};" +
                     $"提交 {after.Commits} 次 值={after.LastCommit:F3};视口 {R(s0.Active)} → {R(after.Active)};手势 {g}", shotMid);
             }
 
