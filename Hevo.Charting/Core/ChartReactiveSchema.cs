@@ -42,6 +42,8 @@ namespace Hevo.Charting.Core
         {
             base.EnsureBaseFeatures();
             this.Add(new Features.ViewportPortsFeature());
+            // 指针路由器:同样每个 schema 一份、拔不掉;没有区域时不做任何事
+            this.Add(new Interaction.PointerRouterFeature());
         }
     }
 }

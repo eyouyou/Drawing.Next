@@ -156,6 +156,9 @@ namespace Hevo.Charting.Core
         /// </summary>
         public IReadOnlyList<Feature> ListFeatures() => _features.ToArray();
 
+        /// <summary>Feature 在执行顺序里的位置(未装配为 -1)。</summary>
+        internal int OrderOf(Feature feature) => Array.IndexOf(_orderedFeatures, feature);
+
         /// <summary>订阅注册表:port → Feature 集合 + 脏队列。Feature 在 OnCompose 中通过 ctx 隐式登记,ProjectAll 弹脏。</summary>
         public SubscriptionRegistry Registry { get; private set; } = null!;
 

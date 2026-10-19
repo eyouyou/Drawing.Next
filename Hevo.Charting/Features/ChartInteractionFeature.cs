@@ -136,7 +136,7 @@ namespace Hevo.Charting.Features
     /// <b>数据流</b>:UI 事件(鼠标/触屏/键盘) → 手势翻译 → 写 <see cref="Viewport.UserRange"/> / <see cref="PointerHitPort"/> → ViewportManager 钳制成 ActiveRange → 全图 OnProject 重算。
     /// </para>
     /// </summary>
-    public class ChartInteractionFeature : ChartFeature
+    public class ChartInteractionFeature : ChartFeature, Interaction.IPointerFallback
     {
         // 铁律：交互运算必须在布局之前完成，确保后续的图层拿到的是最新视口
         public override FeaturePhase Phase => FeaturePhase.PreLayout;
@@ -228,10 +228,20 @@ namespace Hevo.Charting.Features
         // Hover 路径写 PointerHitPort 前必须 _isHoverArmed == true。
         private bool _isHoverArmed = true;
 
+        // --- 指针路由器接管的手势(区域认领了按下)---
+        // 认领的按下在 Preview 里被标 Handled,本 Feature 的冒泡处理器收不到;路由器经 IPointerFallback 代为触发
+        // "任意按下都要做的事",并在手势进行中屏蔽触屏、鼠标离开不清 hit、按需暂停十字光标。
+        private bool _routerGestureActive;
+        private bool _routerHideCrosshair;
+        private RenderContext? _composeCtx;
+
         protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             // hover 武装初值:RequireClickToActivate 为 true 时进入"未武装,等单击"状态
             _isHoverArmed = !RequireClickToActivate;
+            _composeCtx = ctx;
+            _routerGestureActive = _routerHideCrosshair = false;
+            chart.PointerRegions.Fallback = this;
 
             // 框选缩放图层 (Interaction 层级,与 CrosshairLayer 共栖)
             AttachLayer(_box.Layer);
@@ -339,7 +349,7 @@ namespace Hevo.Charting.Features
             WithBoard(this.OnMouse(UIElement.MouseLeaveEvent)).Subscribe(c =>
             {
                 _lastMousePos = null;
-                if (!_isPanning && !_box.IsActive) using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(PointerHitPort, null);
+                if (!_isPanning && !_box.IsActive && !_routerGestureActive) using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(PointerHitPort, null);
             }).OwnedBy(this);
 
             // 4. 鼠标移动:框选刷新 / 平移采样 / Hover
@@ -362,7 +372,7 @@ namespace Hevo.Charting.Features
                     return;
                 }
 
-                if (SupportedModes.HasFlag(ChartInteractionMode.Hover) && _isHoverArmed)
+                if (SupportedModes.HasFlag(ChartInteractionMode.Hover) && _isHoverArmed && !_routerHideCrosshair)
                 {
                     using (c.Board.AcquireUpgradeableReadLock())
                     {
@@ -413,7 +423,7 @@ namespace Hevo.Charting.Features
                 // 只在需要时配置:任何 Pan 或 Zoom 模式启用时挂上;否则保持 None 让 WPF 走 mouse promote
                 bool wantPan = SupportedModes.HasFlag(ChartInteractionMode.Pan);
                 bool wantZoom = SupportedModes.HasFlag(ChartInteractionMode.Zoom);
-                if (!wantPan && !wantZoom) { c.Event.Mode = ManipulationModes.None; return; }
+                if ((!wantPan && !wantZoom) || _routerGestureActive) { c.Event.Mode = ManipulationModes.None; return; }
 
                 c.Event.ManipulationContainer = chart.DrawingCanvas;
                 var mode = ManipulationModes.None;
@@ -425,6 +435,7 @@ namespace Hevo.Charting.Features
             // 8. 触屏 Manipulation:Delta 翻译为 ApplyPan/ApplyZoom
             WithBoard(this.OnUIEvent<ManipulationDeltaEventArgs>(UIElement.ManipulationDeltaEvent)).Subscribe(c =>
             {
+                if (_routerGestureActive) return;
                 _inertia.Stop();
                 using (c.Board.AcquireWriteLock()) c.Board.WriteIfChanged(PointerHitPort, null);
 
@@ -451,7 +462,7 @@ namespace Hevo.Charting.Features
 
                     if (!activeRange.IsValid || plotArea.IsEmpty || scaleStrategy == null) return;
 
-                    if (_lastMousePos.HasValue && !_isPanning && !_box.IsActive && _isHoverArmed)
+                    if (_lastMousePos.HasValue && !_isPanning && !_box.IsActive && _isHoverArmed && !_routerHideCrosshair)
                         UpdatePointerStateFromMouse(plotArea, scaleStrategy, board, activeRange, _lastMousePos.Value);
                 }
             });
@@ -942,6 +953,72 @@ namespace Hevo.Charting.Features
                     centerX,
                     globalIndex,    // 删 Slicer 后世界索引 == 数组下标，LocalIndex 无意义，直接用 world
                     isOutOfBounds));
+            }
+        }
+
+        protected override void OnDecompose()
+        {
+            if (ReferenceEquals(Chart.PointerRegions.Fallback, this)) Chart.PointerRegions.Fallback = null;
+            _composeCtx = null;
+            base.OnDecompose();
+        }
+
+        // ==========================================
+        // 指针路由器的兜底接口(internal,业务看不到)
+        // ==========================================
+
+        void Interaction.IPointerFallback.OnPressClaimed(HevoPoint canvasPosition)
+        {
+            // 跟 MouseDown 开头"任意按下都要做的事"一致:停惯性、武装 hover;
+            // 再就地投影一次十字光标(RequireClickToActivate 时单击武装后不挪鼠标也看得到)
+            _inertia.Stop();
+            _isHoverArmed = true;
+            _lastMousePos = canvasPosition;
+            ProjectHoverAtLastPosition();
+        }
+
+        bool Interaction.IPointerFallback.BeginPanFrom(HevoPoint hostPosition)
+        {
+            // 同 MouseDown 的 ③ 普通平移,只是起点是区域认领时的按下点
+            if (!SupportedModes.HasFlag(ChartInteractionMode.Pan)) return false;
+            var board = CurrentBoard;
+            if (board == null) return false;
+            _isPanning = true;
+            _lastPanPos = hostPosition;
+            _inertia.ResetSamples();
+            using (board.AcquireWriteLock()) board.WriteIfChanged(PointerHitPort, null);
+            Chart.CaptureMouse();
+            return true;
+        }
+
+        void Interaction.IPointerFallback.SetGestureActive(bool active, bool hideCrosshair)
+        {
+            _routerGestureActive = active;
+            bool hide = active && hideCrosshair;
+            if (hide == _routerHideCrosshair) return;
+            _routerHideCrosshair = hide;
+            var board = CurrentBoard;
+            if (board == null) return;
+            if (hide) { using (board.AcquireWriteLock()) board.WriteIfChanged(PointerHitPort, null); }
+            else ProjectHoverAtLastPosition();   // 恢复十字光标:不用等下一次移动
+        }
+
+        TimeSpan Interaction.IPointerFallback.DoubleClickInterval => DoubleClickResetConfig.MaxInterval;
+        double Interaction.IPointerFallback.DoubleClickMaxMovement => DoubleClickResetConfig.MaxMovementPx;
+
+        private void ProjectHoverAtLastPosition()
+        {
+            var ctx = _composeCtx;
+            var board = CurrentBoard;
+            if (ctx == null || board == null || !_lastMousePos.HasValue || !_isHoverArmed
+                || !SupportedModes.HasFlag(ChartInteractionMode.Hover)) return;
+            using (board.AcquireUpgradeableReadLock())
+            {
+                var activeRange = board.Read(Viewport.ActiveRange);
+                var scaleStrategy = ctx.Shared().Read<ScaleStrategyTrait>();
+                var plotArea = ctx.GetPlotArea();
+                if (activeRange.IsValid && scaleStrategy != null && !plotArea.IsEmpty)
+                    UpdatePointerStateFromMouse(plotArea, scaleStrategy, board, activeRange, _lastMousePos.Value);
             }
         }
 

@@ -48,10 +48,20 @@ namespace Hevo.Charting.CodeAnalysis
                 // 抓捕黑板写入动作
                 if (targetMethod == "Write" || targetMethod == "WriteIfChanged" || targetMethod == "Publish")
                 {
+                    // ctx.Pointer().Publish(...) 发布指针区域,语义同 Trait(随帧提交、不写黑板),是 OnProject 的本职
+                    if (targetMethod == "Publish" && IsPointerRegionPublish(context, invocation)) continue;
                     var diagnostic = Diagnostic.Create(Rule, invocation.GetLocation(), targetMethod);
                     context.ReportDiagnostic(diagnostic);
                 }
             }
+        }
+
+        private static bool IsPointerRegionPublish(SyntaxNodeAnalysisContext context, InvocationExpressionSyntax invocation)
+        {
+            var symbol = context.SemanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+            var type = symbol?.ContainingType;
+            return type != null && type.Name == "PointerPublisher"
+                && type.ContainingNamespace?.ToDisplayString() == "Hevo.Charting.Interaction";
         }
 
         private string GetMethodName(InvocationExpressionSyntax invocation)
