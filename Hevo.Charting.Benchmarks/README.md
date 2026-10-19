@@ -575,6 +575,28 @@ dotnet run -c Release -- --latency-probe [--samples=150] [--bars=2000] [--out=la
 
 **实测:待补**。2026-10-08 那轮测量机是远程桌面会话(RenderTier 0),按上面的要求跳过了,需要在本机直显时补跑。
 
+## 交互回归 (`--interaction-probe`, [InteractionProbe](InteractionProbe.cs))
+
+```bash
+dotnet run -c Release -- --interaction-probe [--out=interaction-probe] [--only=1,4,10] [--bars=2000]
+```
+
+用 `SendInput` 注入**真实的系统鼠标 / 键盘输入**,在一张真图(K 线主图 + 成交量副图,`EnableStandard` 开
+`RequireClickToActivate` / `DismissOnEscape` / `Modes = All`,加可拖价格线和 Ctrl 测量)上把内置交互和指针区域走一遍。
+走的是 Windows 输入队列 → WPF 输入管线 → `WpfPointerAdapter` → 路由器 / 行为链,单元测试覆盖不到的鼠标捕获时序、焦点、
+系统双击判定、修饰键状态在这里都是真的。
+
+每项断言黑板上看得到的状态(视口 `ActiveRange`、十字光标命中、价格端口、手势端口相位、测量 / 框选状态、光标形状),
+在 `--out` 目录留一张截图(拖动中的截图带 `-drag` 后缀),输出 PASS / FAIL 表(`interaction-probe.md`)。
+退出码:0 = 全过;1 = 有失败;2 = 中止(桌面锁定、注入的输入到不了窗口、窗口不在前台);99 = 异常。
+
+场景:单击武装后十字光标跟随、拖动平移、甩动惯性(甩 5 次统计)、惯性中按键即停、Shift 框选、双击复原、滚轮锚点缩放、
+←/→ 步进与 ↑/↓ 不动、Esc 解除十字光标、价格线悬停 / 拖动 / 拖动中 Esc / 单击、Ctrl 测量与不按 Ctrl 平移、拖线时滚轮,
+外加一项只记录不判定的:旧式 `OnMouse` 标 Handled 是否还挡平移。
+
+> ⚠️ 约 40 秒,运行时会移动鼠标、按键(Esc / 空格 / 方向键 / Shift / Ctrl),期间不要碰鼠标键盘;结束后光标放回原处。
+> 按键前确认探针窗口在前台,不是就中止,不会往别的程序里打字。远程桌面下也能跑(结果有效),截图是远程会话的画面。
+
 ## 增量核心路径微基准 ([IncrementalCoreBenchmarks](IncrementalCoreBenchmarks.cs))
 
 ```bash
