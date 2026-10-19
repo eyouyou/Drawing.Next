@@ -54,12 +54,14 @@ namespace Hevo.Charting
         /// <summary>
         /// 绑定鼠标事件并注入当前 Feature 拓扑上下文
         /// </summary>
+        [Obsolete("图表上的鼠标输入改用指针区域:OnProject 里 ctx.Pointer().Publish(region),OnCompose 里 flow.WatchPointer(...)。直接订 WPF 事件不参与路由器的裁决,标 Handled 也挡不住内置平移。")]
         public static IRenderFlow<MouseEventArgs> OnMouse(this ChartFeature feature, RoutedEvent routedEvent)
             => feature.OnUIEvent<MouseEventArgs>(routedEvent);
 
         /// <summary>
         /// 绑定键盘事件并注入当前 Feature 拓扑上下文
         /// </summary>
+        [Obsolete("图表上的键盘输入由路由器分发(Esc 给手势 / 模态区域,其余给行为链);直接订 WPF 事件不参与路由。")]
         public static IRenderFlow<KeyEventArgs> OnKey(this ChartFeature feature, RoutedEvent routedEvent)
             => feature.OnUIEvent<KeyEventArgs>(routedEvent);
 
@@ -72,6 +74,7 @@ namespace Hevo.Charting
         /// <summary>
         /// 绑定触控事件并注入当前 Feature 拓扑上下文
         /// </summary>
+        [Obsolete("图表上的触屏输入由路由器分发给行为链;直接订 WPF 事件不参与路由。")]
         public static IRenderFlow<TouchEventArgs> OnTouch(this ChartFeature feature, RoutedEvent routedEvent)
             => feature.OnUIEvent<TouchEventArgs>(routedEvent);
     }

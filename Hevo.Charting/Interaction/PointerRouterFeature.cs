@@ -51,13 +51,11 @@ namespace Hevo.Charting.Interaction
             _cell = chart;
             _router = new PointerRouter(store, _ports);
             store.Listener = _router;
-            _adapter = new WpfPointerAdapter(chart, _router, store, () => CurrentBoardOrNull(), () => ctx.GetPlotArea(),
+            _adapter = new WpfPointerAdapter(chart, _router, store, () => CurrentBoardOrNull, () => ctx.GetPlotArea(),
                 () => ctx.Shared().Read<PointerSettingsTrait>()?.DragThreshold ?? PointerSettingsTrait.DefaultDragThreshold);
             RegisterDisposable(_adapter);
         }
 
-        // 帧外(输入事件)取当前黑板;卸载后为 null,路由器据此不分发
-        private DataBlackboard? CurrentBoardOrNull() => _cell != null ? CurrentBoard : null;
 
         protected override void OnProject(FeatureContext ctx) { }
 

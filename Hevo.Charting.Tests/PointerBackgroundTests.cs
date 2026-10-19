@@ -12,7 +12,7 @@ using Rig = Hevo.Charting.Tests.PointerRouterTests.Rig;
 namespace Hevo.Charting.Tests
 {
     /// <summary>
-    /// 路由器成为唯一输入入口之后:ChartInteractionFeature 是兜底处理器、ElementPlotFeatureBase 改发布区域。
+    /// 路由器成为唯一输入入口之后:ChartInteractionFeature 往行为链上装内置交互、ElementPlotFeatureBase 改发布区域。
     /// 现有交互测试原样通过(行为不变)之外,这里补:源码不再碰 WPF 输入、旧配置照常生效、新开关默认关、
     /// 元素悬停 / 双击的默认行为跟原来一致。
     /// </summary>
@@ -46,7 +46,7 @@ namespace Hevo.Charting.Tests
         public void Source_WpfInputOnlyInAdapter()
         {
             var dir = Path.Combine(RepoRoot(), "Hevo.Charting", "Interaction");
-            var offenders = Directory.GetFiles(dir, "*.cs")
+            var offenders = Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories)
                 .Where(f => Path.GetFileName(f) != "WpfPointerAdapter.cs" && File.ReadAllText(f).Contains("System.Windows.Input"))
                 .ToArray();
             Assert.Empty(offenders);

@@ -62,10 +62,10 @@ namespace Hevo.Charting.Interaction
 
         internal IPointerRegionListener? Listener { get; set; }
 
-        /// <summary>兜底处理器(ChartInteractionFeature 装配时登记):没被区域认领的输入都交给它。</summary>
-        internal IPointerBackground? Background { get; set; }
+        /// <summary>行为链:没被区域拿走的输入按顺序交给它(ChartInteractionFeature 装配时往里装内置交互)。随 cell 存在,跟区域表一样按 Feature 摘除。</summary>
+        internal PointerBehaviorChain Behaviors { get; } = new();
 
-        /// <summary>宿主能力(WPF 适配器登记),兜底处理器抓鼠标、要帧时钟用。</summary>
+        /// <summary>宿主能力(WPF 适配器登记),行为抓鼠标、要帧时钟用。</summary>
         internal IPointerHost? Host { get; set; }
 
         /// <summary>当前生效的区域数。</summary>
@@ -147,6 +147,7 @@ namespace Hevo.Charting.Interaction
         internal void RemoveOwner(Feature owner)
         {
             Listener?.OnOwnerRemoving(owner);
+            Behaviors.Remove(owner);
             if (!_owners.TryGetValue(owner, out var e)) return;
             _owners.Remove(owner);
             _entries.Remove(e);
