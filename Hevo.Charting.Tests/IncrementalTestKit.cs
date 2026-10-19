@@ -42,6 +42,33 @@ namespace Hevo.Charting.Tests
         {
             using (board.BeginTransaction()) board.WriteIfChanged(port, value);
         }
+
+        /// <summary>读锁内取版本号(GetVersion 要求持锁)。</summary>
+        public static VersionToken VersionOf(this DataBlackboard board, object port)
+        {
+            using (board.AcquireReadLock()) return board.GetVersion(port);
+        }
+
+        /// <summary>读锁内取引用版本(GetIdentityVersion 要求持锁)。</summary>
+        public static VersionToken IdentityOf(this DataBlackboard board, object port)
+        {
+            using (board.AcquireReadLock()) return board.GetIdentityVersion(port);
+        }
+
+        /// <summary>挂一个端口写入观察者(跟 Schema 判脏同一条通道);Dispose 摘掉。</summary>
+        public static IDisposable ObservePorts(this DataBlackboard board, Action<object> onPortWritten)
+        {
+            var observer = new DelegateBoardObserver(onPortWritten);
+            board.AddObserver(observer);
+            return new Hevo.Charting.DisposableAction(() => board.RemoveObserver(observer));
+        }
+
+        private sealed class DelegateBoardObserver : IBoardObserver
+        {
+            private readonly Action<object> _onPortWritten;
+            public DelegateBoardObserver(Action<object> onPortWritten) => _onPortWritten = onPortWritten;
+            public void OnPortWritten(object port) => _onPortWritten(port);
+        }
     }
 
     // ── 探针 Trait ──────────────────────────────────────────────────────────────

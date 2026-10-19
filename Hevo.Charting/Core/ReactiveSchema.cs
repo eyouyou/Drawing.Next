@@ -94,7 +94,7 @@ namespace Hevo.Charting.Core
     /// 4) IPausable 生命周期:挂载在 ChartCell.Loaded/Unloaded/IsVisibleChanged 上自动 Suspend/Resume,Tab 切换零开销。
     /// </para>
     /// </summary>
-    public abstract class ReactiveSchema : ChartSchema, IFeatureContext, IFeatureProjector, IDisposableHost, Hevo.Charting.Abstractions.IPausable
+    public abstract class ReactiveSchema : ChartSchema, IFeatureContext, IFeatureProjector, IDisposableHost, Hevo.Charting.Abstractions.IPausable, IBoardObserver
     {
         // 主数据流当前推送的最新 board 引用。volatile 保证 cross-thread 读到的不是部分初始化值。
         private volatile DataBlackboard? _latestBoard;
@@ -805,7 +805,7 @@ namespace Hevo.Charting.Core
                 throw new InvalidOperationException(
                     $"{GetType().Name}.DefineDataFlow 必须调用 .BindTo(chart) 注册主数据流");
 
-            // 3b. 主数据流挂钩:每次推送时对齐 _latestBoard + OnPortUpdated 监听
+            // 3b. 主数据流挂钩:每次推送时对齐 _latestBoard + 端口写入观察者
             //
             // ⚠ tracer attach 必须在这里(Do callback)做,而不是后面 featureFlow.Plot 里 ——
             // Do() 跑在 features' Watch subscribers 之前,把 tracer 提前 attach 到 board,
@@ -819,9 +819,9 @@ namespace Hevo.Charting.Core
             {
                 if (!ReferenceEquals(_latestBoard, board))
                 {
-                    if (_latestBoard != null) _latestBoard.OnPortUpdated -= Blackboard_OnPortUpdated;
+                    if (_latestBoard != null) _latestBoard.RemoveObserver(this);
                     _latestBoard = board;
-                    board.OnPortUpdated += Blackboard_OnPortUpdated;
+                    board.AddObserver(this);
 #if DEBUG
                     var trace = DevTools.TracerRegistry.Get(this);
                     if (trace != null) DevTools.TracerRegistry.Attach(board, trace);
@@ -961,7 +961,7 @@ namespace Hevo.Charting.Core
             // 1. 斩断与底层物理黑板的全局监听 (防止极其严重的内存泄漏！)
             if (_latestBoard != null)
             {
-                _latestBoard.OnPortUpdated -= Blackboard_OnPortUpdated;
+                _latestBoard.RemoveObserver(this);
             }
 
             // 2. 逆向遍历并销毁所有 Feature (先装配的后销毁，严格符合洋葱模型生命周期)
@@ -990,7 +990,7 @@ namespace Hevo.Charting.Core
         /// <summary>
         /// 当黑板上的具体引脚发生写入且数据真实改变时触发
         /// </summary>
-        private void Blackboard_OnPortUpdated(object port)
+        void IBoardObserver.OnPortWritten(object port)
         {
             var chart = _attachedChart;
             var registry = Registry;

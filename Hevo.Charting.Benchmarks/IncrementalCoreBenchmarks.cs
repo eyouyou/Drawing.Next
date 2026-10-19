@@ -153,7 +153,7 @@ namespace Hevo.Charting.Benchmarks
 
     /// <summary>
     /// DataBlackboard 事务:一个事务写 K 个端口。每个端口有 1 个 Feature 订阅(跟 ReactiveSchema 一样经
-    /// OnPortUpdated → SubscriptionRegistry 标脏),事务后弹出脏名单。
+    /// IBoardObserver → SubscriptionRegistry 标脏),事务后弹出脏名单。
     /// Unchanged 是值防抖命中(写同值,不通知),Changed 是真实写入。
     /// </summary>
     [MemoryDiagnoser]
@@ -177,7 +177,14 @@ namespace Hevo.Charting.Benchmarks
                 _ports[i] = new DataPort<double>($"B{i}");
                 _registry.Subscribe(_ports[i], new BenchFeature(_ports[i], withLayer: false));
             }
-            _board.OnPortUpdated += p => _registry.NotifyPortUpdated(p);
+            _board.AddObserver(new RegistryObserver(_registry));
+        }
+
+        private sealed class RegistryObserver : IBoardObserver
+        {
+            private readonly SubscriptionRegistry _registry;
+            public RegistryObserver(SubscriptionRegistry registry) => _registry = registry;
+            public void OnPortWritten(object port) => _registry.NotifyPortUpdated(port);
         }
 
         [GlobalCleanup]

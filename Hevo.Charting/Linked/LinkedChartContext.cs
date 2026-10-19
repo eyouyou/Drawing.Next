@@ -168,20 +168,27 @@ namespace Hevo.Charting.Linked
     internal sealed class PortMirror<T> : IPortMirror, IAfterUnlockAction
     {
         private readonly DataPort<T> _port;
+        private readonly object[] _ports;
         private readonly object _gate = new();
         private LinkedChartContext? _owner;
         private T _latest = default!;
         private bool _hasLatest;
 
-        public PortMirror(DataPort<T> port) => _port = port;
+        public PortMirror(DataPort<T> port)
+        {
+            _port = port;
+            _ports = new object[] { port };
+        }
 
+        // 板跟联动同生共死,不单独退订(板 Dispose 时清空 Watch 表)
         public void SubscribeOn(DataBlackboard board, LinkedChartContext owner)
         {
             _owner = owner;
-            board.Subscribe(_port, OnOriginWritten);
+            board.AddWatch(_ports, OnOriginWritten);
         }
 
-        // 调用栈:NotifyPort ← ForceWrite / EndTransaction,均持源板写锁
+        // 调用栈:Commit ← ForceWrite(非事务写当下)/ EndTransaction(事务里所有端口通知完之后),均持源板写锁。
+        // 事务里比"逐端口通知时"晚一点,但这里只记最新值、跨板写在锁外,结果相同。
         private void OnOriginWritten(DataBlackboard origin)
         {
             if (ReferenceEquals(PortMirror.Applying, this)) return;
