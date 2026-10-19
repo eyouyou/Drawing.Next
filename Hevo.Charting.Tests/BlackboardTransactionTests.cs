@@ -25,9 +25,10 @@ namespace Hevo.Charting.Tests
             using var board = new DataBlackboard();
             var portHits = new Dictionary<object, int>();
             int commits = 0, subscriberHits = 0;
-            board.OnPortUpdated += p => portHits[p] = portHits.GetValueOrDefault(p) + 1;
-            board.OnTransactionCommitted += _ => commits++;
-            board.Subscribe(_a, _ => subscriberHits++);
+            board.ObservePorts(p => portHits[p] = portHits.GetValueOrDefault(p) + 1);
+            // 听两个端口的 Watch:一次提交只跑一次,等于"提交次数"
+            board.AddWatch(new object[] { _a, _b }, _ => commits++);
+            board.AddWatch(new object[] { _a }, _ => subscriberHits++);
 
             using (board.BeginTransaction())
             {
@@ -54,8 +55,8 @@ namespace Hevo.Charting.Tests
         {
             using var board = new DataBlackboard();
             int portHits = 0, commits = 0;
-            board.OnPortUpdated += _ => portHits++;
-            board.OnTransactionCommitted += _ => commits++;
+            board.ObservePorts(_ => portHits++);
+            board.AddWatch(new object[] { _a }, _ => commits++);
 
             using (board.BeginTransaction())
             {
@@ -77,13 +78,13 @@ namespace Hevo.Charting.Tests
         {
             using var board = new DataBlackboard();
             board.Write(_a, 1.0);
-            var v1 = board.GetVersion(_a);
+            var v1 = board.VersionOf(_a);
 
             int portHits = 0;
-            board.OnPortUpdated += _ => portHits++;
+            board.ObservePorts(_ => portHits++);
             board.Write(_a, 1.0);
 
-            Assert.Equal(v1, board.GetVersion(_a));
+            Assert.Equal(v1, board.VersionOf(_a));
             Assert.Equal(0, portHits);
         }
 
@@ -91,19 +92,19 @@ namespace Hevo.Charting.Tests
         public void EffectiveWrite_BumpsVersion_ForceWriteBumpsEvenWithSameValue()
         {
             using var board = new DataBlackboard();
-            Assert.Equal(default, board.GetVersion(_a)); // 从未写过 = default 令牌
+            Assert.Equal(default, board.VersionOf(_a)); // 从未写过 = default 令牌
 
             board.Write(_a, 1.0);
-            var v1 = board.GetVersion(_a);
+            var v1 = board.VersionOf(_a);
             Assert.NotEqual(default, v1);
 
             board.Write(_a, 2.0);
-            var v2 = board.GetVersion(_a);
+            var v2 = board.VersionOf(_a);
             Assert.NotEqual(v1, v2);
 
             // ForceWrite 不做值比较:同值也推进版本 → 下游 UsePort 会看到 IsChanged=true
             using (board.BeginTransaction()) board.ForceWrite(_a, 2.0);
-            Assert.NotEqual(v2, board.GetVersion(_a));
+            Assert.NotEqual(v2, board.VersionOf(_a));
         }
 
         [Fact]
@@ -111,8 +112,8 @@ namespace Hevo.Charting.Tests
         {
             using var board = new DataBlackboard();
             int portHits = 0, commits = 0;
-            board.OnPortUpdated += _ => portHits++;
-            board.OnTransactionCommitted += _ => commits++;
+            board.ObservePorts(_ => portHits++);
+            board.AddWatch(new object[] { _a }, _ => commits++);
 
             using (board.AcquireWriteLock())
             {
@@ -134,12 +135,12 @@ namespace Hevo.Charting.Tests
             Task? reader = null;
             bool readerEnteredDuringNotify = true;
 
-            board.OnTransactionCommitted += b =>
+            board.AddWatch(new object[] { _a }, b =>
             {
                 reader = Task.Run(() => { using (b.AcquireReadLock()) { } });
                 // 读线程在写锁释放前必然阻塞;等 200ms 仍未完成即证明锁还被持有
                 readerEnteredDuringNotify = reader.Wait(200);
-            };
+            });
 
             using (board.BeginTransaction()) board.WriteIfChanged(_a, 1);
 
@@ -150,13 +151,13 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void TransactionCommit_FeedsRegistry_FeatureDirtiedOnceForTwoPorts()
         {
-            // 复刻 ReactiveSchema.Blackboard_OnPortUpdated 的接线:board 端口通知 → registry 标脏。
+            // 复刻 ReactiveSchema 作为 IBoardObserver 的接线:board 端口通知 → registry 标脏。
             using var board = new DataBlackboard();
             var registry = new SubscriptionRegistry();
             var feature = new ProbeFeature("f");
             registry.Subscribe(_a, feature);
             registry.Subscribe(_b, feature);
-            board.OnPortUpdated += p => registry.NotifyPortUpdated(p);
+            board.ObservePorts(p => registry.NotifyPortUpdated(p));
 
             using (board.BeginTransaction())
             {
@@ -177,11 +178,11 @@ namespace Hevo.Charting.Tests
             // EndTransaction 先快照脏端口再通知:回调里再写别的端口不会撞上"集合被修改"。
             using var board = new DataBlackboard();
             var notified = new List<object>();
-            board.OnPortUpdated += p =>
+            board.ObservePorts(p =>
             {
                 notified.Add(p);
                 if (ReferenceEquals(p, _a)) board.WriteIfChanged(_c, 42);
-            };
+            });
 
             using (board.BeginTransaction())
             {

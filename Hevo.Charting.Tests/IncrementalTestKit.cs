@@ -42,6 +42,33 @@ namespace Hevo.Charting.Tests
         {
             using (board.BeginTransaction()) board.WriteIfChanged(port, value);
         }
+
+        /// <summary>读锁内取版本号(GetVersion 要求持锁)。</summary>
+        public static VersionToken VersionOf(this DataBlackboard board, object port)
+        {
+            using (board.AcquireReadLock()) return board.GetVersion(port);
+        }
+
+        /// <summary>读锁内取引用版本(GetIdentityVersion 要求持锁)。</summary>
+        public static VersionToken IdentityOf(this DataBlackboard board, object port)
+        {
+            using (board.AcquireReadLock()) return board.GetIdentityVersion(port);
+        }
+
+        /// <summary>挂一个端口写入观察者(跟 Schema 判脏同一条通道);Dispose 摘掉。</summary>
+        public static IDisposable ObservePorts(this DataBlackboard board, Action<object> onPortWritten)
+        {
+            var observer = new DelegateBoardObserver(onPortWritten);
+            board.AddObserver(observer);
+            return new Hevo.Charting.DisposableAction(() => board.RemoveObserver(observer));
+        }
+
+        private sealed class DelegateBoardObserver : IBoardObserver
+        {
+            private readonly Action<object> _onPortWritten;
+            public DelegateBoardObserver(Action<object> onPortWritten) => _onPortWritten = onPortWritten;
+            public void OnPortWritten(object port) => _onPortWritten(port);
+        }
     }
 
     // ── 探针 Trait ──────────────────────────────────────────────────────────────
@@ -74,6 +101,10 @@ namespace Hevo.Charting.Tests
 
         /// <summary>把 protected AttachLayer 暴露给测试在 Compose 委托里用。</summary>
         public void Attach<TLayer>(TLayer layer) where TLayer : IChartLayer => AttachLayer(layer);
+
+        /// <summary>挂层并经 AttachLayer 返回的代理发一份 Trait(Feature 在 OnCompose 里发静态样式的写法)。</summary>
+        public void AttachAndPublish<TLayer, T>(TLayer layer, T trait) where TLayer : IChartLayer where T : class
+            => AttachLayer(layer).PublishData(trait);
 
         protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             => OnComposeAction?.Invoke(this);

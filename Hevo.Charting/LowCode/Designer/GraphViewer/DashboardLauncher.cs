@@ -205,7 +205,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 ctx.RegisterFromConfig(dashboard.SharedPorts);
             }
 
-            var linkedDashboard = new LinkedChartDashboard(ctx);
+            var linkedDashboard = new LinkedChartDashboard(ctx) { IsPaneResizeEnabled = dashboard.EnablePaneResize };
 
             // 2. Phase-1:逐 cell 走 BuildSchemaDeferred —— schema 装配 + 订阅就位,但**不 fire LoadAsync**。
             //    每个 cell 加入 dashboard 顺序固定(Master 在 [0]),ChartCell 默认 IsLoading=false,

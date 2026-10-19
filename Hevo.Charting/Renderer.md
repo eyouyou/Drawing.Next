@@ -74,7 +74,8 @@ public sealed class WpfRenderProvider : IRendererProvider<DrawingContext>
 - 实现 `Render(DrawingBuffer buffer, TContext ctx)`,遍历 `buffer.Commands` 按 `DrawOp` 分发
 - **画刷 / 笔缓存**:把 `IHevoBrush` / `HevoPen` 翻译成后端原生类型,缓存避免每帧 new
 - **像素对齐**:**必须沿用** [Renderers/PixelSnap.cs](Renderers/PixelSnap.cs) 的 `SnapEndpoints` / `InsideStroke` / `Vertex`,所有 stroke 顶点 snap 到 `.5/.0`,跨 backend 同源,保证业务侧渲染像素级一致
-- **DrawOp 完整覆盖**:DrawLine / DrawRectangle / DrawRoundedRectangle / DrawEllipse / DrawPolyline / DrawLineSegments / DrawRectangles / DrawGeometry / DrawText / DrawImage / DrawVideo / PushClip / PushOpacity / PushTransform / Pop。漏一个就有 layer 不工作。(`PushGuidelineSet` 已删除,详见 [06.WPF 渲染规约.md](06.WPF%20渲染规约.md) §3.3)
+- **DrawOp 完整覆盖**:DrawLine / DrawRectangle / DrawRoundedRectangle / DrawEllipse / DrawPolyline / DrawLineSegments / DrawCubicBezier / DrawRectangles / DrawGeometry / DrawPolygon / DrawBand / DrawText / DrawImage / DrawVideo / PushClip / PushOpacity / PushTransform / Pop。漏一个就有 layer 不工作。
+- **填充指令**:DrawPolygon / DrawBand 的图形拆分(NaN 断带、上下穿越分段)不要自己写,实现一个 `IFigureWriter`(struct,Begin / LineTo / End)交给 [Renderers/FillGeometry.cs](Renderers/FillGeometry.cs);填充顶点用 `PixelSnap.FillVertex`、描边顶点用 `Vertex`,非零环绕。规则见 [06 号文档 §4.7](06.WPF%20渲染规约.md)。(`PushGuidelineSet` 已删除,详见 [06.WPF 渲染规约.md](06.WPF%20渲染规约.md) §3.3)
 - **0-GC 热路径**:`Render` 每帧调用,内部循环不允许 LINQ / box / 临时 List 分配
 
 ### 3. 实现 `IRenderer<BitmapBuffer, TContext>` (位图渲染器)
@@ -184,6 +185,7 @@ chart.RenderModeOverride = RenderMode.Bitmap;
 ### 跟 WPF 矢量路径的差异
 
 - 像素对齐沿用 `PixelSnap`,覆盖规则是像素中心采样(无抗锯齿,边四舍五入到像素边界,跟矢量路径同一条规则,见 06 §4.1):水平 / 垂直线、矩形跟 WPF 路径(全图抗锯齿 + 设备像素对齐)逐像素一致(`RasterRendererTests` 截图对比);斜线 / 曲线位图后端是锯齿的,WPF 路径是平滑的。
+- DrawPolygon / DrawBand 的填充顶点先取到设备像素边界(同 WPF 的 `FillVertex`)再进扫描线:横竖边跟 WPF、跟 `FillRect` 逐像素一致(`FillDrawingTests`);斜边同上是锯齿的。边直接进边表、描边点缓冲跨帧复用,上屏 0 分配。
 - `PushOpacity` 逐图元乘透明度(WPF 是整组合成后再乘,组内图元重叠处会略深)。
 - 渐变只取首尾两个色标;ImageBrush / VisualBrush 不支持(该图元跳过)。
 - 文字:字形落在整像素上(WPF 亚像素定位),宽度用 advance 之和;标签框位置可能差 1 像素。

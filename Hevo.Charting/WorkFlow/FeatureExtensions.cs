@@ -225,10 +225,19 @@ namespace Hevo.Charting.WorkFlow
             Action<DataBlackboard> executeAction)
         {
             DataBlackboard? currentBoard = null;
-            Action<DataBlackboard>? dirtyMarker = null;
-            Action<DataBlackboard>? commitHandler = null;
+            IDisposable? watch = null;
             bool hasInitialized = false;
             object switchLock = new object();
+
+            // 脏标志和"只跑脏的"由黑板的 Watch 表管(提交时按注册顺序扫),这里只负责切板与销毁
+            Action<DataBlackboard> onCommit = b =>
+            {
+                // 修复 M5:退订不拿黑板锁,别的线程正在跑的那次提交可能已经读过 Removed 标志、
+                // 还会再调一次本回调,闭包里的 executeAction 可能访问已销毁资源。
+                // 在 switchLock 内复查 currentBoard:DoOnDispose 会先置 null / 切换 board,不匹配即安全退出。
+                lock (switchLock) { if (currentBoard != b) return; }
+                executeAction(b);
+            };
 
             var hookedFlow = flow.Do(board =>
             {
@@ -238,33 +247,9 @@ namespace Hevo.Charting.WorkFlow
                 {
                     if (currentBoard != board)
                     {
-                        if (currentBoard != null)
-                        {
-                            if (dirtyMarker != null) foreach (var port in listenPorts) currentBoard.Unsubscribe(port, dirtyMarker);
-                            if (commitHandler != null) currentBoard.OnTransactionCommitted -= commitHandler;
-                        }
-
+                        watch?.Dispose();
                         currentBoard = board;
-                        bool isDirty = false;
-                        object watchLock = new object();
-
-                        dirtyMarker = _ => { lock (watchLock) isDirty = true; };
-                        commitHandler = b =>
-                        {
-                            // 修复 M5：OnTransactionCommitted 的 event `-=` 是原子的，但 DataBlackboard
-                            // 端 `Invoke` 先把 delegate 读到局部再调用，`-=` 若发生在这两步之间，已排队的
-                            // 调用依旧会落到本 handler，闭包里的 executeAction 可能访问已销毁资源。
-                            // 在 switchLock 内复查 currentBoard：DoOnDispose 会先置 null / 切换 board，
-                            // 不匹配即安全退出。
-                            lock (switchLock) { if (currentBoard != b) return; }
-
-                            bool shouldRun = false;
-                            lock (watchLock) { if (isDirty) { shouldRun = true; isDirty = false; } }
-                            if (shouldRun) executeAction(b);
-                        };
-
-                        foreach (var port in listenPorts) currentBoard.Subscribe(port, dirtyMarker);
-                        currentBoard.OnTransactionCommitted += commitHandler;
+                        watch = board.AddWatch(listenPorts, onCommit);
                     }
 
                     if (!hasInitialized)
@@ -281,70 +266,94 @@ namespace Hevo.Charting.WorkFlow
             {
                 lock (switchLock)
                 {
-                    if (currentBoard != null)
-                    {
-                        if (dirtyMarker != null) foreach (var port in listenPorts) currentBoard.Unsubscribe(port, dirtyMarker);
-                        if (commitHandler != null) currentBoard.OnTransactionCommitted -= commitHandler;
-                        currentBoard = null;
-                        dirtyMarker = null;
-                        commitHandler = null;
-                    }
+                    watch?.Dispose();
+                    watch = null;
+                    currentBoard = null;
                 }
             });
         }
 
+        // CombineLatest / Merge / Join 的公开重载都要在装配作用域里登记一个变换,Build 时串进 schema 主管线。
+        // 变换里只能调不登记的内核再 Wrap:Build 正在遍历变换列表,调回公开重载会再登记一次,遍历期间改列表就抛异常。
         public static IRenderFlow<DataBlackboard> CombineLatest(
             this IRenderFlow<DataBlackboard> flow,
             object[] requiredPorts,
             Action<DataBlackboard> sideEffect)
         {
             sideEffect = BindToComposingFeature(sideEffect);
-            IWorkflow<DataBlackboard> baseFlow = ((IWorkflow<DataBlackboard>)flow).WatchAsync(requiredPorts, b =>
+            var wrapped = flow.Wrap(CombineLatestCore(flow, requiredPorts, sideEffect));
+            FeatureComposeScope.Current?.AddTransform(current => current.Wrap(CombineLatestCore(current, requiredPorts, sideEffect)));
+            return wrapped;
+        }
+
+        private static IWorkflow<DataBlackboard> CombineLatestCore(
+            IWorkflow<DataBlackboard> flow,
+            object[] requiredPorts,
+            Action<DataBlackboard> sideEffect)
+        {
+            return flow.WatchAsync(requiredPorts, b =>
             {
-                for (int i = 0; i < requiredPorts.Length; i++)
-                {
-                    if (b.GetVersion(requiredPorts[i]) == default) return;
-                }
+                // 线程池回调不持锁:版本号字典是普通字典,读它要进读锁;副作用在锁外跑(它可能自己拿写锁)
+                if (!AllPortsWritten(b, requiredPorts)) return;
                 sideEffect(b);
             });
-
-            var wrapped = flow.Wrap(baseFlow);
-            FeatureComposeScope.Current?.AddTransform(current => current.CombineLatest(requiredPorts, sideEffect));
-            return wrapped;
         }
 
         public static IRenderFlow<DataBlackboard> Merge(
             this IRenderFlow<DataBlackboard> source,
             IRenderFlow<DataBlackboard> other)
         {
-            IWorkflow<DataBlackboard> combined = new WorkflowEngine<DataBlackboard>((next, error) =>
+            var wrapped = source.Wrap(MergeCore(source, other));
+            FeatureComposeScope.Current?.AddTransform(current => current.Wrap(MergeCore(current, other)));
+            return wrapped;
+        }
+
+        private static IWorkflow<DataBlackboard> MergeCore(
+            IWorkflow<DataBlackboard> source,
+            IWorkflow<DataBlackboard> other)
+        {
+            return new WorkflowEngine<DataBlackboard>((next, error) =>
             {
                 var sub1 = source.Subscribe(next, error);
                 var sub2 = other.Subscribe(next, error);
-                // Phase 11 / §H.10：CompositeDisposable 多上游 fan-out IPausable
+                // CompositeDisposable 多上游 fan-out IPausable
                 return new CompositeDisposable(sub1, sub2);
             });
-            var wrapped = source.Wrap(combined);
-            FeatureComposeScope.Current?.AddTransform(current => current.Merge(other));
-            return wrapped;
         }
 
         public static IRenderFlow<DataBlackboard> Join(
             this IRenderFlow<DataBlackboard> source,
             params object[] requiredPorts)
         {
-            IWorkflow<DataBlackboard> filtered = ((IWorkflow<DataBlackboard>)source).Where(b =>
-            {
-                foreach (var port in requiredPorts)
-                {
-                    if (b.GetVersion(port).Equals(default(VersionToken)))
-                        return false;
-                }
-                return true;
-            });
-            var wrapped = source.Wrap(filtered);
-            FeatureComposeScope.Current?.AddTransform(current => current.Join(requiredPorts));
+            var wrapped = source.Wrap(JoinCore(source, requiredPorts));
+            FeatureComposeScope.Current?.AddTransform(current => current.Wrap(JoinCore(current, requiredPorts)));
             return wrapped;
+        }
+
+        // Where 在管线释放黑板锁之后才跑,同样要自己进读锁
+        private static IWorkflow<DataBlackboard> JoinCore(IWorkflow<DataBlackboard> source, object[] requiredPorts)
+            => source.Where(b => AllPortsWritten(b, requiredPorts));
+
+        // 每个端口都至少写过一次(版本号不是 default)。读锁可重入(持写锁 / 可升级读锁时进读锁也行);
+        // 黑板已释放 = 管线正在拆,当作没就绪。
+        private static bool AllPortsWritten(DataBlackboard board, object[] ports)
+        {
+            if (board.IsDisposed) return false;
+            try
+            {
+                using (board.AcquireReadLock())
+                {
+                    for (int i = 0; i < ports.Length; i++)
+                    {
+                        if (board.GetVersion(ports[i]) == default) return false;
+                    }
+                    return true;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
         }
 
 

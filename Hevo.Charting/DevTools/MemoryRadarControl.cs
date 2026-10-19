@@ -11,7 +11,7 @@ namespace Hevo.Charting.DevTools
     /// <summary>
     /// 💥 Hevo 物理内存与视口迷你图监控器
     /// </summary>
-    public class MemoryRadarControl : Grid
+    public class MemoryRadarControl : Grid, IBoardObserver
     {
         // 单例 frozen brush:跨所有 MemoryRadarControl 实例共享,且 FlashMemoryExpansion
         // 不再 new 新 brush,数据扩张时直接 swap 引用。Freeze 让 WPF 走 fast-path 渲染。
@@ -80,7 +80,7 @@ namespace Hevo.Charting.DevTools
         {
             if (_monitoredBoard != null)
             {
-                _monitoredBoard.OnPortUpdated -= Blackboard_OnPortUpdated;
+                _monitoredBoard.RemoveObserver(this);
             }
 
             _monitoredBoard = board;
@@ -89,7 +89,7 @@ namespace Hevo.Charting.DevTools
             if (_monitoredBoard != null)
             {
                 // 监听黑板数据变化
-                _monitoredBoard.OnPortUpdated += Blackboard_OnPortUpdated;
+                _monitoredBoard.AddObserver(this);
                 UpdateRadar();
             }
         }
@@ -98,12 +98,12 @@ namespace Hevo.Charting.DevTools
         {
             if (_monitoredBoard != null)
             {
-                _monitoredBoard.OnPortUpdated -= Blackboard_OnPortUpdated;
+                _monitoredBoard.RemoveObserver(this);
                 _monitoredBoard = null;
             }
         }
 
-        private void Blackboard_OnPortUpdated(object port)
+        void IBoardObserver.OnPortWritten(object port)
         {
             if (_vp == null) return;
 

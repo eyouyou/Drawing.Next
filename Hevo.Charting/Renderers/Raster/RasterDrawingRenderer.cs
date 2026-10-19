@@ -245,6 +245,58 @@ namespace Hevo.Charting.Renderers.Raster
                     case DrawOp.DrawGeometry:
                         if (cmd.RefData is string svg) DrawSvg(svg, GetBrush(cmd.Brush), GetPen(cmd.Pen));
                         break;
+                    case DrawOp.DrawPolygon:
+                    {
+                        if (cmd.RefData is not List<HevoPoint> pts || pts.Count < 3) break;
+                        var ps = CollectionsMarshal.AsSpan(pts);
+                        var brush = GetBrush(cmd.Brush);
+                        if (brush.Valid)
+                        {
+                            var w = new FigureWriter(this, null, true, 0f);
+                            _filler.Reset();
+                            if (FillGeometry.Polygon(ps, ref w)) FillFigures(ref w, brush);
+                        }
+                        var pen = GetPen(cmd.Pen);
+                        if (pen != null)
+                        {
+                            var w = new FigureWriter(this, pen, true, PixelSnap.HalfPx(pen.Thickness));
+                            FillGeometry.Polygon(ps, ref w);
+                        }
+                        break;
+                    }
+                    case DrawOp.DrawBand:
+                    {
+                        if (cmd.RefData is not HevoBand band || band.Count < 2) break;
+                        var up = CollectionsMarshal.AsSpan(band.Upper);
+                        var lo = CollectionsMarshal.AsSpan(band.Lower);
+                        var crossed = band.CrossedBrush;
+                        var brush = GetBrush(cmd.Brush);
+                        if (brush.Valid)
+                        {
+                            var w = new FigureWriter(this, null, true, 0f);
+                            _filler.Reset();
+                            FillGeometry.Band(up, lo, crossed != null ? 1 : 0, ref w);
+                            FillFigures(ref w, brush);
+                        }
+                        if (crossed != null)
+                        {
+                            var cb = GetBrush(crossed);
+                            if (cb.Valid)
+                            {
+                                var w = new FigureWriter(this, null, true, 0f);
+                                _filler.Reset();
+                                FillGeometry.Band(up, lo, -1, ref w);
+                                FillFigures(ref w, cb);
+                            }
+                        }
+                        var pen = GetPen(cmd.Pen);
+                        if (pen != null)
+                        {
+                            var w = new FigureWriter(this, pen, false, PixelSnap.HalfPx(pen.Thickness));
+                            FillGeometry.BandEdges(up, lo, ref w);
+                        }
+                        break;
+                    }
                     case DrawOp.DrawText:
                         DrawText(cmd);
                         break;
@@ -518,6 +570,79 @@ namespace Hevo.Charting.Renderers.Raster
                     _shape[idx++] = new Vector2(cx + rx * MathF.Cos(a), cy + ry * MathF.Sin(a));
                 }
             }
+        }
+
+        /// <summary>
+        /// DrawPolygon / DrawBand 的图形输出。填充(pen = null):边直接进扫描线边表,不缓冲顶点;
+        /// 描边:顶点同 polyline 的 Vertex,攒进点缓冲后整条展开。
+        /// </summary>
+        private struct FigureWriter : IFigureWriter
+        {
+            private readonly RasterDrawingRenderer _r;
+            private readonly PenInfo? _pen;
+            private readonly bool _closed;
+            private readonly float _half;
+            private Vector2 _first, _prev;
+            private int _n;
+            public float L, T, R, B;
+            public int Figures;
+
+            public FigureWriter(RasterDrawingRenderer r, PenInfo? pen, bool closed, float half)
+            {
+                _r = r; _pen = pen; _closed = closed; _half = half;
+                _first = _prev = default; _n = 0;
+                L = T = float.MaxValue; R = B = float.MinValue;
+                Figures = 0;
+            }
+
+            public void Begin(HevoPoint p)
+            {
+                Figures++;
+                _n = 0;
+                _first = _prev = Add(p);
+            }
+
+            public void LineTo(HevoPoint p)
+            {
+                var v = Add(p);
+                if (_pen == null) _r._filler.AddEdge(_prev.X, _prev.Y, v.X, v.Y);
+                _prev = v;
+            }
+
+            public void End()
+            {
+                if (_pen == null) _r._filler.AddEdge(_prev.X, _prev.Y, _first.X, _first.Y);
+                else if (_n >= 2) _r.StrokePath(new ReadOnlySpan<Vector2>(_r._pts, 0, _n), _closed, _pen);
+            }
+
+            private Vector2 Add(HevoPoint p)
+            {
+                Vector2 v;
+                if (_pen == null)
+                {
+                    // 顶点取到设备像素边界(同 WPF / Skia 的 FillVertex)。不取整的话 .5 坐标的内部横边会碰上
+                    // 扫描线"上端点 ≤ 采样线"的平局规则,跟 FillRect 的"平局归下"差一行
+                    v = _r.Tx(p);
+                    v = new Vector2(MathF.Floor(v.X + 0.5f), MathF.Floor(v.Y + 0.5f));
+                    if (v.X < L) L = v.X;
+                    if (v.X > R) R = v.X;
+                    if (v.Y < T) T = v.Y;
+                    if (v.Y > B) B = v.Y;
+                }
+                else
+                {
+                    v = _r.Tx(PixelSnap.Vertex(p.X, _half), PixelSnap.Vertex(p.Y, _half));
+                    if (_r._pts.Length == _n) Array.Resize(ref _r._pts, _n * 2);
+                    _r._pts[_n++] = v;
+                }
+                return v;
+            }
+        }
+
+        private void FillFigures(ref FigureWriter w, in BrushInfo brush)
+        {
+            if (w.Figures == 0 || _filler.IsEmpty) return;
+            if (MakePaint(brush, w.L, w.T, w.R, w.B, out var paint)) _filler.Fill(_s, paint);
         }
 
         private void DrawSvg(string svg, in BrushInfo brush, PenInfo? pen)
