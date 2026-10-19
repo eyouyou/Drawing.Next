@@ -41,6 +41,11 @@ namespace Hevo.Charting.Benchmarks
             if (args.Length > 0 && args[0] == "--latency-probe")
                 return LatencyProbe.Run(args);
 
+            // 交互回归(SendInput 注入真实鼠标 / 键盘,走一遍内置交互和指针区域,断言黑板状态 + 截图):
+            //   `dotnet run -c Release -- --interaction-probe [--out=interaction-probe] [--only=1,4,10]`
+            if (args.Length > 0 && args[0] == "--interaction-probe")
+                return InteractionProbe.Run(args);
+
             var summaries = BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, BenchConfig(args)).ToList();
             return BenchExitCode(summaries);
         }

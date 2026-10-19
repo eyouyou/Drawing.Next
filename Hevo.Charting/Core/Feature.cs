@@ -62,6 +62,9 @@ namespace Hevo.Charting.Core
 
         internal DataBlackboard? CurrentBoard => Schema.CurrentBoard;
 
+        /// <summary>帧外(输入事件)取当前黑板;未挂载 / 已卸载时为 null,不抛。</summary>
+        internal DataBlackboard? CurrentBoardOrNull => _schema?.CurrentBoard;
+
         /// <summary>本 Feature 挂的图层里最靠上的 <see cref="ChartLayerType"/>;没有图层为 -1。指针区域同档优先级时画在上层的先命中。</summary>
         internal int TopLayerLevel
         {

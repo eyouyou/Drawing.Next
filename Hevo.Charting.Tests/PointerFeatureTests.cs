@@ -59,6 +59,30 @@ namespace Hevo.Charting.Tests
             AssertSameRange(rig.Initial, after);
         });
 
+        /// <summary>拖着线时 Y 量程变了(滚轮缩放 / 自动量程)而指针没动:松手按新量程下指针处的价格提交,不是最后一次移动时的价格。</summary>
+        [Fact]
+        public void DraggableLine_RangeChangesWhileDragging_CommitsPriceUnderPointer() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (rig, price, commits) = LineRig();
+            float y = rig.PriceToScreenY(100.0);
+            rig.Mouse.Move(rig.Canvas, new Point(200, y));
+            rig.Mouse.Down(rig.Canvas, new Point(200, y));
+            rig.Move(200, y - 30);
+            double beforeRangeChange = rig.Read(price);
+            rig.Write(rig.Schema.YRange, new RealRange(90, 130));
+            rig.Frame();
+            rig.Mouse.Up(rig.Canvas, new Point(200, y - 30));
+            rig.Frame();
+            double end = rig.Read(price);
+            float endY = rig.PriceToScreenY(end);
+            rig.Close();
+
+            Assert.Single(commits);
+            Assert.Equal(end, commits[0], 9);
+            Assert.NotEqual(beforeRangeChange, end, 3);
+            Assert.Equal(y - 30, endY, 1);
+        });
+
         [Fact]
         public void DraggableLine_Escape_RollsBack_NoCommit() => IncrementalTestKit.RunOnSta(() =>
         {

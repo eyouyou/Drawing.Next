@@ -36,7 +36,9 @@ namespace Hevo.Charting.Benchmarks
             public HevoRect PlotArea => new HevoRect(50, 10, 1200, 700);
             public void CaptureForBackground() { }
             public void ReleaseBackgroundCapture() { }
-            public void SetFrameCallback(Action? callback) { }
+            public int BackgroundCaptureCount => 0;
+            public void AddFrameCallback(Action callback) { }
+            public void RemoveFrameCallback(Action callback) { }
             public double DragThreshold => 4;
         }
 

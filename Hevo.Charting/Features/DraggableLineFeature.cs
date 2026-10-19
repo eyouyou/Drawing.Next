@@ -61,6 +61,8 @@ namespace Hevo.Charting.Features
         private ChartProjection _projection;
         private double _drawnPrice = double.NaN;
         private double _startPrice, _grabOffset, _dragPrice;
+        // 拖动中最后的指针 Y:拖着时量程变了(滚轮缩放、自动量程),线按新投影仍画在指针下,松手按它提交
+        private float _dragPointerY;
         private bool _dragging;
 
         protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
@@ -90,6 +92,7 @@ namespace Hevo.Charting.Features
                     // 用最新投影:拖动中 Y 量程自己在变时,线也始终在指针下
                     if (!_projection.IsValid || double.IsNaN(_startPrice)) break;
                     _dragging = true;
+                    _dragPointerY = g.Position.Y;
                     _dragPrice = _projection.ScreenToValue(g.Position.Y - _grabOffset);
                     using (board.BeginTransaction())
                     {
@@ -102,10 +105,11 @@ namespace Hevo.Charting.Features
                 {
                     if (!_dragging) break;
                     _dragging = false;
-                    double committed = _dragPrice;
+                    // 按最新投影换算松手点:最后一次移动之后量程可能又变了(拖着线滚轮)
+                    double committed = _projection.IsValid ? _projection.ScreenToValue(g.Position.Y - _grabOffset) : _dragPrice;
                     using (board.BeginTransaction())
                     {
-                        if (!Options.LiveWrite) board.WriteIfChanged(PricePort, committed);
+                        board.WriteIfChanged(PricePort, committed);
                         board.WriteIfChanged(_draftPort, null);
                     }
                     var onCommitted = Options.OnCommitted;
@@ -131,7 +135,8 @@ namespace Hevo.Charting.Features
             var (price, prc) = ctx.UsePort(PricePort);
             var (draft, dc) = ctx.UsePort(_draftPort);
             var (hot, hc) = ctx.UsePort(_hotPort);
-            double shown = draft ?? price;
+            // 拖动中按本帧投影从指针位置换算:量程变了而指针没动时,端口里的价格要等下一次移动才更新,线不能跟着跑开
+            double shown = _dragging && proj.IsValid ? proj.ScreenToValue(_dragPointerY - _grabOffset) : draft ?? price;
             _projection = proj;
             _drawnPrice = shown;
             if (!pc && !prc && !dc && !hc) return;
