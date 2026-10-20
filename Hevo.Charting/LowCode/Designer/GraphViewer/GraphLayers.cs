@@ -9,55 +9,164 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     /// <summary>
     /// GraphViewer 调色板。统一在此处注册画刷/画笔常量,
     /// 业务想换皮直接改这里——layer 不需要改一行。
+    /// <para>
+    /// 配色原则:画布、泳道、节点一律中性石板灰,颜色只留给"数据是什么"(连线 / 端口)和"选中关系"(上下游)。
+    /// 颜色一多就分不清哪种颜色在表达什么,这是旧版看起来乱的主因。
+    /// </para>
     /// </summary>
     internal static class GraphPalette
     {
-        public static readonly IHevoBrush CanvasBg     = new HevoSolidBrush(Color.FromRgb(0x1E, 0x1F, 0x22));
-        public static readonly IHevoBrush GridBrush    = new HevoSolidBrush(Color.FromArgb(0x40, 0x55, 0x55, 0x55));
+        private static Color Rgb(uint hex) => Color.FromRgb((byte)(hex >> 16), (byte)(hex >> 8), (byte)hex);
+        private static Color Argb(byte a, uint hex) => Color.FromArgb(a, (byte)(hex >> 16), (byte)(hex >> 8), (byte)hex);
 
-        public static readonly IHevoBrush NodeFillSrc  = new HevoSolidBrush(Color.FromRgb(0x2A, 0x44, 0x5C));
-        public static readonly IHevoBrush NodeFillTrait = new HevoSolidBrush(Color.FromRgb(0x4C, 0x3D, 0x55));
-        public static readonly IHevoBrush NodeFillFeat = new HevoSolidBrush(Color.FromRgb(0x35, 0x40, 0x35));
+        public static readonly Color CanvasColor = Rgb(0x0F172A);
+        public static readonly IHevoBrush CanvasBg     = new HevoSolidBrush(CanvasColor);
+        public static readonly IHevoBrush GridBrush    = new HevoSolidBrush(Argb(0x0E, 0x94A3B8));
 
-        public static readonly HevoPen NodeBorder      = new(new HevoSolidBrush(Color.FromRgb(0x78, 0x84, 0x90)), 1.0);
-        public static readonly HevoPen NodeBorderSel   = new(new HevoSolidBrush(Color.FromRgb(0xFF, 0xC1, 0x07)), 2.0);
+        // 泳道:相邻泳道明暗交替 + 细分隔线,不染色。
+        public static readonly IHevoBrush LaneFillOdd  = new HevoSolidBrush(Argb(0x07, 0xFFFFFF));
+        public static readonly HevoPen    LaneDivider  = new(new HevoSolidBrush(Rgb(0x1E293B)), 1.0, IsAntialias: false);
+        public static readonly IHevoBrush LaneTitle    = new HevoSolidBrush(Rgb(0x94A3B8));
+        public static readonly IHevoBrush LaneCount    = new HevoSolidBrush(Rgb(0x475569));
 
-        public static readonly IHevoBrush HeaderFill   = new HevoSolidBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00));
-        public static readonly IHevoBrush TitleText    = new HevoSolidBrush(Colors.White);
-        public static readonly IHevoBrush PortText     = new HevoSolidBrush(Color.FromRgb(0xC0, 0xC8, 0xD0));
+        public static readonly IHevoBrush NodeFill     = new HevoSolidBrush(Rgb(0x1B2336));
+        // 数据源是整张图的起点,底色略偏蓝,一眼能找到。
+        public static readonly IHevoBrush NodeFillSrc  = new HevoSolidBrush(Rgb(0x1A2A44));
+        public static readonly IHevoBrush NodeShadow   = new HevoSolidBrush(Argb(0x60, 0x020617));
+        public static readonly HevoPen NodeBorder      = new(new HevoSolidBrush(Rgb(0x2B3548)), 1.0);
+        public static readonly HevoPen NodeDivider     = new(new HevoSolidBrush(Rgb(0x2B3548)), 1.0, IsAntialias: false);
+        public static readonly HevoPen NodeBorderSel   = new(new HevoSolidBrush(Rgb(0xFBBF24)), 1.8);
 
-        public static readonly IHevoBrush PortInput    = new HevoSolidBrush(Color.FromRgb(0x4F, 0xC3, 0xF7));
-        public static readonly IHevoBrush PortOutput   = new HevoSolidBrush(Color.FromRgb(0xFF, 0xB7, 0x4D));
-        public static readonly HevoPen   PortBorder    = new(new HevoSolidBrush(Color.FromRgb(0x10, 0x10, 0x10)), 1.0);
+        public static readonly IHevoBrush TitleText    = new HevoSolidBrush(Rgb(0xE2E8F0));
+        public static readonly IHevoBrush PortText     = new HevoSolidBrush(Rgb(0x94A3B8));
+        public static readonly IHevoBrush PortTextDim  = new HevoSolidBrush(Rgb(0x334155));
 
-        // Edge 现在画在 Node 之上,用更细的线 + 略高的对比度,既不过分压制节点视觉,又保证可见性。
-        public static readonly HevoPen EdgePen         = new(new HevoSolidBrush(Color.FromRgb(0xCD, 0xD8, 0xE0)), 1.5);
-        // Edge 描边(衬底):稍粗一点的深色半透明笔,保证经过浅色节点头部时仍清晰可见。
-        public static readonly HevoPen EdgeOutlinePen  = new(new HevoSolidBrush(Color.FromArgb(0xB0, 0x10, 0x14, 0x1A)), 3.0);
-        public static readonly HevoPen RubberValid     = new(new HevoSolidBrush(Color.FromRgb(0x66, 0xBB, 0x6A)), 2.0);
-        public static readonly HevoPen RubberInvalid   = new(new HevoSolidBrush(Color.FromRgb(0xEF, 0x53, 0x50)), 2.0,
+        // Edge 衬底:画布底色的粗笔,两根线交叉时下面那根被"切开",交叉关系一目了然,比深色描边干净。
+        public static readonly HevoPen EdgeOutlinePen  = new(new HevoSolidBrush(CanvasColor), 4.0);
+        public static readonly HevoPen RubberValid     = new(new HevoSolidBrush(Rgb(0x4ADE80)), 2.0);
+        public static readonly HevoPen RubberInvalid   = new(new HevoSolidBrush(Rgb(0xF87171)), 2.0,
                                                               DashArray: new double[] { 4, 3 });
 
-        public static readonly HevoPen   BoxSelectPen  = new(new HevoSolidBrush(Color.FromRgb(0x4F, 0xC3, 0xF7)), 1.0,
+        public static readonly HevoPen   BoxSelectPen  = new(new HevoSolidBrush(Rgb(0x38BDF8)), 1.0,
                                                               DashArray: new double[] { 3, 3 });
-        public static readonly IHevoBrush BoxSelectFill = new HevoSolidBrush(Color.FromArgb(0x33, 0x4F, 0xC3, 0xF7));
+        public static readonly IHevoBrush BoxSelectFill = new HevoSolidBrush(Argb(0x22, 0x38BDF8));
 
-        public static readonly IHevoBrush  TooltipBg     = new HevoSolidBrush(Color.FromArgb(0xF0, 0x1A, 0x1B, 0x1F));
-        public static readonly HevoPen     TooltipBorder = new(new HevoSolidBrush(Color.FromRgb(0x55, 0x5C, 0x66)), 1.0);
-        public static readonly IHevoBrush  TooltipText   = new HevoSolidBrush(Color.FromRgb(0xE6, 0xE6, 0xE6));
-        public static readonly IHevoBrush  TooltipDimText = new HevoSolidBrush(Color.FromRgb(0x9E, 0xA8, 0xB0));
+        public static readonly IHevoBrush  TooltipBg     = new HevoSolidBrush(Argb(0xF5, 0x1E293B));
+        public static readonly HevoPen     TooltipBorder = new(new HevoSolidBrush(Rgb(0x334155)), 1.0);
+        public static readonly IHevoBrush  TooltipText   = new HevoSolidBrush(Rgb(0xE2E8F0));
+        public static readonly IHevoBrush  TooltipDimText = new HevoSolidBrush(Rgb(0x94A3B8));
 
-        // 拖动节点的对齐辅助线:鲜艳青色 + 虚线,1px,跟节点边框拉开识别度。
-        public static readonly HevoPen AlignGuidePen = new(new HevoSolidBrush(Color.FromRgb(0x4F, 0xC3, 0xF7)), 1.0,
+        // 拖动节点的对齐辅助线:虚线,1px,跟节点边框拉开识别度。
+        public static readonly HevoPen AlignGuidePen = new(new HevoSolidBrush(Rgb(0x38BDF8)), 1.0,
                                                             DashArray: new double[] { 4, 3 });
 
         // Minimap:背景半透明深色 + 边框,内部节点用低饱和填充。
-        public static readonly IHevoBrush MinimapBg     = new HevoSolidBrush(Color.FromArgb(0xCC, 0x14, 0x16, 0x1B));
-        public static readonly HevoPen    MinimapBorder = new(new HevoSolidBrush(Color.FromRgb(0x55, 0x5C, 0x66)), 1.0);
-        public static readonly IHevoBrush MinimapNodeFill = new HevoSolidBrush(Color.FromArgb(0xAA, 0x90, 0xA4, 0xAE));
-        public static readonly HevoPen    MinimapViewport = new(new HevoSolidBrush(Color.FromRgb(0xFF, 0xC1, 0x07)), 1.5);
+        public static readonly IHevoBrush MinimapBg     = new HevoSolidBrush(Argb(0xE0, 0x0B1120));
+        public static readonly HevoPen    MinimapBorder = new(new HevoSolidBrush(Rgb(0x334155)), 1.0);
+        public static readonly IHevoBrush MinimapNodeFill = new HevoSolidBrush(Rgb(0x475569));
+        public static readonly HevoPen    MinimapViewport = new(new HevoSolidBrush(Rgb(0xFBBF24)), 1.5);
 
-        public static readonly IHevoTypeface Typeface = new HevoTypeface("Segoe UI", FontWeight: 500);
+        public static readonly IHevoTypeface Typeface      = new HevoTypeface("Segoe UI", FontWeight: 500);
+        public static readonly IHevoTypeface TitleTypeface = new HevoTypeface("Segoe UI", FontWeight: 600);
+
+        // 连线 / 端口颜色只表达"流的是什么数据"。同一档明度(Tailwind 400),色相彼此拉开。
+        public static Color EdgeColor(EdgeDataKind kind) => kind switch
+        {
+            EdgeDataKind.Column   => Rgb(0x38BDF8),
+            EdgeDataKind.Range    => Rgb(0xFBBF24),
+            EdgeDataKind.HitState => Rgb(0xF472B6),
+            EdgeDataKind.Viewport => Rgb(0x4ADE80),
+            EdgeDataKind.Stream   => Rgb(0xA78BFA),
+            _                     => Rgb(0x94A3B8),
+        };
+
+        private static readonly Dictionary<EdgeDataKind, HevoPen> _edgePens = BuildEdgePens(0xE6, 1.5);
+        private static readonly Dictionary<EdgeDataKind, HevoPen> _edgePensDim = BuildEdgePens(0x26, 1.2);
+        private static readonly Dictionary<EdgeDataKind, IHevoBrush> _portBrushes = BuildPortBrushes();
+
+        private static Dictionary<EdgeDataKind, HevoPen> BuildEdgePens(byte alpha, double thickness)
+        {
+            var map = new Dictionary<EdgeDataKind, HevoPen>();
+            foreach (EdgeDataKind k in Enum.GetValues(typeof(EdgeDataKind)))
+            {
+                var c = EdgeColor(k);
+                map[k] = new HevoPen(new HevoSolidBrush(Color.FromArgb(alpha, c.R, c.G, c.B)), thickness);
+            }
+            return map;
+        }
+
+        private static Dictionary<EdgeDataKind, IHevoBrush> BuildPortBrushes()
+        {
+            var map = new Dictionary<EdgeDataKind, IHevoBrush>();
+            foreach (EdgeDataKind k in Enum.GetValues(typeof(EdgeDataKind)))
+                map[k] = new HevoSolidBrush(EdgeColor(k));
+            return map;
+        }
+
+        public static HevoPen EdgePenFor(EdgeDataKind kind, bool dimmed)
+            => (dimmed ? _edgePensDim : _edgePens)[kind];
+
+        public static IHevoBrush PortBrushFor(EdgeDataKind kind) => _portBrushes[kind];
+
+        private static readonly Dictionary<EdgeDataKind, HevoPen> _portRings = BuildEdgePens(0xFF, 1.4);
+        public static HevoPen PortRingFor(EdgeDataKind kind) => _portRings[kind];
+
+        // 选中后的上下游:跟拓扑监控同一套语义 —— 蓝 = 数据从哪来,橙 = 数据到哪去。
+        public static readonly Color UpstreamColor   = Rgb(0x60A5FA);
+        public static readonly Color DownstreamColor = Rgb(0xFB923C);
+        public static readonly HevoPen UpstreamEdgePen   = new(new HevoSolidBrush(UpstreamColor), 2.4);
+        public static readonly HevoPen DownstreamEdgePen = new(new HevoSolidBrush(DownstreamColor), 2.4);
+        public static readonly HevoPen UpstreamNodeBorder   = new(new HevoSolidBrush(UpstreamColor), 1.6);
+        public static readonly HevoPen DownstreamNodeBorder = new(new HevoSolidBrush(DownstreamColor), 1.6);
+        public static readonly IHevoBrush NodeDimOverlay = new HevoSolidBrush(Argb(0xB0, 0x0F172A));
+
+        public static readonly IHevoBrush LegendBg     = new HevoSolidBrush(Argb(0xF0, 0x111A2E));
+        public static readonly HevoPen    LegendBorder = new(new HevoSolidBrush(Rgb(0x1E293B)), 1.0);
+    }
+
+    /// <summary>
+    /// 选中节点的上下游快照。节点层、连线层、图例层各自从同一份 GraphState 算出,结论一致。
+    /// </summary>
+    internal sealed class GraphFocus
+    {
+        public IReadOnlySet<string> Selected { get; }
+        public HashSet<string> Upstream { get; }
+        public HashSet<string> Downstream { get; }
+        public HashSet<(string From, string To)> BackEdges { get; }
+
+        private GraphFocus(IReadOnlySet<string> selected, HashSet<string> up, HashSet<string> down,
+                           HashSet<(string, string)> back)
+        {
+            Selected = selected; Upstream = up; Downstream = down; BackEdges = back;
+        }
+
+        /// <summary>没选中节点时返回 null —— 调用方据此走"不压暗"的常规绘制。</summary>
+        public static GraphFocus? From(GraphState s)
+        {
+            if (s.SelectedNodeIds.Count == 0) return null;
+            var back = GraphFlowAnalysis.FindBackEdges(s.Nodes, s.Edges);
+            var (up, down) = GraphFlowAnalysis.ComputeLineage(s.Edges, s.SelectedNodeIds, back);
+            return new GraphFocus(s.SelectedNodeIds, up, down, back);
+        }
+
+        public bool InLineage(string nodeId) => Upstream.Contains(nodeId) || Downstream.Contains(nodeId);
+
+        /// <summary>
+        /// 连线在焦点下的角色:+1 下游,-1 上游,0 无关(压暗)。
+        /// 回边不参与链路传递,只在直接连着选中节点时亮,否则环里的线会把整圈都染上。
+        /// </summary>
+        public int RoleOf(Edge e)
+        {
+            if (BackEdges.Contains((e.FromNodeId, e.ToNodeId)))
+            {
+                if (Selected.Contains(e.FromNodeId)) return 1;
+                if (Selected.Contains(e.ToNodeId)) return -1;
+                return 0;
+            }
+            if (Downstream.Contains(e.FromNodeId) && Downstream.Contains(e.ToNodeId)) return 1;
+            if (Upstream.Contains(e.FromNodeId) && Upstream.Contains(e.ToNodeId)) return -1;
+            return 0;
+        }
     }
 
     /// <summary>
@@ -85,69 +194,77 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
             var tr = t.State.Transform;
 
-            // 1) 类别泳道 —— 节点 Y 范围聚合成横幅 (画布坐标 → 屏幕坐标)。
-            // 横向铺满当前画布,Y 范围 = 该 category 所有节点的 [minY, maxY+H] 合并。
-            // 业务自由拖动节点 → 泳道实时跟随;空 category 不渲染。
-            var bands = ComputeCategoryBands(t.State);
-            foreach (var (category, top, bottom) in bands)
-            {
-                float screenTop    = top    * tr.Scale + tr.OffsetY;
-                float screenBottom = bottom * tr.Scale + tr.OffsetY;
-                if (screenBottom < 0 || screenTop > h) continue;
-                screenTop    = Math.Max(screenTop,    0);
-                screenBottom = Math.Min(screenBottom, h);
-                var fill = new HevoSolidBrush(FeatureCategoryStyle.ZoneFill(category));
-                draw.DrawRectangle(fill, null, new HevoRect(0, screenTop, w, screenBottom - screenTop));
-
-                // 类别标签贴左上角
-                var labelBrush = new HevoSolidBrush(FeatureCategoryStyle.ZoneLabel(category));
-                draw.DrawText(FeatureCategoryStyle.DisplayName(category), GraphPalette.Typeface,
-                    labelBrush, 11f,
-                    new HevoPoint(8f, screenTop + 4f),
-                    TextAlignX.Left, TextAlignY.Top);
-            }
-
-            // 2) 网格:间距随 zoom 扩缩,屏幕步长保持在 [16, 64] 内
-            float baseStep = 50f;
+            // 1) 网格:很淡,只给拖拽对齐一点参照;间距随 zoom 扩缩,屏幕步长保持在 [16, 64] 内
+            float baseStep = 40f;
             float screenStep = baseStep * tr.Scale;
             while (screenStep < 16f) screenStep *= 2f;
             while (screenStep > 64f) screenStep /= 2f;
 
             float ox = ((tr.OffsetX % screenStep) + screenStep) % screenStep;
             float oy = ((tr.OffsetY % screenStep) + screenStep) % screenStep;
+            var gridPen = new HevoPen(GraphPalette.GridBrush, 1.0, IsAntialias: false);
+            for (float x = ox; x < w; x += screenStep) draw.DrawLine(gridPen, new HevoPoint(x, 0), new HevoPoint(x, h));
+            for (float y = oy; y < h; y += screenStep) draw.DrawLine(gridPen, new HevoPoint(0, y), new HevoPoint(w, y));
 
-            for (float x = ox; x < w; x += screenStep)
-                draw.DrawLine(new HevoPen(GraphPalette.GridBrush, 1.0, IsAntialias: false),
-                              new HevoPoint(x, 0), new HevoPoint(x, h));
-            for (float y = oy; y < h; y += screenStep)
-                draw.DrawLine(new HevoPen(GraphPalette.GridBrush, 1.0, IsAntialias: false),
-                              new HevoPoint(0, y), new HevoPoint(w, y));
+            // 2) 泳道 —— 竖向列带,从左到右就是数据流方向。不染色,只靠明暗交替 + 细分隔线区分:
+            //    颜色留给连线表达数据类型,泳道再染一套色会互相抢。
+            //    相邻泳道在两者之间的缝隙中线分界,色带连成一片,不留黑缝。
+            //    标题固定贴在色带顶部(图例那一行下面),上下平移时不会滚出视野。
+            var bands = ComputeCategoryBands(t.State).OrderBy(b => b.left).ToList();
+            for (int i = 0; i < bands.Count; i++)
+            {
+                var (category, left, right, count) = bands[i];
+                float l = i == 0 ? left : (bands[i - 1].right + left) / 2f;
+                float r = i == bands.Count - 1 ? right : (right + bands[i + 1].left) / 2f;
+                float screenLeft  = l * tr.Scale + tr.OffsetX;
+                float screenRight = r * tr.Scale + tr.OffsetX;
+                if (screenRight < 0 || screenLeft > w) continue;
+
+                if (i % 2 == 1)
+                    draw.DrawRectangle(GraphPalette.LaneFillOdd, null, new HevoRect(screenLeft, 0, screenRight - screenLeft, h));
+                if (i > 0)
+                    draw.DrawLine(GraphPalette.LaneDivider, new HevoPoint(screenLeft, 0), new HevoPoint(screenLeft, h));
+
+                var title = FeatureCategoryStyle.DisplayName(category);
+                float tx = Math.Max(screenLeft, 0) + 12f;
+                draw.DrawText(title, GraphPalette.TitleTypeface,
+                    GraphPalette.LaneTitle, 12f, new HevoPoint(tx, LaneTitleY), TextAlignX.Left, TextAlignY.Top);
+                draw.DrawText(count.ToString(), GraphPalette.Typeface, GraphPalette.LaneCount, 11f,
+                    new HevoPoint(tx + EstimateWidth(title, 12f) + 8f, LaneTitleY + 1f),
+                    TextAlignX.Left, TextAlignY.Top);
+            }
         }
 
-        /// <summary>
-        /// 把当前画布上同 category 的节点聚成 Y 范围带子。带子之间用一点 padding,UI 看起来不挤。
-        /// 每个 category 的 band 范围 = min(node.Y) - pad ~ max(node.Y + node.Height) + pad。
-        /// </summary>
-        private static IEnumerable<(FeatureCategory category, float top, float bottom)> ComputeCategoryBands(GraphState state)
+        // 没有文本测量接口,按 CJK 全角 / 拉丁半角粗估。
+        internal static float EstimateWidth(string text, float fontSize)
         {
-            const float pad = 14f;
-            var groups = new Dictionary<FeatureCategory, (float min, float max)>();
+            float wsum = 0f;
+            foreach (var ch in text) wsum += ch >= 0x2E80 ? fontSize : fontSize * 0.58f;
+            return wsum;
+        }
+
+        // 泳道标题的屏幕 Y:让开顶部图例那一行。
+        private const float LaneTitleY = 42f;
+
+        /// <summary>
+        /// 把当前画布上同泳道的节点聚成 X 范围列带。泳道归属跟 <see cref="AutoLayout.LaneFor"/> 一致,
+        /// 自动布局排出来的列段和这里画的色带才能对上。
+        /// </summary>
+        private static IEnumerable<(FeatureCategory category, float left, float right, int count)> ComputeCategoryBands(GraphState state)
+        {
+            const float pad = 24f;
+            var groups = new Dictionary<FeatureCategory, (float min, float max, int count)>();
             foreach (var n in state.Nodes)
             {
-                if (n.Category == FeatureCategory.Unknown) continue;
-                if (!groups.TryGetValue(n.Category, out var range))
-                {
-                    groups[n.Category] = (n.Position.Y - pad, n.Position.Y + n.Size.Y + pad);
-                }
-                else
-                {
-                    groups[n.Category] = (
-                        Math.Min(range.min, n.Position.Y - pad),
-                        Math.Max(range.max, n.Position.Y + n.Size.Y + pad));
-                }
+                var lane = AutoLayout.LaneFor(n);
+                if (lane == FeatureCategory.Unknown) continue;
+                float l = n.Position.X - pad, r = n.Position.X + n.Size.X + pad;
+                groups[lane] = groups.TryGetValue(lane, out var range)
+                    ? (Math.Min(range.min, l), Math.Max(range.max, r), range.count + 1)
+                    : (l, r, 1);
             }
             foreach (var kv in groups)
-                yield return (kv.Key, kv.Value.min, kv.Value.max);
+                yield return (kv.Key, kv.Value.min, kv.Value.max, kv.Value.count);
         }
     }
 
@@ -172,56 +289,77 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             var tr = s.Transform;
             var matrix = new Matrix3x2(tr.Scale, 0, 0, tr.Scale, tr.OffsetX, tr.OffsetY);
             using var _ = draw.PushTransform(matrix);
+            var focus = GraphFocus.From(s);
 
+            // 端口颜色跟连在它上面的线一致;没连线的端口按自身类型取色、画空心圈。
+            var portKind = new Dictionary<(string, string, bool), EdgeDataKind>();
+            foreach (var e in s.Edges)
+            {
+                var k = EdgeDataKindClassifier.Classify(s, e);
+                portKind[(e.FromNodeId, e.FromPortId, false)] = k;
+                portKind[(e.ToNodeId, e.ToPortId, true)] = k;
+            }
+
+            const float radius = 8f, headerH = 24f;
             foreach (var node in s.Nodes)
             {
                 var bounds = node.GetBounds();
-                var fill = node.Kind switch
-                {
-                    NodeKind.DataSource => GraphPalette.NodeFillSrc,
-                    NodeKind.Trait => GraphPalette.NodeFillTrait,
-                    _ => GraphPalette.NodeFillFeat,
-                };
-                var border = s.SelectedNodeIds.Contains(node.Id) ? GraphPalette.NodeBorderSel : GraphPalette.NodeBorder;
-                draw.DrawRoundedRectangle(fill, border, bounds, 6f, 6f);
+                var fill = node.Kind == NodeKind.DataSource ? GraphPalette.NodeFillSrc : GraphPalette.NodeFill;
+                var border = GraphPalette.NodeBorder;
+                if (s.SelectedNodeIds.Contains(node.Id)) border = GraphPalette.NodeBorderSel;
+                else if (focus != null && focus.Upstream.Contains(node.Id)) border = GraphPalette.UpstreamNodeBorder;
+                else if (focus != null && focus.Downstream.Contains(node.Id)) border = GraphPalette.DownstreamNodeBorder;
 
-                // 标题栏底色
-                var headerRect = new HevoRect(bounds.X, bounds.Y, bounds.Width, 24f);
-                draw.DrawRectangle(GraphPalette.HeaderFill, null, headerRect);
+                // 一层下移 3px 的深色投影,让卡片从画布上浮起来,不用边框加粗也能分出层次。
+                var shadow = new HevoRect(bounds.X, bounds.Y + 3f, bounds.Width, bounds.Height);
+                draw.DrawRoundedRectangle(GraphPalette.NodeShadow, null, shadow, radius, radius);
+                draw.DrawRoundedRectangle(fill, border, bounds, radius, radius);
 
-                // 标题文字
-                draw.DrawText(node.Title, GraphPalette.Typeface, GraphPalette.TitleText, 12f,
-                              new HevoPoint(bounds.X + 8f, bounds.Y + 4f),
-                              TextAlignX.Left, TextAlignY.Top);
+                draw.DrawText(node.Title, GraphPalette.TitleTypeface, GraphPalette.TitleText, 13f,
+                              new HevoPoint(bounds.X + 10f, bounds.Y + headerH / 2f + 1f),
+                              TextAlignX.Left, TextAlignY.Center);
+                if (node.InputPorts.Count + node.OutputPorts.Count > 0)
+                    draw.DrawLine(GraphPalette.NodeDivider,
+                        new HevoPoint(bounds.X + 1f, bounds.Y + headerH + 2f),
+                        new HevoPoint(bounds.X + bounds.Width - 1f, bounds.Y + headerH + 2f));
 
-                DrawPorts(draw, node, isInput: true);
-                DrawPorts(draw, node, isInput: false);
+                bool dimmed = focus != null && !focus.InLineage(node.Id);
+                // 不在链路上的节点盖一层半透明底色压暗,比逐个元素换暗色笔刷改动小、观感一致。
+                // 端口圆点骑在节点边框上、一半露在遮罩外,所以端口在遮罩之后单独按压暗样式画。
+                if (dimmed) draw.DrawRoundedRectangle(GraphPalette.NodeDimOverlay, null, bounds, radius, radius);
+                DrawPorts(draw, node, isInput: true, portKind, dimmed);
+                DrawPorts(draw, node, isInput: false, portKind, dimmed);
             }
         }
 
-        private static void DrawPorts(IDrawingSink draw, Node node, bool isInput)
+        private static void DrawPorts(IDrawingSink draw, Node node, bool isInput,
+                                      Dictionary<(string, string, bool), EdgeDataKind> portKind, bool dimmed)
         {
             var ports = isInput ? node.InputPorts : node.OutputPorts;
-            var fill = isInput ? GraphPalette.PortInput : GraphPalette.PortOutput;
             for (int i = 0; i < ports.Count; i++)
             {
                 var port = ports[i];
                 var c = node.GetPortPosition(port);
+                bool connected = portKind.TryGetValue((node.Id, port.Id, isInput), out var kind);
+                if (!connected)
+                    kind = EdgeDataKindClassifier.Classify(port.DataTypeName, EdgeKind.DataPort, node.Kind, null);
+                var fill = connected && !dimmed ? GraphPalette.PortBrushFor(kind) : GraphPalette.NodeFill;
+                var ring = dimmed ? GraphPalette.EdgePenFor(kind, dimmed: true) : GraphPalette.PortRingFor(kind);
+
                 if (port.IsArray)
                 {
-                    // 扇入端口画方块,跟单端口圆点拉开视觉差。
-                    draw.DrawRectangle(fill, GraphPalette.PortBorder,
-                        new HevoRect(c.X - 5f, c.Y - 5f, 10f, 10f));
+                    // 扇入端口画圆角方块,跟单端口圆点拉开视觉差。
+                    draw.DrawRoundedRectangle(fill, ring, new HevoRect(c.X - 4.5f, c.Y - 4.5f, 9f, 9f), 2f, 2f);
                 }
                 else
                 {
-                    draw.DrawEllipse(fill, GraphPalette.PortBorder, c, 5f, 5f);
+                    draw.DrawEllipse(fill, ring, c, 4.5f, 4.5f);
                 }
 
-                var labelX = isInput ? c.X + 10f : c.X - 10f;
+                var labelX = isInput ? c.X + 11f : c.X - 11f;
                 var alignX = isInput ? TextAlignX.Left : TextAlignX.Right;
-                var label  = port.IsArray ? $"{port.Name} []" : port.Name;
-                draw.DrawText(label, GraphPalette.Typeface, GraphPalette.PortText, 10f,
+                var label  = port.IsArray ? port.Name + " []" : port.Name;
+                draw.DrawText(label, GraphPalette.Typeface, dimmed ? GraphPalette.PortTextDim : GraphPalette.PortText, 11f,
                               new HevoPoint(labelX, c.Y),
                               alignX, TextAlignY.Center);
             }
@@ -229,7 +367,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     }
 
     /// <summary>
-    /// 连线层:贝塞尔曲线连接 from-output 到 to-input。
+    /// 连线层:优先按自动布局给的横竖折线画;没有折线或节点被拖动过的连线退回贝塞尔曲线连接 from-output 到 to-input。
     /// 用 Geometry SVG path,稳定 0-GC——cubic 控制点按节点距离半量水平偏移即可。
     /// </summary>
     internal sealed class GraphEdgeLayer : ChartLayer
@@ -253,7 +391,20 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             // 同 source-port 多次出线时,按出线序号微微纵向偏移,避免曲线 100% 重叠看起来像一根。
             // 缓存 (fromNodeId, fromPortId) → 已绘制次数。
             var siblingCounter = new Dictionary<(string, string), int>();
-            foreach (var edge in s.Edges)
+            var focus = GraphFocus.From(s);
+
+            // 焦点下先画压暗的、再画链路上的,保证高亮线不被暗线盖住。
+            IEnumerable<Edge> ordered = s.Edges;
+            if (focus != null) ordered = s.Edges.OrderBy(e => focus.RoleOf(e) != 0 ? 1 : 0);
+
+            // 走折线的连线按源端口 / 目标端口分组,最后在主干的分叉处画圆点。
+            var bySource = new Dictionary<(string, string), List<(IReadOnlyList<HevoPoint> Route, HevoPen Pen, bool Dimmed)>>();
+            var byTarget = new Dictionary<(string, string), List<(IReadOnlyList<HevoPoint> Route, HevoPen Pen, bool Dimmed)>>();
+
+            // 回绕总线:进同一个输入端口的回边,收集起来最后统一标注来源。
+            var buses = new Dictionary<(string, string), List<(Edge Edge, IReadOnlyList<HevoPoint> Route, bool Dimmed, EdgeDataKind Kind)>>();
+
+            foreach (var edge in ordered)
             {
                 var from = s.FindNode(edge.FromNodeId);
                 var to = s.FindNode(edge.ToNodeId);
@@ -268,13 +419,216 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 int siblingIdx = siblingCounter.GetValueOrDefault((edge.FromNodeId, edge.FromPortId), 0);
                 siblingCounter[(edge.FromNodeId, edge.FromPortId)] = siblingIdx + 1;
 
+                int role = focus?.RoleOf(edge) ?? 0;
+                bool dimmed = focus != null && role == 0;
+                var pen = role > 0 ? GraphPalette.DownstreamEdgePen
+                        : role < 0 ? GraphPalette.UpstreamEdgePen
+                        : GraphPalette.EdgePenFor(EdgeDataKindClassifier.Classify(s, edge), dimmed);
+
+                // 自动布局给过折线、且首尾还贴着端口(节点没被拖走)→ 按折线画:横竖走线不穿节点、不重合。
+                if (TryGetRoute(s, edge, p0, p3, out var route))
+                {
+                    if (!dimmed) DrawRoundedPolyline(draw, route, GraphPalette.EdgeOutlinePen);
+                    DrawRoundedPolyline(draw, route, pen);
+                    AddTo(bySource, (edge.FromNodeId, edge.FromPortId), (route, pen, dimmed));
+                    AddTo(byTarget, (edge.ToNodeId, edge.ToPortId), (route, pen, dimmed));
+                    if (p3.X < p0.X)
+                    {
+                        var key = (edge.ToNodeId, edge.ToPortId);
+                        if (!buses.TryGetValue(key, out var list)) buses[key] = list = new List<(Edge, IReadOnlyList<HevoPoint>, bool, EdgeDataKind)>();
+                        list.Add((edge, route, dimmed, EdgeDataKindClassifier.Classify(s, edge)));
+                    }
+                    continue;
+                }
+
+                // 终点在起点左边:贝塞尔会从节点身上横穿回去。改走两端节点下方绕回,跟正向线分开。
+                if (p3.X < p0.X + BackRouteMinDx)
+                {
+                    float bottom = Math.Max(from.Position.Y + from.Size.Y, to.Position.Y + to.Size.Y);
+                    float routeY = bottom + 24f + siblingIdx * 6f;
+                    if (!dimmed) DrawBackRoute(draw, p0, p3, routeY, GraphPalette.EdgeOutlinePen);
+                    DrawBackRoute(draw, p0, p3, routeY, pen);
+                    continue;
+                }
+
                 // 避障:扫所有非端点节点,挡道的把控制点 Y 推开。
                 float vAvoid = ComputeAvoidanceVOffset(p0, p3, s.Nodes, edge.FromNodeId, edge.ToNodeId);
 
-                // 双笔:深色描边在底层兜底"过节点也能看到",上层亮线表达连接关系。
-                DrawBezier(draw, p0, p3, GraphPalette.EdgeOutlinePen, siblingIdx, vAvoid);
-                DrawBezier(draw, p0, p3, GraphPalette.EdgePen,        siblingIdx, vAvoid);
+                // 双笔:深色描边在底层兜底"过节点也能看到",上层亮线表达连接关系;压暗的线不要衬底,免得暗线反而显眼。
+                if (!dimmed) DrawBezier(draw, p0, p3, GraphPalette.EdgeOutlinePen, siblingIdx, vAvoid);
+                DrawBezier(draw, p0, p3, pen, siblingIdx, vAvoid);
             }
+
+            foreach (var g in bySource.Values) DrawJunctions(draw, g);
+            foreach (var g in byTarget.Values) DrawJunctions(draw, g);
+            foreach (var kv in buses) DrawBusLabel(draw, s, kv.Key.Item2, kv.Value);
+        }
+
+        private static void AddTo<TKey, TItem>(Dictionary<TKey, List<TItem>> map, TKey key, TItem item) where TKey : notnull
+        {
+            if (!map.TryGetValue(key, out var list)) map[key] = list = new List<TItem>();
+            list.Add(item);
+        }
+
+        /// <summary>
+        /// 同一端口的几根折线共用主干时,在分叉处画圆点:某根线的拐点落在同组另一根线的线段内部
+        /// (另一根在这里直行、它在这里拐走)就是分叉。没有圆点的十字交叉才是真的两根线交叉。
+        /// </summary>
+        private static void DrawJunctions(IDrawingSink draw, List<(IReadOnlyList<HevoPoint> Route, HevoPen Pen, bool Dimmed)> group)
+        {
+            if (group.Count < 2) return;
+            var drawn = new HashSet<(int, int)>();
+            foreach (var a in group)
+            {
+                for (int i = 1; i < a.Route.Count - 1; i++)
+                {
+                    var v = a.Route[i];
+                    foreach (var b in group)
+                    {
+                        if (ReferenceEquals(a.Route, b.Route)) continue;
+                        if (!LiesInsideSegment(v, b.Route)) continue;
+                        if (!drawn.Add(((int)MathF.Round(v.X), (int)MathF.Round(v.Y)))) break;
+                        var brush = a.Pen.Brush;
+                        draw.DrawEllipse(brush, null, v, a.Dimmed ? 2f : 3f, a.Dimmed ? 2f : 3f);
+                        break;
+                    }
+                }
+            }
+
+            static bool LiesInsideSegment(HevoPoint p, IReadOnlyList<HevoPoint> route)
+            {
+                const float eps = 0.5f;
+                for (int j = 0; j + 1 < route.Count; j++)
+                {
+                    var s = route[j];
+                    var t = route[j + 1];
+                    if (Math.Abs(s.X - t.X) < eps && Math.Abs(p.X - s.X) < eps
+                        && p.Y > Math.Min(s.Y, t.Y) + eps && p.Y < Math.Max(s.Y, t.Y) - eps) return true;
+                    if (Math.Abs(s.Y - t.Y) < eps && Math.Abs(p.Y - s.Y) < eps
+                        && p.X > Math.Min(s.X, t.X) + eps && p.X < Math.Max(s.X, t.X) - eps) return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 回绕总线的来源标注,贴在总线走廊(折线里最长的横段)左端、靠节点的一侧:"Compute.OutputPort, Plot.macd/signal/hist → ValuePorts"。
+        /// 回边要绕到画布底部再回来,单看线很难追到两头;把两头写在线上,不用追线也知道谁连谁。
+        /// </summary>
+        private static void DrawBusLabel(IDrawingSink draw, GraphState s,
+            string toPortId, List<(Edge Edge, IReadOnlyList<HevoPoint> Route, bool Dimmed, EdgeDataKind Kind)> bus)
+        {
+            if (bus.All(b => b.Dimmed)) return;
+
+            // 同一个源节点的多个端口合并写:Plot.macd/signal/hist
+            var parts = new List<string>();
+            foreach (var g in bus.GroupBy(b => b.Edge.FromNodeId))
+            {
+                var node = s.FindNode(g.Key);
+                if (node == null) continue;
+                var ports = g.Select(b => node.FindPort(b.Edge.FromPortId, isInput: false)?.Name ?? b.Edge.FromPortId).Distinct();
+                parts.Add(ShortTitle(node.Title) + "." + string.Join("/", ports));
+            }
+            var target = s.FindNode(bus[0].Edge.ToNodeId);
+            var toName = target?.FindPort(toPortId, isInput: true)?.Name ?? toPortId;
+            var text = string.Join(", ", parts) + "  →  " + (target != null ? ShortTitle(target.Title) + "." : "") + toName;
+
+            // 走廊在节点上方或下方都有可能,取折线里最长的横段;标签写在走廊靠节点的一侧
+            //(走廊在两端端口上方就写在线下面),不跟顶部泳道标题或外圈的走廊抢位置。
+            var route = bus[0].Route;
+            float corridorY = route[0].Y, left = route[0].X, longest = -1f;
+            for (int i = 0; i + 1 < route.Count; i++)
+            {
+                var a = route[i];
+                var b = route[i + 1];
+                if (Math.Abs(a.Y - b.Y) > 0.5f) continue;
+                float len = Math.Abs(a.X - b.X);
+                if (len <= longest) continue;
+                longest = len;
+                corridorY = a.Y;
+                left = Math.Min(a.X, b.X);
+            }
+
+            const float fontSize = 12f, padX = 6f, h = 17f;
+            float w = GraphCanvasLayer.EstimateWidth(text, fontSize) + padX * 2;
+            bool corridorAbove = corridorY < Math.Min(route[0].Y, route[route.Count - 1].Y);
+            var rect = new HevoRect(left + 10f, corridorAbove ? corridorY + 3f : corridorY - h - 3f, w, h);
+            draw.DrawRoundedRectangle(GraphPalette.CanvasBg, null, rect, 3f, 3f);
+            draw.DrawText(text, GraphPalette.Typeface, GraphPalette.PortBrushFor(bus[0].Kind), fontSize,
+                new HevoPoint(rect.X + padX, rect.Y + h / 2f), TextAlignX.Left, TextAlignY.Center);
+        }
+
+        // 节点标题去掉 Feature 后缀,标注里省地方:UniversalAutoScaleFeature → UniversalAutoScale。
+        private static string ShortTitle(string title)
+            => title.EndsWith("Feature", StringComparison.Ordinal) && title.Length > 7 ? title.Substring(0, title.Length - 7) : title;
+
+        private static bool TryGetRoute(GraphState s, Edge edge, HevoPoint p0, HevoPoint p3, out IReadOnlyList<HevoPoint> route)
+        {
+            route = Array.Empty<HevoPoint>();
+            if (s.EdgeRoutes == null || !s.EdgeRoutes.TryGetValue(edge.Id, out var r) || r == null || r.Count < 2) return false;
+            const float tol = 1f;
+            var a = r[0];
+            var b = r[r.Count - 1];
+            if (Math.Abs(a.X - p0.X) > tol || Math.Abs(a.Y - p0.Y) > tol) return false;
+            if (Math.Abs(b.X - p3.X) > tol || Math.Abs(b.Y - p3.Y) > tol) return false;
+            route = r;
+            return true;
+        }
+
+        /// <summary>
+        /// 横竖折线,拐角用小圆角过渡:直角拐点在缩放后显得生硬,圆角也让并行的线在拐弯处更好分辨。
+        /// 圆角半径不超过相邻两段各自的一半,短段不会被圆角吃掉方向。
+        /// </summary>
+        public static void DrawRoundedPolyline(IDrawingSink draw, IReadOnlyList<HevoPoint> pts, HevoPen pen, float radius = 6f)
+        {
+            if (pts.Count < 2) return;
+            var cursor = pts[0];
+            for (int i = 1; i < pts.Count - 1; i++)
+            {
+                var prev = pts[i - 1];
+                var corner = pts[i];
+                var next = pts[i + 1];
+                float inLen = Dist(prev, corner), outLen = Dist(corner, next);
+                float r = Math.Min(radius, Math.Min(inLen, outLen) / 2f);
+                if (r < 0.5f)
+                {
+                    draw.DrawLine(pen, cursor, corner);
+                    cursor = corner;
+                    continue;
+                }
+                var enter = Toward(corner, prev, r);
+                var leave = Toward(corner, next, r);
+                draw.DrawLine(pen, cursor, enter);
+                // 控制点取在拐点与两端点连线的 0.55 处,近似四分之一圆。
+                draw.DrawCubicBezier(pen, enter, Lerp(enter, corner, 0.55f), Lerp(leave, corner, 0.55f), leave);
+                cursor = leave;
+            }
+            draw.DrawLine(pen, cursor, pts[pts.Count - 1]);
+
+            static float Dist(HevoPoint a, HevoPoint b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+            static HevoPoint Toward(HevoPoint from, HevoPoint to, float d)
+            {
+                float len = Dist(from, to);
+                return len < 1e-3f ? from : new HevoPoint(from.X + (to.X - from.X) / len * d, from.Y + (to.Y - from.Y) / len * d);
+            }
+            static HevoPoint Lerp(HevoPoint a, HevoPoint b, float t) => new HevoPoint(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t);
+        }
+
+        // 两端口水平距离不足这个值也按回绕处理:几乎竖直的 S 形线会贴着节点边框走,看不清。
+        private const float BackRouteMinDx = 24f;
+
+        /// <summary>
+        /// 回绕走线:出口向右拐下 → 沿 <paramref name="routeY"/> 水平向左 → 向上拐进入口。
+        /// 两段拐角用 cubic,中段直线,端口处仍保持水平切线,跟正向边的接入方式一致。
+        /// </summary>
+        public static void DrawBackRoute(IDrawingSink draw, HevoPoint a, HevoPoint b, float routeY, HevoPen pen)
+        {
+            const float k = 40f;
+            var a1 = new HevoPoint(a.X + k, routeY);
+            var b1 = new HevoPoint(b.X - k, routeY);
+            draw.DrawCubicBezier(pen, a, new HevoPoint(a.X + k * 1.4f, a.Y), new HevoPoint(a.X + k * 1.4f, routeY), a1);
+            draw.DrawLine(pen, a1, b1);
+            draw.DrawCubicBezier(pen, b1, new HevoPoint(b.X - k * 1.4f, routeY), new HevoPoint(b.X - k * 1.4f, b.Y), b);
         }
 
         /// <summary>
@@ -391,6 +745,82 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         }
     }
 
+    /// <summary>
+    /// 连线颜色图例,固定在画布左上角横排一条(右下角归 minimap)。
+    /// 只列当前画布实际出现的数据类型;选中节点时追加上下游两行,解释高亮色。
+    /// </summary>
+    internal sealed class GraphLegendLayer : ChartLayer
+    {
+        public GraphLegendLayer()
+        {
+            Name = "GraphLegendLayer";
+            Mode = RenderMode.Software;
+            Level = ChartLayerType.Selection;
+        }
+
+        protected override void OnUpdate(IVisualData data, IDrawingSink draw, WidgetBuffer widget)
+        {
+            var t = data.Get<GraphRenderTrait>();
+            var size = data.Get<ViewportSizeTrait>();
+            if (t == null || size == null) return;
+            var rows = BuildRows(t.State);
+            if (rows.Count == 0) return;
+
+            // 横排一条贴画布顶部:AutoLayout 第一条泳道从 y=60 起,顶上这条带子默认是空的,不压节点。
+            const float pad = 6f, rowH = 18f, swatchW = 18f, gap = 6f, itemGap = 16f, fontSize = 11f;
+            float maxW = Math.Max(120f, (float)size.Width - 24f);
+            var placed = new List<(float X, int Row, string Label, HevoPen Pen)>(rows.Count);
+            float x = 0f, widest = 0f;
+            int row = 0;
+            foreach (var (label, pen) in rows)
+            {
+                float itemW = swatchW + gap + EstimateTextWidth(label, fontSize);
+                if (x > 0f && x + itemW > maxW - pad * 2) { row++; x = 0f; }
+                placed.Add((x, row, label, pen));
+                x += itemW + itemGap;
+                widest = Math.Max(widest, x - itemGap);
+            }
+
+            var rect = new HevoRect(12f, 8f, widest + pad * 2, (row + 1) * rowH + pad * 2 - 4f);
+            draw.DrawRoundedRectangle(GraphPalette.LegendBg, GraphPalette.LegendBorder, rect, 4f, 4f);
+            foreach (var (ix, r, label, pen) in placed)
+            {
+                float cy = rect.Y + pad - 2f + rowH * (r + 0.5f);
+                float sx = rect.X + pad + ix;
+                draw.DrawLine(pen, new HevoPoint(sx, cy), new HevoPoint(sx + swatchW, cy));
+                draw.DrawText(label, GraphPalette.Typeface, GraphPalette.TooltipText, fontSize,
+                    new HevoPoint(sx + swatchW + gap, cy), TextAlignX.Left, TextAlignY.Center);
+            }
+        }
+
+        private static List<(string Label, HevoPen Pen)> BuildRows(GraphState s)
+        {
+            var present = new HashSet<EdgeDataKind>();
+            foreach (var e in s.Edges) present.Add(EdgeDataKindClassifier.Classify(s, e));
+
+            var rows = new List<(string, HevoPen)>();
+            foreach (EdgeDataKind k in Enum.GetValues(typeof(EdgeDataKind)))
+            {
+                if (present.Contains(k))
+                    rows.Add((EdgeDataKindClassifier.DisplayName(k), GraphPalette.EdgePenFor(k, dimmed: false)));
+            }
+            if (s.SelectedNodeIds.Count > 0 && rows.Count > 0)
+            {
+                rows.Add(("上游 · 数据从哪来", GraphPalette.UpstreamEdgePen));
+                rows.Add(("下游 · 数据到哪去", GraphPalette.DownstreamEdgePen));
+            }
+            return rows;
+        }
+
+        // 没有文本测量接口,按 CJK 全角 / 拉丁半角粗估;宁宽勿窄,背景框不至于截字。
+        private static float EstimateTextWidth(string text, float fontSize)
+        {
+            float w = 0f;
+            foreach (var ch in text) w += ch >= 0x2E80 ? fontSize : fontSize * 0.6f;
+            return w;
+        }
+    }
+
     // GraphMinimapLayer 已合并到通用 Hevo.Charting.Layers.MinimapLayer ——
     // GraphSchema.PushTraitToLayers 自己负责把 GraphState 翻译成 MinimapTrait(ContentBounds + ContentItems + Viewport)。
     // 旧的 ComputeContentBounds 静态方法搬到 GraphSchema.ComputeNodesAabb,跟 ComputeMinimapMapping 共用。
@@ -490,7 +920,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
             float tx = rect.X + pad;
             float ty = rect.Y + pad;
-            var headBrush = port.IsInput ? GraphPalette.PortInput : GraphPalette.PortOutput;
+            var headBrush = GraphPalette.PortBrushFor(
+                EdgeDataKindClassifier.Classify(port.DataTypeName, EdgeKind.DataPort, null, null));
             draw.DrawText(line1, GraphPalette.Typeface, headBrush, fontSize,
                 new HevoPoint(tx, ty), TextAlignX.Left, TextAlignY.Top);
             draw.DrawText(line2, GraphPalette.Typeface, GraphPalette.TooltipDimText, fontSize - 1f,

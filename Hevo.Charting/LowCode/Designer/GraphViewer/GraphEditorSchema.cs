@@ -103,6 +103,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             canvas.Add(new GraphNodeFeature      { StatePort = port });
             canvas.Add(new GraphEdgeFeature      { StatePort = port });
             canvas.Add(new GraphSelectionFeature { StatePort = port });
+            canvas.Add(new GraphLegendFeature    { StatePort = port });
             canvas.Add(new GraphPreviewFeature   { StatePort = port });
             canvas.Add(new GraphMinimapFeature   { StatePort = port, Geometry = MinimapGeometry });
             canvas.Add(Interaction);

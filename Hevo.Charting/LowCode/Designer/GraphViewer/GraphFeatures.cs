@@ -73,6 +73,13 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             => ctx.For(Layer).PublishData(new GraphRenderTrait(state));
     }
 
+    /// <summary>连线颜色图例(屏幕左下角)。</summary>
+    internal sealed class GraphLegendFeature : GraphLayerFeatureBase<GraphLegendLayer>
+    {
+        protected override void PublishTrait(FeatureContext ctx, GraphState state)
+            => ctx.For(Layer).PublishData(new GraphRenderTrait(state));
+    }
+
     /// <summary>橡皮筋连线 + 对齐辅助线 + hover tooltip 渲染。</summary>
     internal sealed class GraphPreviewFeature : GraphLayerFeatureBase<GraphPreviewLayer>
     {

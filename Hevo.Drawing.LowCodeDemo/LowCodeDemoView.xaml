@@ -11,7 +11,7 @@
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition x:Name="jsonColumn" Width="380"/>
+            <ColumnDefinition x:Name="jsonColumn" Width="0"/>
         </Grid.ColumnDefinitions>
 
         <!-- 工具栏 -->
@@ -26,21 +26,24 @@
             <Button x:Name="btnImportJson"  Content="打开"      Margin="6,4" Padding="10,4"
                     ToolTip="从 JSON 文件加载蓝图到画布(覆盖当前画布,且记住路径作为后续保存目标)"/>
             <Button x:Name="btnAutoLayout"  Content="自动布局"   Margin="6,4" Padding="10,4"
-                    ToolTip="按 Category 分列、按入度纵向排开，一键整理乱拖之后的画布"/>
+                    ToolTip="竖向泳道从左到右按数据流排开，连线改走绕开节点的折线，一键整理乱拖之后的画布"/>
             <Separator Margin="6,4"/>
             <Button x:Name="btnRunBlueprint" Content="运行蓝图" Margin="6,4" Padding="10,4"
                     ToolTip="把当前画布编译成 ChartBlueprint 并在预览窗口中运行。运行时上下文从各 DataSource 节点的 DefaultContext 字段读取"/>
             <Separator Margin="6,4"/>
             <Button x:Name="btnClear" Content="清空" Margin="6,4" Padding="10,4"/>
+            <Separator Margin="6,4"/>
+            <ToggleButton x:Name="btnToggleJson" Content="JSON 预览" Margin="6,4" Padding="10,4"
+                          ToolTip="展开 / 收起右侧蓝图 JSON 预览(Ctrl+J)。默认收起,把宽度让给画布"/>
             <TextBlock Foreground="#FFA0A8B0" VerticalAlignment="Center" Margin="20,0,0,0"
-                       Text="左键拖节点 / 右键平移 / 滚轮缩放 / 输出→输入拖连线 / Del 删节点 / Ctrl+Z 撤销 / Ctrl+Y 重做"/>
+                       Text="左键拖节点 / 右键拖动或 Shift+滚轮平移 / 滚轮缩放 / Home 适配视图 / 输出→输入拖连线 / Del 删节点 / Ctrl+Z 撤销 / Ctrl+Y 重做"/>
         </StackPanel>
 
-        <!-- 画布 -->
-        <chart:ChartHost Grid.Row="1" Grid.Column="0" x:Name="lowCodeHost"/>
+        <!-- 画布(裁剪:平移后内容不能画到工具栏上) -->
+        <chart:ChartHost Grid.Row="1" Grid.Column="0" x:Name="lowCodeHost" ClipToBounds="True"/>
 
-        <!-- JSON 预览(可隐藏:ShowJsonPreview=false 时折叠 Column 1) -->
-        <Grid Grid.Row="1" Grid.Column="1" x:Name="jsonPreviewPane" Background="#FF202229">
+        <!-- JSON 预览(默认收起,工具栏按钮 / Ctrl+J 展开) -->
+        <Grid Grid.Row="1" Grid.Column="1" x:Name="jsonPreviewPane" Background="#FF202229" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
