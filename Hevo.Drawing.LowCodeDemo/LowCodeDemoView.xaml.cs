@@ -47,9 +47,9 @@ namespace Hevo.Drawing.LowCodeDemo
         public BlueprintHandlerRegistry? HandlersOverride { get; set; }
 
         /// <summary>
-        /// 是否显示右侧 JSON 预览栏。默认 true(独立 demo 用)。
-        /// 业务嵌入 BlueprintEditorPanel 这种宿主自己有 chart 预览的场景:设 false 收起 JSON 栏,
-        /// 把空间让给 inline preview;落盘 / 调试 走 PersistencePath JSON 文件即可。
+        /// 是否显示右侧 JSON 预览栏。默认 false:画布才是主角,JSON 只在排查序列化时看,
+        /// 用工具栏"JSON 预览"按钮或 Ctrl+J 随时展开。
+        /// 业务嵌入 BlueprintEditorPanel 这种宿主自己有 chart 预览的场景保持收起即可;落盘 / 调试 走 PersistencePath JSON 文件。
         /// </summary>
         public bool ShowJsonPreview
         {
@@ -61,6 +61,9 @@ namespace Hevo.Drawing.LowCodeDemo
                 // ColumnDefinition 设 0 + Visibility=Collapsed 双管齐下,确保右栏物理空间为 0,
                 // 避免画布右侧仍空 380px 看着像 padding。
                 jsonColumn.Width = value ? new System.Windows.GridLength(380) : new System.Windows.GridLength(0);
+                if (btnToggleJson != null) btnToggleJson.IsChecked = value;
+                // 收起期间不刷新 JSON(拖节点每帧都序列化太浪费),展开时补一次。
+                if (value && _schema != null) RefreshJsonPreview(_schema.DataSource.State);
             }
         }
 
@@ -185,19 +188,27 @@ namespace Hevo.Drawing.LowCodeDemo
             btnExportJson.Click += (_, __) => SaveBlueprintInteractive();
             btnImportJson.Click += (_, __) => OpenBlueprintInteractive();
 
+            btnToggleJson.Click += (_, __) => ShowJsonPreview = btnToggleJson.IsChecked == true;
+            PreviewKeyDown += (_, e) =>
+            {
+                // 中文输入法开着时字母键到 WPF 是 ImeProcessed,真实键在 ImeProcessedKey。
+                var key = e.Key == System.Windows.Input.Key.ImeProcessed ? e.ImeProcessedKey : e.Key;
+                if (key == System.Windows.Input.Key.J
+                    && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control)
+                {
+                    ShowJsonPreview = !ShowJsonPreview;
+                    e.Handled = true;
+                }
+            };
+
             btnClear.Click += (_, __) =>
                 _schema!.DataSource.ApplyUserEdit(s => GraphState.Empty with { Transform = s.Transform });
 
             btnAutoLayout.Click += (_, __) =>
             {
                 if (_schema == null) return;
-                _schema.DataSource.ApplyUserEdit(s =>
-                {
-                    var nodes = s.Nodes.ToList();
-                    var edges = s.Edges.ToList();
-                    AutoLayout.Apply(nodes, edges);
-                    return s with { Nodes = nodes };
-                });
+                _schema.DataSource.ApplyUserEdit(AutoLayout.Apply);
+                _schema.Interaction.FitToContent();
             };
 
             btnRunBlueprint.Click += (_, __) =>
@@ -406,6 +417,7 @@ namespace Hevo.Drawing.LowCodeDemo
 
         private void RefreshJsonPreview(GraphState state)
         {
+            if (!ShowJsonPreview) return;
             var bp   = GraphSerializer.ToBlueprint(state);
             var json = JsonSerializer.Serialize(bp, _jsonOptions);
             jsonPreview.Text = json;
@@ -659,39 +671,34 @@ namespace Hevo.Drawing.LowCodeDemo
 
         private static GraphState BuildSampleGraph()
         {
-            const float colStep = 260f, col0 = 60f;
-            float Col(int i) => col0 + colStep * i;
+            // 位置全部交给末尾的 AutoLayout:手摆坐标一旦跟数据流方向不一致,
+            // PlotFeature 的 macd / signal / hist 就得从右往左绕回 AutoScale,满屏回绕线。
+            var at = default(HevoPoint);
 
-            const float laneDS       =  60f;
-            const float laneEnv      = 240f;
-            const float laneAxes     = 440f;
-            const float laneSeries   = 600f;
-            const float laneInteract = 800f;
-
-            var ds = NodeFactory.CreateNode(typeof(SinWaveDataSource), new HevoPoint(Col(0), laneDS));
+            var ds = NodeFactory.CreateNode(typeof(SinWaveDataSource), at);
             // 节点化协议:DS 节点必须有 Properties["DefaultContext"] —— 否则 BlueprintRunner.StartLoading
             // 静默跳过 LoadAsync,首屏数据永不发出,cell 永远卡在 IsLoading=true。
             // 任何非空串都行,SinWaveDataSource.OnFetchAsync 不读 context 内容。
             ds.Properties["DefaultContext"] = "demo";
 
-            var grid         = NodeFactory.CreateNode(typeof(GridLayoutFeature),         new HevoPoint(Col(0), laneEnv));
-            var decor        = NodeFactory.CreateNode(typeof(PlotAreaDecorFeature),      new HevoPoint(Col(1), laneEnv));
-            var vpManager    = NodeFactory.CreateNode(typeof(ViewportManagerFeature),    new HevoPoint(Col(2), laneEnv));
-            var scale        = NodeFactory.CreateNode(typeof(UniversalAutoScaleFeature), new HevoPoint(Col(3), laneEnv));
-            var viewportNode = NodeFactory.CreateViewportNode(                           new HevoPoint(Col(4), laneEnv));
+            var grid         = NodeFactory.CreateNode(typeof(GridLayoutFeature),         at);
+            var decor        = NodeFactory.CreateNode(typeof(PlotAreaDecorFeature),      at);
+            var vpManager    = NodeFactory.CreateNode(typeof(ViewportManagerFeature),    at);
+            var scale        = NodeFactory.CreateNode(typeof(UniversalAutoScaleFeature), at);
+            var viewportNode = NodeFactory.CreateViewportNode(                           at);
             var scaleTrait   = MakeTraitNode("ScaleStrategyTrait", "LineMode",
-                position: new HevoPoint(Col(5), laneEnv));
+                position: at);
 
             decor.Properties[nameof(PlotAreaDecorFeature.BackgroundBrush)] =
                 (IHevoBrush)new HevoSolidBrush(Color.FromRgb(0x14, 0x16, 0x1B));
             decor.Properties[nameof(PlotAreaDecorFeature.BorderStyle)] =
                 LineStyle.Create(Color.FromArgb(0x55, 0xB0, 0xBE, 0xC5), thickness: 1.0);
 
-            var yAxis = NodeFactory.CreateNode(typeof(AxisFeature), new HevoPoint(Col(4), laneAxes));
+            var yAxis = NodeFactory.CreateNode(typeof(AxisFeature), at);
             yAxis.Properties[nameof(AxisFeature.AxisStyle)] =
                 AxisStyleTrait.Create(AxisPlacement.Right, Color.FromRgb(0xB0, 0xBE, 0xC5), fontSize: 11.0);
 
-            var lineRaw = NodeFactory.CreateNode(typeof(LineSeriesFeature), new HevoPoint(Col(3), laneSeries));
+            var lineRaw = NodeFactory.CreateNode(typeof(LineSeriesFeature), at);
             lineRaw.Properties[nameof(LineSeriesFeature.LayerName)] = "Raw";
             lineRaw.Properties[nameof(LineSeriesFeature.Style)] =
                 LineStyle.Create(Color.FromArgb(0x66, 0x4F, 0xC3, 0xF7), thickness: 1.0);
@@ -700,10 +707,10 @@ namespace Hevo.Drawing.LowCodeDemo
             // Properties["Compute"] 是 string,蓝图加载阶段 ResolveHandlerReferences 翻译成
             // Func<ROM<double>, ROM<double>>(从 DemoPythonHost.Registry 查表)。
             // handler 来自 complex_indicators.py(纯 numpy 实现),签名 (ROM<double>) -> ROM<double>。
-            var pyMa = NodeFactory.CreateNode(typeof(ComputeFeature), new HevoPoint(Col(4), laneSeries));
+            var pyMa = NodeFactory.CreateNode(typeof(ComputeFeature), at);
             pyMa.Properties[nameof(ComputeFeature.Compute)] = "bollinger_upper";
 
-            var lineMa = NodeFactory.CreateNode(typeof(LineSeriesFeature), new HevoPoint(Col(5), laneSeries));
+            var lineMa = NodeFactory.CreateNode(typeof(LineSeriesFeature), at);
             lineMa.Properties[nameof(LineSeriesFeature.LayerName)] = "BB Upper";
             lineMa.Properties[nameof(LineSeriesFeature.Style)] =
                 LineStyle.Create(Color.FromRgb(0xFF, 0xB7, 0x4D), thickness: 2.0);
@@ -711,7 +718,7 @@ namespace Hevo.Drawing.LowCodeDemo
             // §D2.6 Pine 风味:PyPlot 节点 = 一个文件 (pine_demo.py @indicator pine_macd) 自动出 line+bar 混合 series。
             // 选 pine_macd(line ×2 + bar ×1)同时验证 PlotFeature 的 LineLayer / BarLayer 双路径,
             // 也是 §F SmartActivator setter 防注入护栏修复后必跑的回归用例。
-            var pyPlot = NodeFactory.CreateNode(typeof(PlotFeature), new HevoPoint(Col(6), laneSeries));
+            var pyPlot = NodeFactory.CreateNode(typeof(PlotFeature), at);
             pyPlot.Properties[nameof(PlotFeature.IndicatorName)] = "pine_macd";
             pyPlot.Properties[nameof(PlotFeature.Indicator)]     = "pine_macd";
             // 反射拿不到 indicator 的 series names —— 它来自 Python 装饰器元数据,运行期才知道。
@@ -722,10 +729,10 @@ namespace Hevo.Drawing.LowCodeDemo
                 new[] { "macd", "signal", "hist" },
                 typeof(ReadOnlyMemory<double>));
 
-            var interact  = NodeFactory.CreateNode(typeof(ChartInteractionFeature),      new HevoPoint(Col(1), laneInteract));
-            var crosshair = NodeFactory.CreateNode(typeof(CrosshairDoubleFeature),       new HevoPoint(Col(2), laneInteract));
-            var tooltip   = NodeFactory.CreateNode(typeof(TooltipDoubleWidgetFeature),   new HevoPoint(Col(3), laneInteract));
-            var header    = NodeFactory.CreateNode(typeof(UniversalHeaderFeature),       new HevoPoint(Col(4), laneInteract));
+            var interact  = NodeFactory.CreateNode(typeof(ChartInteractionFeature),      at);
+            var crosshair = NodeFactory.CreateNode(typeof(CrosshairDoubleFeature),       at);
+            var tooltip   = NodeFactory.CreateNode(typeof(TooltipDoubleWidgetFeature),   at);
+            var header    = NodeFactory.CreateNode(typeof(UniversalHeaderFeature),       at);
 
             var nodes = new[] { ds, scaleTrait, grid, decor, vpManager, scale, viewportNode, yAxis,
                                 lineRaw, pyMa, lineMa, pyPlot, interact, crosshair, tooltip, header };
@@ -769,13 +776,17 @@ namespace Hevo.Drawing.LowCodeDemo
 
             TryWire(edges, viewportNode, "LogicalLength", header, nameof(UniversalHeaderFeature.LogicalLengthPort));
 
+            var laidOut = nodes.ToList();
+            var routes = AutoLayout.Apply(laidOut, edges);
+
             return new GraphState(
-                Nodes: nodes,
+                Nodes: laidOut,
                 Edges: edges,
                 SelectedNodeIds: new HashSet<string>(),
                 Transform: CanvasTransform.Identity,
                 RubberBand: null,
-                BoxSelection: null);
+                BoxSelection: null,
+                EdgeRoutes: routes);
         }
 
         /// <summary>

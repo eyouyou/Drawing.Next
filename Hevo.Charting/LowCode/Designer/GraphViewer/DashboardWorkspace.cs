@@ -533,13 +533,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void AutoLayoutActive()
         {
-            ActiveSlot()?.State.ApplyUserEdit(s =>
-            {
-                var nodes = s.Nodes.ToList();
-                var edges = s.Edges.ToList();
-                AutoLayout.Apply(nodes, edges);
-                return s with { Nodes = nodes };
-            });
+            ActiveSlot()?.State.ApplyUserEdit(AutoLayout.Apply);
         }
 
         private void ClearActive()

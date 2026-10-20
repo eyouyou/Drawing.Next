@@ -187,6 +187,10 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     /// 整个画布的不可变状态快照。任意修改都必须 with { ... } 出新实例,
     /// trait 引用判脏 (VisualDependencyTracker.CheckIfDirty) 才能命中。
     /// </summary>
+    /// <param name="EdgeRoutes">
+    /// 自动布局给出的连线折线(按 <see cref="Edge.Id"/>,画布坐标)。纯视图态,不进蓝图序列化。
+    /// 拖动节点后首尾点对不上端口的折线视为过期,画布退回贝塞尔曲线,再点"自动布局"重新生成。
+    /// </param>
     public record GraphState(
         IReadOnlyList<Node> Nodes,
         IReadOnlyList<Edge> Edges,
@@ -195,7 +199,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         EdgeRubberBand? RubberBand,
         BoxSelection? BoxSelection,
         HoveredPort? HoveredPort = null,
-        AlignmentGuides? AlignmentGuides = null
+        AlignmentGuides? AlignmentGuides = null,
+        IReadOnlyDictionary<string, IReadOnlyList<HevoPoint>>? EdgeRoutes = null
     )
     {
         public static readonly GraphState Empty = new(

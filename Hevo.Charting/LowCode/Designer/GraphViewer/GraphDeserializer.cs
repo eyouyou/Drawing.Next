@@ -1,3 +1,4 @@
+using Hevo.Charting.DevTools;
 using Hevo.Charting.Features;
 using Hevo.Charting.LowCode;
 
@@ -14,7 +15,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     /// <b>规则</b>:
     /// <list type="number">
     ///   <item><b>节点</b>:每个 DataSource / Feature / Trait 走 <see cref="NodeFactory.CreateNode"/> 派生(端口元数据按 .NET 反射重建);
-    ///         位置由内部 <see cref="AutoLayout"/> 按 <see cref="FeatureCategory"/> 分泳道、按拓扑深度分列自动派。</item>
+    ///         位置由内部 <see cref="AutoLayout"/> 按 <see cref="FeatureCategory"/> 分竖向泳道、泳道内按数据流分列自动派。</item>
     ///   <item><b>Viewport</b>:扫描所有 <c>PortBindings</c> + <c>DataSource.ScalarMappings</c>,
     ///         发现指向 <c>VP_LogicalLength</c> / <c>VP_UserRange</c> / <c>VP_ActiveRange</c> 这几个 well-known id 时,
     ///         自动孵化一个 <see cref="NodeKind.Viewport"/> 节点并把对应连线引过去 —— 跟 GraphSerializer 的 Viewport 路径对称。</item>
@@ -118,8 +119,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             // 扇入端口上解析不到画布内源头的引用(dashboard 共享端口、未登记节点的输出)记到端口上,保存时写回。
             ApplyExternalFanInIds(nodes, featureModelByNodeId, globalIdToOutput);
 
-            // 6. 自动布局:DataSource 在最左,然后按 FeatureCategory 分列(Environment / Axes / Series / Interaction)。
-            AutoLayout.Apply(nodes, edges);
+            // 6. 自动布局:竖向泳道从左到右 数据源 → Environment → Axes → Series → Interaction,连线走布局给的折线。
+            var routes = AutoLayout.Apply(nodes, edges);
 
             return new GraphState(
                 Nodes: nodes,
@@ -127,7 +128,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 SelectedNodeIds: new HashSet<string>(),
                 Transform: CanvasTransform.Identity,
                 RubberBand: null,
-                BoxSelection: null)
+                BoxSelection: null,
+                EdgeRoutes: routes)
             {
                 Passthrough = new BlueprintPassthrough(
                     passDs, passTraits, passFeatures,
@@ -437,155 +439,134 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     }
 
     /// <summary>
-    /// 简易布局算法 —— 按 <see cref="FeatureCategory"/> 横向分泳道,每个泳道独占自己的 Y 行,
-    /// 内部按入度排序后水平铺开。
+    /// 蓝图自动布局 —— 泳道是竖向列带,从左到右依次是 数据源 → Trait → Environment 环境 → Axes 坐标轴 →
+    /// Series 序列 → Interaction 交互,跟数据流方向一致;端口右出左入,所以绝大多数连线从左往右走。
     /// <para>
-    /// 设计目标:跟 <see cref="GraphCanvasLayer"/> 渲染的"类别横幅"视觉模型对齐 —— 横幅按节点 Y 范围
-    /// 聚合,所以"每 category 一个 Y 行"才不会让带子互相重叠。曾经版本是按 category 分列(每列从 y=60
-    /// 起头),结果所有泳道竖向重合,UX 完全乱套,踩坑后改成本设计。
+    /// 复用拓扑监控的分层布局 <see cref="LayeredGraphLayout"/>(参照 ELK Layered):每条泳道是一个分区,
+    /// 占一段连续的列;泳道内按数据流分列,长边拆虚拟节点减少交叉,连线是绕开节点的横竖折线。
+    /// 从后面泳道连回前面泳道的线(AutoScale 收 Series 的列、交互回写 Header 等)当回边,
+    /// 从全部节点下方的独立走廊绕回,不穿节点、彼此不重合。
     /// </para>
-    /// <para>公开给 Window4 的"自动布局"按钮复用 —— 一键把杂乱画布重排成清晰的 6 行泳道。</para>
+    /// <para>公开给编辑器的"自动布局"按钮复用。</para>
     /// </summary>
     public static class AutoLayout
     {
-        // 列水平参数(每泳道内部从左到右排开)
-        private const float ColW = 260f;
-        private const float ColX0 = 40f;
-        // 泳道起点 + 泳道间垂直间距(给 ComputeCategoryBands 的 pad=14 留视觉缓冲)
-        private const float LaneY0 = 60f;
-        private const float LaneGap = 60f;
+        // 列与列之间留给连线竖段的宽度:太宽整图变宽、适配视图时缩得字看不清;太窄竖段挤成一团。
+        // 示例图最挤的缝隙有六七根竖段,80 时间距约 10px。
+        private const double ColumnGap = 80;
+        private const double Left = 40;
+        // 顶部留给泳道标题和图例。
+        private const double Top = 100;
+        private const double NodeSpacing = 28;
+
+        // 泳道从左到右的顺序 = 分区序号。
+        private static readonly FeatureCategory[] LaneOrder =
+        {
+            FeatureCategory.DataSource,
+            FeatureCategory.Trait,
+            FeatureCategory.Environment,
+            FeatureCategory.Axes,
+            FeatureCategory.Series,
+            FeatureCategory.Interaction,
+            FeatureCategory.Unknown,
+        };
 
         /// <summary>
-        /// 就地修改 <paramref name="nodes"/> 列表里的节点位置(Node 是 record,with 出新引用回写),
-        /// 不改 <paramref name="edges"/>。
-        /// <para>
-        /// 算法:横向泳道(Y 行 = Category)+ 拓扑深度强制 forward(X 列 ≥ DAG 深度)。
-        /// 每个节点先算 DAG 深度(从所有"入度 0 源"出发的最长路径),然后在自己泳道内分配 col,
-        /// 满足两条硬约束:(1) col ≥ depth(确保所有边 X 方向向右,无反向边);
-        /// (2) 同泳道内 col 互不相同(避免同 Y 重叠)。无连接节点(decor/grid/vpManager 这种纯
-        /// 配置节点)推到泳道末尾,不挤占主流数据通道。
-        /// </para>
-        /// <para>
-        /// 跟旧版 barycentric 比:旧版尝试用邻居重心拉拢节点,但孤立节点占住 col 0-N 把后续 depth-N 节点
-        /// 顶到右边,跨泳道边反而出现 backward S 钩。新版用 depth 显式分层,任何 (a→b) 边天然 a.col < b.col。
-        /// </para>
+        /// 就地改写 <paramref name="nodes"/> 的位置(Node 是 record,with 出新引用回写),不改 <paramref name="edges"/>;
+        /// 返回每根连线(按 <see cref="Edge.Id"/>)的折线,画布坐标。
         /// </summary>
-        public static void Apply(List<Node> nodes, List<Edge> edges)
+        public static Dictionary<string, IReadOnlyList<HevoPoint>> Apply(List<Node> nodes, List<Edge> edges)
         {
-            // 1. 泳道分桶
-            var byLane = new Dictionary<FeatureCategory, List<Node>>();
-            foreach (var n in nodes)
+            var routes = new Dictionary<string, IReadOnlyList<HevoPoint>>();
+            if (nodes.Count == 0) return routes;
+
+            var byId = new Dictionary<string, Node>();
+            foreach (var n in nodes) byId[n.Id] = n;
+
+            var lNodes = nodes.Select(n => new LayeredGraphLayout.Node
             {
-                var lane = LaneFor(n);
-                if (!byLane.TryGetValue(lane, out var list)) { list = new List<Node>(); byLane[lane] = list; }
-                list.Add(n);
-            }
+                Id = n.Id,
+                Height = n.Size.Y,
+                Partition = Array.IndexOf(LaneOrder, LaneFor(n)),
+                PinFirstLayer = n.Kind == NodeKind.DataSource,
+            }).ToList();
 
-            // 2. 计算每个节点的 DAG 深度(longest-path-from-any-source)。
-            //    入度 0 节点 depth = 0;其它 = max(predecessor.depth) + 1。
-            //    用拓扑序保证每个节点处理时其前驱已完成。带环图回退到 BFS 单调放松,
-            //    画布上一般都是 DAG,环来自业务自定义闭环 feature,不在本次低代码 demo 范围。
-            var depth = ComputeDepth(nodes, edges);
-
-            // 3. 邻接表(只统计"是否有连接")用来识别孤立节点,推到泳道末尾。
-            var hasEdge = new HashSet<string>();
-            foreach (var e in edges) { hasEdge.Add(e.FromNodeId); hasEdge.Add(e.ToNodeId); }
-
-            // 4. 每条泳道内排序:连接节点优先 (按 depth 升序 → alphabetic);孤立节点(配置类)排在后面。
-            //    这一步是 forward 性的关键 —— 连接节点先抢占低 col,孤立节点不挤占数据通道。
-            foreach (var list in byLane.Values)
+            var lEdges = new List<LayeredGraphLayout.Edge>(edges.Count);
+            foreach (var e in edges)
             {
-                list.Sort((a, b) =>
+                byId.TryGetValue(e.FromNodeId, out var from);
+                byId.TryGetValue(e.ToNodeId, out var to);
+                var fp = from?.FindPort(e.FromPortId, isInput: false);
+                var tp = to?.FindPort(e.ToPortId, isInput: true);
+                lEdges.Add(new LayeredGraphLayout.Edge
                 {
-                    bool ca = hasEdge.Contains(a.Id);
-                    bool cb = hasEdge.Contains(b.Id);
-                    if (ca != cb) return ca ? -1 : 1;            // 连接者在前
-                    int da = depth.GetValueOrDefault(a.Id, 0);
-                    int db = depth.GetValueOrDefault(b.Id, 0);
-                    if (da != db) return da.CompareTo(db);
-                    return string.Compare(a.TypeName, b.TypeName, StringComparison.Ordinal);
+                    Src = e.FromNodeId,
+                    Tgt = e.ToNodeId,
+                    // 端口相对节点顶边的偏移跟节点当前位置无关,直接拿现位置算差值。
+                    SrcPortY = from != null && fp != null ? from.GetPortPosition(fp).Y - from.Position.Y : (double?)null,
+                    TgtPortY = to != null && tp != null ? to.GetPortPosition(tp).Y - to.Position.Y : (double?)null,
                 });
             }
 
-            // 5. 派 (X, Y):每泳道独占 Y 行;X 用贪心 max(node.depth, lastColInLane + 1)。
-            //    单节点泳道(DataSource / Axes / Series 通常 1 个节点)的 col 直接 = depth,
-            //    跨泳道的边自然成 forward(右下)。
-            // 跟 LowCodeDemo / KLineDetailBlueprint 手写蓝图的 5 lane 排序对齐:
-            // 数据源在最上 → 环境/Trait 配置 → 坐标轴 → Series(含 Compute / Plot)→ 交互 在最下。
-            // Compute 节点(ComputeFeature / IncrementalComputeFeature 等)归入 Series 泳道,
-            // 跟 LineSeries 同行水平排开(Compute → LineSeries 数据流),不另起一行。
-            var laneOrder = new[]
+            double nodeW = nodes.Max(n => n.Size.X);
+            var res = LayeredGraphLayout.Compute(lNodes, lEdges, new LayeredGraphLayout.Options
             {
-                FeatureCategory.DataSource,
-                FeatureCategory.Trait,
-                FeatureCategory.Environment,
-                FeatureCategory.Axes,
-                FeatureCategory.Series,
-                FeatureCategory.Interaction,
-                FeatureCategory.Unknown,
-            };
+                Left = Left,
+                Top = Top,
+                // 不按窗口铺满:蓝图画布可平移缩放,列宽和高度都取最小值,内容多大就占多大。
+                Width = 0,
+                Height = 0,
+                MaxVerticalExpand = 1,
+                MinNodeWidth = nodeW,
+                MaxNodeWidth = nodeW,
+                MinColumnGap = ColumnGap,
+                NodeSpacing = NodeSpacing,
+                RouteBackEdgesNear = true,
+                // 每条回绕总线上方要放一行来源标注,走廊间距得容得下。
+                BackEdgeSpacing = 24,
+                WeightedCycleBreaking = true,
+                MergeSamePortTracks = true,
+                // 长边并排横穿多列时,间距太小在 0.9 倍缩放下几乎贴在一起,看着像重合。
+                DummySpacing = 18,
+            });
 
-            float yCursor = LaneY0;
-            foreach (var cat in laneOrder)
+            for (int i = 0; i < nodes.Count; i++)
             {
-                if (!byLane.TryGetValue(cat, out var list) || list.Count == 0) continue;
-                int lastCol = -1;
-                float maxH = 0f;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var n = list[i];
-                    int nodeDepth = depth.GetValueOrDefault(n.Id, 0);
-                    int col = Math.Max(nodeDepth, lastCol + 1);
-                    int idx = nodes.IndexOf(n);
-                    if (idx < 0) continue;
-                    nodes[idx] = n with { Position = new HevoPoint(ColX0 + col * ColW, yCursor) };
-                    lastCol = col;
-                    if (n.Size.Y > maxH) maxH = n.Size.Y;
-                }
-                yCursor += maxH + LaneGap;
+                if (!res.Boxes.TryGetValue(nodes[i].Id, out var b)) continue;
+                // 节点比列宽里的节点框窄时左对齐,输出端口落在框右边缘以内。
+                nodes[i] = nodes[i] with { Position = new HevoPoint((float)b.X, (float)b.Y) };
             }
+
+            for (int i = 0; i < edges.Count; i++)
+            {
+                var r = res.EdgeRoutes[i];
+                if (r == null || r.Count < 2) continue;
+                var pts = r.Select(p => new HevoPoint((float)p.X, (float)p.Y)).ToList();
+                // 节点比列宽窄时,首尾点要贴到端口真实位置,画布据此判断折线是否还有效。
+                int fi = nodes.FindIndex(n => n.Id == edges[i].FromNodeId);
+                int ti = nodes.FindIndex(n => n.Id == edges[i].ToNodeId);
+                if (fi >= 0)
+                {
+                    var n = nodes[fi];
+                    pts[0] = new HevoPoint(n.Position.X + n.Size.X, pts[0].Y);
+                }
+                if (ti >= 0) pts[pts.Count - 1] = new HevoPoint(nodes[ti].Position.X, pts[pts.Count - 1].Y);
+                routes[edges[i].Id] = pts;
+            }
+            return routes;
         }
 
-        /// <summary>
-        /// 计算每个节点的 DAG 深度(longest path from any indeg-0 source)。
-        /// 拓扑顺序遍历 + 单调松弛;带环图最坏情况下深度被截到当前已松弛步数,不会无限循环。
-        /// </summary>
-        private static Dictionary<string, int> ComputeDepth(List<Node> nodes, List<Edge> edges)
+        /// <summary>整张图重排,节点位置和连线折线一起换掉。</summary>
+        public static GraphState Apply(GraphState state)
         {
-            var depth = new Dictionary<string, int>();
-            var indeg = new Dictionary<string, int>();
-            var outAdj = new Dictionary<string, List<string>>();
-            foreach (var n in nodes) { depth[n.Id] = 0; indeg[n.Id] = 0; outAdj[n.Id] = new List<string>(); }
-            foreach (var e in edges)
-            {
-                if (!indeg.ContainsKey(e.ToNodeId) || !outAdj.ContainsKey(e.FromNodeId)) continue;
-                indeg[e.ToNodeId]++;
-                outAdj[e.FromNodeId].Add(e.ToNodeId);
-            }
-
-            // Kahn 拓扑排序:入度 0 进队列,弹出时把所有后继的 depth 用 max(currentDepth+1, succ.depth) 更新。
-            var queue = new Queue<string>();
-            foreach (var kv in indeg) if (kv.Value == 0) queue.Enqueue(kv.Key);
-            int processed = 0;
-            int safetyLimit = nodes.Count + edges.Count + 10;  // 环图兜底
-            while (queue.Count > 0 && processed < safetyLimit)
-            {
-                processed++;
-                var u = queue.Dequeue();
-                int du = depth[u];
-                foreach (var v in outAdj[u])
-                {
-                    if (du + 1 > depth[v]) depth[v] = du + 1;
-                    if (--indeg[v] == 0) queue.Enqueue(v);
-                }
-            }
-            return depth;
+            var nodes = state.Nodes.ToList();
+            var edges = state.Edges.ToList();
+            var routes = Apply(nodes, edges);
+            return state with { Nodes = nodes, EdgeRoutes = routes };
         }
 
-        // 节点 → 实际泳道 Category。NodeKind 优先 (DataSource / Viewport 强制泳道),
-        // 其它走 Node.Category。Trait 默认 Trait 泳道,但业务可在 FeatureCategoryRegistry 重定向
-        // (例如 ScaleStrategyTrait 在 Bootstrap 里被改派到 Environment 泳道)。
-        private static FeatureCategory LaneFor(Node n) => n.Kind switch
+        /// <summary>节点的类别泳道。NodeKind 优先(DataSource / Viewport 固定泳道),其它走 Node.Category。</summary>
+        public static FeatureCategory LaneFor(Node n) => n.Kind switch
         {
             NodeKind.DataSource => FeatureCategory.DataSource,
             NodeKind.Viewport   => FeatureCategory.Environment,

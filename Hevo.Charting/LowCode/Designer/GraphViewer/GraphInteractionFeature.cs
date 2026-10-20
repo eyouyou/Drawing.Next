@@ -44,10 +44,27 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         /// <summary>节点被双击时触发。NodeEditorWindow 监听此事件,弹出节点属性编辑器。</summary>
         public event Action<Node>? NodeEditRequested;
 
+        /// <summary>
+        /// 画布拿到尺寸时,如果还是初始变换就自动适配视图;之后窗口改尺寸,只要用户没动过视图就跟着重新适配。
+        /// 默认开:自动布局后的蓝图往往比窗口大,停在原点只能看到左上一角。宿主自己管理初始视图时关掉。
+        /// </summary>
+        public bool FitOnFirstShow { get; init; } = true;
+
+        /// <summary>
+        /// 适配视图时最小缩放。节点标题 13px、端口名 11px,低于 0.9 端口名就只剩十像素上下、看着吃力;
+        /// 放不下的部分留在视野外,右键拖动或 Shift+滚轮横向平移查看。
+        /// </summary>
+        public float MinFitScale { get; init; } = 0.9f;
+
+        // 最近一次自动适配给出的变换。当前变换还等于它,说明用户没平移缩放过,改窗口尺寸时可以放心重算。
+        private CanvasTransform? _autoFitTransform;
+
         // ==========================================
         //  交互运行时状态(纯 UI,不进 GraphState,避免污染序列化产物)
         // ==========================================
         private enum DragMode { None, PanCanvas, MoveNodes, RubberEdge, BoxSelect }
+        // 拖节点的起动阈值(屏幕像素),低于它算点选。
+        private const float DragThreshold = 4f;
         private DragMode _drag = DragMode.None;
         private HevoPoint _dragStartScreen;          // 屏幕坐标:按下点
         private CanvasTransform _dragStartTransform; // 按下时的画布变换
@@ -81,6 +98,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             // 同时启用,跟鼠标 right-drag pan + wheel zoom 行为对齐。
             chart.ManipulationStarting += OnManipulationStarting;
             chart.ManipulationDelta    += OnManipulationDelta;
+            chart.SizeChanged          += OnSizeChanged;
         }
 
         protected override void OnDecompose()
@@ -98,6 +116,58 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             chart.KeyDown              -= OnKeyDown;
             chart.ManipulationStarting -= OnManipulationStarting;
             chart.ManipulationDelta    -= OnManipulationDelta;
+            chart.SizeChanged          -= OnSizeChanged;
+        }
+
+        private void OnSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (!FitOnFirstShow) return;
+            if (e.NewSize.Width <= 0 || e.NewSize.Height <= 0 || DataSource.State.Nodes.Count == 0) return;
+            // 用户或宿主已经动过视图就不抢。
+            var current = DataSource.State.Transform;
+            bool untouched = _autoFitTransform == null ? current == CanvasTransform.Identity : current == _autoFitTransform.Value;
+            if (!untouched) return;
+            FitToContent();
+            _autoFitTransform = DataSource.State.Transform;
+        }
+
+        /// <summary>
+        /// 缩放平移到能看全节点和连线折线(不低于 <see cref="MinFitScale"/>,不放大超过 1)。
+        /// 只改视图变换,不进撤销栈。
+        /// </summary>
+        public void FitToContent()
+        {
+            var chart = Chart;
+            if (chart == null) return;
+            var s = DataSource.State;
+            if (s.Nodes.Count == 0) return;
+            float vw = (float)chart.ActualWidth, vh = (float)chart.ActualHeight;
+            if (vw <= 0 || vh <= 0) return;
+
+            DataSource.State = s with { Transform = ComputeFitTransform(s, vw, vh, MinFitScale) };
+        }
+
+        /// <summary>
+        /// 能看全节点和连线折线的变换:缩放夹在 [<paramref name="minScale"/>, 1],内容左上角对齐视口左上(顶部让出图例
+        /// 和泳道标题)。缩放被下限卡住时内容会超出视口右侧 / 下方,由用户平移查看。
+        /// </summary>
+        public static CanvasTransform ComputeFitTransform(GraphState s, float viewWidth, float viewHeight, float minScale)
+        {
+            var (x, y, w, h) = GraphGeometry.ComputeNodesAabb(s.Nodes);
+            float minX = x, minY = y, maxX = x + w, maxY = y + h;
+            if (s.EdgeRoutes != null)
+                foreach (var r in s.EdgeRoutes.Values)
+                    foreach (var p in r)
+                    {
+                        minX = Math.Min(minX, p.X); maxX = Math.Max(maxX, p.X);
+                        minY = Math.Min(minY, p.Y); maxY = Math.Max(maxY, p.Y);
+                    }
+
+            const float margin = 20f, topReserve = 70f;
+            float scale = Math.Min((viewWidth - 2 * margin) / Math.Max(1f, maxX - minX),
+                                   (viewHeight - topReserve - margin) / Math.Max(1f, maxY - minY));
+            scale = Math.Max(minScale, Math.Min(1f, scale));
+            return new CanvasTransform(margin - minX * scale, topReserve - minY * scale, scale);
         }
 
         protected override void OnProject(FeatureContext ctx)
@@ -260,6 +330,11 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 case DragMode.MoveNodes:
                 {
                     if (_dragStartPositions == null) break;
+                    // 鼠标挪出几像素才算拖动:点选时手一抖、或者吸附在 0 位移时就把节点吸过去,
+                    // 都会让节点偏几像素,自动布局的折线首尾对不上端口、整片退回贝塞尔。
+                    if (Math.Abs(screen.X - _dragStartScreen.X) < DragThreshold
+                        && Math.Abs(screen.Y - _dragStartScreen.Y) < DragThreshold
+                        && ReferenceEquals(s, _dragStartModelSnapshot)) break;
                     var startCanvas = _dragStartTransform.ScreenToCanvas(_dragStartScreen);
                     float ddx = canvas.X - startCanvas.X;
                     float ddy = canvas.Y - startCanvas.Y;
@@ -474,6 +549,16 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             if (chart == null) return;
             var screen = Pt(e, chart);
             var s = DataSource.State;
+
+            // Shift+滚轮横向平移:适配视图有缩放下限,宽图会超出视口右侧,触控板 / 鼠标都能横着翻。
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+            {
+                var t = s.Transform;
+                DataSource.State = s with { Transform = new CanvasTransform(t.OffsetX + e.Delta * 0.6f, t.OffsetY, t.Scale) };
+                e.Handled = true;
+                return;
+            }
+
             var canvasUnderMouse = s.Transform.ScreenToCanvas(screen);
 
             float factor = e.Delta > 0 ? 1.15f : 1f / 1.15f;
@@ -496,6 +581,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
             if (ctrl && (e.Key == Key.Z) && !shift) { DataSource.Undo(); e.Handled = true; return; }
             if (ctrl && (e.Key == Key.Y || (e.Key == Key.Z && shift))) { DataSource.Redo(); e.Handled = true; return; }
+
+            if (e.Key == Key.Home) { FitToContent(); e.Handled = true; return; }
 
             var s = DataSource.State;
             if (e.Key == Key.Delete && s.SelectedNodeIds.Count > 0)
