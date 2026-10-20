@@ -42,7 +42,7 @@ namespace Hevo.Charting.Features
     ///   source 注进来,Get 命中缓存优先,miss 时调 source 一次再缓存。</item>
     /// </list>
     ///
-    /// <para>主项目 <c>Hevo.Charting</c> 对 Python 零感知 —— 不开 PythonNet 子项目时 source 是 null,
+    /// <para>主项目 <c>Charting</c> 对 Python 零感知 —— 不开 PythonNet 子项目时 source 是 null,
     /// Get 走纯字典查找,业务依赖 Register 显式塞数据。</para>
     /// </summary>
     public static class IndicatorMetadataRegistry
@@ -426,7 +426,7 @@ namespace Hevo.Charting.Features
                 watchKeys = new object[] { InputPort };
             }
 
-            // 协议规范 §B (00.Hevo.Charting 架构协议) 要求:Indicator 调用属于"耗时指标计算",
+            // 协议规范 §B (00.架构协议与开发规范) 要求:Indicator 调用属于"耗时指标计算",
             // 必须走 WatchAsync 后台线程池 + Compute-then-Commit 三段式锁:
             //   ① 瞬间读锁捞 inputs → ② 锁外裸奔算指标 → ③ 瞬间写锁提交 outputs
             // 之前用 flow.Watch 整段持 UpgradeableReadLock 跑 Indicator.DynamicInvoke,

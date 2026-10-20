@@ -7,7 +7,7 @@
 		<!-- .NET 5 SDK 不认 ImplicitUsings:改用 GlobalUsings.cs 显式列出(同核心库 Globals.cs) -->
 		<ImplicitUsings>disable</ImplicitUsings>
 
-		<!-- 纯通用交易抽象,不依赖 Hevo.Charting / WPF / Skia 等 ——
+		<!-- 纯通用交易抽象,不依赖 Charting / WPF / Skia 等 ——
 		     任何 .NET 10 项目(命令行回测 / Web API / Console Trader / 图表)都能引用。 -->
 		<Description>Hevo Trade abstractions: ITradeService 接口 + DTO + NullTradeService。broker 适配 / 远端 gRPC client 各自独立子项目实装。</Description>
 	</PropertyGroup>

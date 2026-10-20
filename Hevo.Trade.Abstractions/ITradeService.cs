@@ -14,18 +14,18 @@ namespace Hevo.Trade
     /// </para>
     /// <list type="bullet">
     ///   <item><b>LocalTradeService</b>(各 broker 一个独立子项目):
-    ///         <c>Hevo.Trade.{CTP / Tora / IB / XTP / Mock}</c>。
+    ///         <c>Trade.{CTP / Tora / IB / XTP / Mock}</c>。
     ///         直接调 broker 本地 SDK,典型单机部署用。</item>
-    ///   <item><b>RemoteTradeService</b>(<c>Hevo.Trade.Remote</c>):
+    ///   <item><b>RemoteTradeService</b>(<c>Trade.Remote</c>):
     ///         gRPC client → 后端 <c>TradeService</c> 转发,典型后端模式用。</item>
     ///   <item><b><see cref="NullTradeService"/></b>:默认实现,任何下单调用抛"未配置 backend"
     ///         + 安装指引。</item>
     /// </list>
     ///
     /// <para>
-    /// <b>本程序集纯 BCL,不依赖 Hevo.Charting / WPF / 任何图表库</b> ——
+    /// <b>本程序集纯 BCL,不依赖 Charting / WPF / 任何图表库</b> ——
     /// 命令行回测 / Web API / Console Trader / 图表都能直接引用。
-    /// 跟图表的桥接(<c>TradeServiceTrait</c>)放 Hevo.Charting 主项目内。
+    /// 跟图表的桥接(<c>TradeServiceTrait</c>)放 Charting 主项目内。
     /// </para>
     /// </summary>
     public interface ITradeService

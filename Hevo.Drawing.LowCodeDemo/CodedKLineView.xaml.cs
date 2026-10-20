@@ -6,7 +6,7 @@ using Hevo.Drawing.LowCodeDemo.CodedKLine;
 namespace Hevo.Drawing.LowCodeDemo
 {
     /// <summary>
-    /// §对照实现 host —— 跟 <c>Hevo.Drawing.Sample.Kline.Linked.KLineIndicatorView</c>(canonical 范本)
+    /// §对照实现 host —— 跟 <c>Drawing.Sample.Kline.Linked.KLineIndicatorView</c>(canonical 范本)
     /// 完全同款打法:
     /// <list type="number">
     ///   <item><b>共享一份 DataSource</b>:两 schema 都接 View 持有的 <see cref="MockKLineDataSource"/>,

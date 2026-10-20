@@ -1,6 +1,6 @@
-# Hevo.Charting.Skia
+# Charting.Skia
 
-Hevo.Charting 的 Skia 上屏后端，**WPF 专用**：合成面是 WPF 元素（`WriteableBitmap` / `SKGLElement`），挂在 `ChartCell` 里。图表的 Feature 投影、图层录制、DrawCmd 缓冲都不变，只把"指令 → 像素"这一步从 WPF `DrawingVisual` 换成 Skia。
+Charting 的 Skia 上屏后端，**WPF 专用**：合成面是 WPF 元素（`WriteableBitmap` / `SKGLElement`），挂在 `ChartCell` 里。图表的 Feature 投影、图层录制、DrawCmd 缓冲都不变，只把"指令 → 像素"这一步从 WPF `DrawingVisual` 换成 Skia。
 
 核心库 `Hevo.Charting` 仍然零第三方依赖；SkiaSharp 只在这个程序集里。
 

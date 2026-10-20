@@ -6,13 +6,13 @@
 
 新任务起手用这段锁定风格:
 
-> 请按 Hevo.Charting 项目规范执行:严守 .NET 5 兼容(SDK 5.0.408 红线,见 `Hevo.Charting/README.md` §2)、`00.架构协议与开发规范` 全部铁律、`Environment / Axes / Series / Interactions` 四段 builder 装配、注释只阐述 Why / Intent。
+> 请按 Charting 项目规范执行:严守 .NET 5 兼容(SDK 5.0.408 红线,见 `Hevo.Charting/README.md` §2)、`00.架构协议与开发规范` 全部铁律、`Environment / Axes / Series / Interactions` 四段 builder 装配、注释只阐述 Why / Intent。
 
 ## 写代码前读什么
 
-1. [Hevo.Charting/README.md](./Hevo.Charting/README.md):.NET 5 兼容红线、常用命令、注释规范。**红线不可协商。**
+1. [Charting/README.md](./Hevo.Charting/README.md):.NET 5 兼容红线、常用命令、注释规范。**红线不可协商。**
 2. [术语表](./docs/术语表.md):黑板 / 端口 / Feature / Trait / Layer 各是什么。
-3. [00 号文档](./Hevo.Charting/00.Hevo.Charting%20架构协议与开发规范.md):架构铁律与 SOP。新写指标 / 图层前看 §5,代码范例在 `Hevo.Charting.Tests/DocSamples/`。
+3. [00 号文档](./Hevo.Charting/00.架构协议与开发规范.md):架构铁律与 SOP。新写指标 / 图层前看 §5,代码范例在 `Hevo.Charting.Tests/DocSamples/`。
 4. 按任务翻:蓝图 → `LowCode/Designer/低代码.md`;交互 → `04`;渲染 → `06` / `Renderer.md`;Python → `Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md`。
 
 ## 硬约束速记

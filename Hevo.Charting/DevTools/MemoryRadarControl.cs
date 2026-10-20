@@ -9,7 +9,7 @@ using System.Windows.Threading;
 namespace Hevo.Charting.DevTools
 {
     /// <summary>
-    /// 💥 Hevo 物理内存与视口迷你图监控器
+    /// 💥 物理内存与视口迷你图监控器
     /// </summary>
     public class MemoryRadarControl : Grid, IBoardObserver
     {

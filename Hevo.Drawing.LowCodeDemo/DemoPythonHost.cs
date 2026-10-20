@@ -129,7 +129,7 @@ namespace Hevo.Drawing.LowCodeDemo
 
         /// <summary>
         /// 把 demo .py 落盘到 IndicatorsDir(覆盖式)—— Python 源代码现在以 EmbeddedResource 嵌在
-        /// <c>Hevo.Drawing.LowCodeDemo.PyIndicators.*.py</c> 命名空间,启动时从 assembly manifest 提取
+        /// <c>Drawing.LowCodeDemo.PyIndicators.*.py</c> 命名空间,启动时从 assembly manifest 提取
         /// 写到 %TEMP% 给 PythonHandlerRegistry.AutoDiscoverDirectory 扫。
         ///
         /// <para>

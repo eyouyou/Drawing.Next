@@ -6,14 +6,14 @@ namespace Hevo.Charting.PythonNet
 {
     /// <summary>
     /// 通用 Compute / Handler / Plot 蓝图节点的分类注册 + 旧名向后兼容入口。业务侧引
-    /// Hevo.Charting.PythonNet 后启动调一次:
+    /// Charting.PythonNet 后启动调一次:
     /// <code>
     /// PythonNetBootstrap.Register();
     /// </code>
     ///
     /// <para>
     /// <b>新现实</b>:<see cref="ComputeFeature"/> / <see cref="HandlerFeature"/> / <see cref="PlotFeature"/>
-    /// 已下沉主项目 <c>Hevo.Charting</c>(无 Python 依赖),所以 <c>BuiltinRegistration.RegisterBuiltins</c>
+    /// 已下沉主项目 <c>Charting</c>(无 Python 依赖),所以 <c>BuiltinRegistration.RegisterBuiltins</c>
     /// 已经会自动收录到 <see cref="ComponentRegistry"/>。本入口只补两件事:
     /// </para>
     /// <list type="number">

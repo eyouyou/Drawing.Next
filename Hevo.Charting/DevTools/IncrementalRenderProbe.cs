@@ -5,7 +5,7 @@ using Hevo.Charting.Core;
 
 namespace Hevo.Charting.DevTools
 {
-    // 增量渲染对照开关 + 计数器,只给测量工具(Hevo.Charting.Benchmarks --render-probe)和单测用。
+    // 增量渲染对照开关 + 计数器,只给测量工具(Charting.Benchmarks --render-probe)和单测用。
     //
     // 默认全关:关着时 ProjectAll / SubmitSync 的行为跟没有本类时逐行一致,只多一次静态字段读。
     // 打开某个开关 = 人为关掉对应那一层增量机制,作为前后对比的对照组:

@@ -9,7 +9,7 @@ namespace Hevo.Charting.PythonNet
     /// <para>
     /// <b>默认行为</b>:框架内置 <see cref="NullPythonRuntime"/>(任何调用都抛 InvalidOperationException
     /// + 安装指引)。要真跑 Python,业务侧引用 <c>Python.Runtime</c> NuGet,实现 <c>PythonNetRuntime : IPythonRuntime</c>
-    /// (典型在配套 <c>Hevo.Charting.PythonNet</c> 子项目),启动时调用
+    /// (典型在配套 <c>Charting.PythonNet</c> 子项目),启动时调用
     /// <see cref="PythonHandlerRegistry.UseRuntime"/> 注入。
     /// </para>
     ///

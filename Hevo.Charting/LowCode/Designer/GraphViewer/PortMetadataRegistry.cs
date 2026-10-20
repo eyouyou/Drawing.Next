@@ -6,7 +6,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
     /// <summary>
     /// 端口侧元数据(方向 / 注释)的"GraphViewer 层覆盖表"。
     /// <para>
-    /// 设计目标:不污染 Hevo.Charting 框架源码即可给现有 Feature 标方向 + 加端口注释。
+    /// 设计目标:不污染 Charting 框架源码即可给现有 Feature 标方向 + 加端口注释。
     /// 反射时优先级:本注册表 &gt; <c>[PortDirection]</c> 属性 &gt; 默认 (Input + 无注释)。
     /// 业务侧也可在启动时为自定义 Feature 调一次 Register,GraphViewer 立即生效。
     /// </para>
