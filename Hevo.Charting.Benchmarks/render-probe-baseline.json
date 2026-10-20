@@ -1,4 +1,28 @@
 {
+  "Settings": {
+    "WindowWidth": 960,
+    "WindowHeight": 540,
+    "Steps": 120,
+    "Warmup": 20,
+    "Scenarios": [
+      "Hover",
+      "Pan",
+      "Zoom",
+      "Tick",
+      "Append",
+      "Resize",
+      "HoverNoTip",
+      "DashHover",
+      "DashPan",
+      "DashTick",
+      "Zoom@150",
+      "Zoom@200"
+    ],
+    "Modes": [
+      "inc"
+    ],
+    "DpiScale": 1
+  },
   "Entries": {
     "bars=2000|charts=1|Hover|inc": {
       "FeaturesPerFrame": 3,
@@ -53,12 +77,12 @@
     "bars=2000|charts=1|Zoom@150|inc": {
       "FeaturesPerFrame": 3.2667,
       "LayersPerFrame": 5.5333,
-      "DrawCmdsPerFrame": 15.83
+      "DrawCmdsPerFrame": 16.08
     },
     "bars=2000|charts=1|Zoom@200|inc": {
       "FeaturesPerFrame": 3.2667,
       "LayersPerFrame": 5.5333,
-      "DrawCmdsPerFrame": 13.02
+      "DrawCmdsPerFrame": 13.37
     }
   }
 }

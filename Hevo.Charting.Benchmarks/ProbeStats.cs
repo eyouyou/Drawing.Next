@@ -52,16 +52,28 @@ namespace Hevo.Charting.Benchmarks
     /// <summary>
     /// 计数基线(CI 回归门槛)。只收确定性计数:Feature 重算/帧、图层重录/帧、绘制命令/帧 —— 不收耗时,
     /// 耗时在共享 CI 机器上噪声太大。超出基线 (1+容差) 倍即判回归;明显低于基线提示更新基线。
+    /// 绘制命令数随绘图区 DIP 尺寸(刻度 / 网格条数)和 PixelsPerDip(按物理像素列 LOD)变,
+    /// 所以基线同时记下写入时的测量参数,比对时按它重跑;系统 DPI 对不上就不比这一项。
     /// </summary>
     internal sealed class ProbeBaseline
     {
         public sealed record Counter(double FeaturesPerFrame, double LayersPerFrame, double DrawCmdsPerFrame);
 
+        public sealed record MeasureSettings(int WindowWidth, int WindowHeight, int Steps, int Warmup,
+            string[] Scenarios, string[] Modes, double DpiScale);
+
+        /// <summary>写入基线时的测量参数;老基线没有这一段时为 null,比对就按命令行参数跑。</summary>
+        public MeasureSettings? Settings { get; set; }
+
         public Dictionary<string, Counter> Entries { get; set; } = new();
 
-        public static ProbeBaseline FromEntries(IEnumerable<RenderProbe.Entry> entries)
+        public static ProbeBaseline FromEntries(IEnumerable<RenderProbe.Entry> entries, ProbeOptions opt, double dpiScale)
         {
-            var b = new ProbeBaseline();
+            var b = new ProbeBaseline
+            {
+                Settings = new MeasureSettings(opt.WindowWidth, opt.WindowHeight, opt.Steps, opt.Warmup,
+                    opt.Scenarios, opt.Modes.Select(m => m.Key).ToArray(), dpiScale),
+            };
             foreach (var e in entries.Where(e => e.Frames > 0 && e.CountersDeterministic))
                 b.Entries[e.Key] = new Counter(Math.Round(e.FeaturesPerFrame, 4), Math.Round(e.LayersPerFrame, 4), Math.Round(e.DrawCmdsPerFrame, 2));
             return b;
@@ -70,14 +82,38 @@ namespace Hevo.Charting.Benchmarks
         public static ProbeBaseline Load(string path)
             => JsonSerializer.Deserialize<ProbeBaseline>(File.ReadAllText(path)) ?? new ProbeBaseline();
 
-        public string ToJson() => JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+        // 换行固定成 LF:基线入库,Windows 上序列化出 CRLF 会让每次 --write-baseline 都是整文件 diff
+        public string ToJson() => JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }).Replace("\r\n", "\n") + "\n";
 
-        public (bool Regressed, string Text) Check(IEnumerable<RenderProbe.Entry> current, double tolerance)
+        /// <summary>
+        /// 比对前把测量参数换成基线写入时的:计数 key 里没有窗口尺寸,参数不一致时比出来的"回归"全是误报
+        /// (例如基线用 --ci 的 960x540 写入,不带 --ci 的默认 1280x720 刻度更多,绘制命令/帧整体偏高)。
+        /// </summary>
+        public void ApplyTo(ProbeOptions opt)
+        {
+            if (Settings is not { } s) return;
+            opt.WindowWidth = s.WindowWidth;
+            opt.WindowHeight = s.WindowHeight;
+            opt.Steps = s.Steps;
+            opt.Warmup = s.Warmup;
+            opt.Scenarios = RenderProbe.AllFrameScenarios.Where(x => s.Scenarios.Contains(x, StringComparer.OrdinalIgnoreCase)).ToArray();
+            opt.Modes = RenderProbe.AllModes.Where(m => s.Modes.Contains(m.Key, StringComparer.OrdinalIgnoreCase)).ToArray();
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                $"[render-probe] 测量参数按基线:size={s.WindowWidth}x{s.WindowHeight} steps={s.Steps} warmup={s.Warmup} " +
+                $"scenarios={string.Join(',', opt.Scenarios)} modes={string.Join(',', opt.Modes.Select(m => m.Key))}"));
+        }
+
+        public (bool Regressed, string Text) Check(IEnumerable<RenderProbe.Entry> current, double tolerance, double dpiScale)
         {
             var sb = new StringBuilder();
             sb.AppendLine("### render-probe 计数回归检查");
             sb.AppendLine();
             sb.AppendLine(string.Create(CultureInfo.InvariantCulture, $"容差 {tolerance:P0}(计数超过基线 ×(1+容差) 判回归)"));
+            // 系统 DPI 不同,PixelsPerDip 变了 LOD 列数就变,绘制命令数不可比;Feature / 图层重录跟 DPI 无关照比
+            bool compareDrawCmds = Settings is not { } st || double.IsNaN(dpiScale) || Math.Abs(st.DpiScale - dpiScale) < 0.01;
+            if (!compareDrawCmds)
+                sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
+                    $"系统 DPI 缩放 {dpiScale:P0} 与基线 {Settings!.DpiScale:P0} 不同,本次不比「绘制命令/帧」。"));
             sb.AppendLine();
             sb.AppendLine("| 组合 | 指标 | 基线 | 本次 | 结论 |");
             sb.AppendLine("|---|---|---:|---:|---|");
@@ -95,7 +131,8 @@ namespace Hevo.Charting.Benchmarks
                 }
                 regressed |= Row(sb, e.Key, "Feature重算/帧", b.FeaturesPerFrame, e.FeaturesPerFrame, tolerance, 0.01);
                 regressed |= Row(sb, e.Key, "图层重录/帧", b.LayersPerFrame, e.LayersPerFrame, tolerance, 0.01);
-                regressed |= Row(sb, e.Key, "绘制命令/帧", b.DrawCmdsPerFrame, e.DrawCmdsPerFrame, tolerance, 1);
+                if (compareDrawCmds)
+                    regressed |= Row(sb, e.Key, "绘制命令/帧", b.DrawCmdsPerFrame, e.DrawCmdsPerFrame, tolerance, 1);
             }
             // 基线里有、本次没跑出来的组合也算失败:场景改名 / 从 --ci 预设里移掉后,门槛不能悄悄变成"少比几个"
             var ran = new HashSet<string>(current.Select(e => e.Key));

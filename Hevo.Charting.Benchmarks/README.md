@@ -255,7 +255,7 @@ dotnet run -c Release -- --render-probe --scenarios=Hover,Zoom --rounds=10 --out
 | `--modes=` | 全部 | `inc,nobag,layerfull,featfull,full,inc-par,full-par,bmp,bmp-series` |
 | `--window=` | 1280x720 | 图表区域尺寸(定在内容上,窗口 SizeToContent) |
 | `--out=` | render-probe.csv | 逐帧明细;同名 `.md` 汇总表、`.json` 汇总数据 |
-| `--baseline=` / `--write-baseline=` / `--tolerance=` | - / - / 0.02 | 计数回归门槛(见下面 CI 一节) |
+| `--baseline=` / `--write-baseline=` / `--tolerance=` | - / - / 0.02 | 计数回归门槛;带 `--baseline` 时窗口 / 步数 / 场景 / 模式改用基线 `Settings` 里的(见下面 CI 一节) |
 | `--ci` | | CI 预设:只跑 `inc`,全部逐帧场景(含扩展)120 帧 × 1 轮,图表区 960x540,无 Startup / 套件 |
 | `--alloc-types` | | 进程内订阅 GCAllocationTick,按类型 + SOH/LOH 汇总每帧分配(UI 线程,含脚本输入),追加到 `.md`。用来查"分配/帧"的大头 |
 | `--heavy-layers=` / `--heavy-ms=` | 0 / 1 | 每张图额外挂 N 个人为加重的图层(每层录制忙等 X ms,纯 CPU),测 `PlotMode.Parallel` 用 |
@@ -673,3 +673,8 @@ dotnet run -c Release -- --render-probe --ci --write-baseline=render-probe-basel
 ```
 
 或者从 CI 产物 `perf-artifacts/render-probe/render-probe.json` 里取数更新 [render-probe-baseline.json](render-probe-baseline.json)。
+
+基线更新:在 `Hevo.Charting.Benchmarks/` 下跑上面这条 `--ci --write-baseline`,再跑一次 `--render-probe --baseline=render-probe-baseline.json` 确认通过,和代码改动一起提交。
+基线里的 `Settings` 记着写入时的窗口尺寸、步数、场景、模式和系统 DPI,带 `--baseline` 比对时按它重跑,所以带不带 `--ci` 结果一样。
+原因是绘制命令/帧随绘图区 DIP 尺寸(刻度、网格条数)和 PixelsPerDip(按物理像素列做 LOD)变化:不带 `--ci` 的默认 1280x720 窗口会比 `--ci` 的 960x540 多出不少命令,
+以前就因为这个把 Pan / Zoom / Append 误报成回归。本机系统 DPI 和基线不同时,这一项跳过不比,Feature 重算 / 图层重录照比。
