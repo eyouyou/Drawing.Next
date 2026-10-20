@@ -684,6 +684,11 @@ namespace Hevo.Charting.LowCode
         {
             // 销毁与推送并发:板已关门就丢掉这次推送(管线正在拆,没有下游要看了)
             if (_persistentBoard.IsDisposed) return _persistentBoard;
+#if DEBUG
+            // 摄入器写入一律算数据源:数据源可能在某个 Feature 的作用域里被触发推送(典型 DataPaging 要数据),
+            // 不清掉的话那个 Feature 会被画成所有价格列的写入方。
+            using var traceScope = DevTools.TopologyTracer.EnterScope(null);
+#endif
             using (_persistentBoard.WriteScope())
             {
                 // 按添加顺序执行，确保标量先写入，向量后写入
@@ -703,6 +708,9 @@ namespace Hevo.Charting.LowCode
         /// <param name="board"></param>
         public void ProcessTo(DataSnapshot<TItem> snapshot, DataBlackboard board)
         {
+#if DEBUG
+            using var traceScope = DevTools.TopologyTracer.EnterScope(null); // 同 Process
+#endif
             using (board.WriteScope())
             {
                 for (int i = 0; i < _ingestors.Count; i++)

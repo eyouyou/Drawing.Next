@@ -110,6 +110,11 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         // ==========================================
         private void OnMouseDown(object sender, MouseButtonEventArgs e)
         {
+            // 这些是 chart 上直接挂的 WPF 事件,不在任何 Feature 作用域里;不进作用域的话
+            // 改画布状态 → 写 StatePort 会被拓扑监控记成数据源,看不出是交互触发的。
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var chart = Chart;
             if (chart == null) return;
             chart.Focus();
@@ -198,6 +203,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnMouseRightDown(object sender, MouseButtonEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var chart = Chart;
             if (chart == null) return;
             _drag = DragMode.PanCanvas;
@@ -209,11 +217,17 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnMouseRightUp(object sender, MouseButtonEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             if (_drag == DragMode.PanCanvas) { _drag = DragMode.None; _isMinimapDrag = false; Chart?.ReleaseMouseCapture(); e.Handled = true; }
         }
 
         private void OnMouseMove(object sender, MouseEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var chart = Chart;
             if (chart == null) return;
             var screen = Pt(e, chart);
@@ -286,6 +300,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnMouseUp(object sender, MouseButtonEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var chart = Chart;
             if (chart == null || _drag == DragMode.None) return;
             switch (_drag)
@@ -367,6 +384,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnMouseLeave(object sender, MouseEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var s = DataSource.State;
             if (s.HoveredPort != null)
                 DataSource.State = s with { HoveredPort = null };
@@ -374,6 +394,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnLostCapture(object sender, MouseEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             if (_drag == DragMode.None) return;
             _drag = DragMode.None;
             _isMinimapDrag = false;
@@ -392,6 +415,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
         // ──────────────────────────────────────────
         private void OnManipulationStarting(object? sender, ManipulationStartingEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var chart = Chart;
             if (chart == null) return;
             // Container 必须显式给到 ChartCell —— 默认 manipulation origin 跑到 visual root 偏移失真。
@@ -401,6 +427,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnManipulationDelta(object? sender, ManipulationDeltaEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var chart = Chart;
             if (chart == null) return;
             var d  = e.DeltaManipulation;
@@ -438,6 +467,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnMouseWheel(object sender, MouseWheelEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             var chart = Chart;
             if (chart == null) return;
             var screen = Pt(e, chart);
@@ -456,6 +488,9 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 
         private void OnKeyDown(object sender, KeyEventArgs e)
         {
+#if DEBUG
+            using var traceScope = Hevo.Charting.DevTools.TopologyTracer.EnterScope(this);
+#endif
             // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 统一在这里拦,优先于 Delete。
             bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
             bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
