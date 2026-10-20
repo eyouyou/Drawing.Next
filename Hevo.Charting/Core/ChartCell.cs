@@ -635,6 +635,38 @@ namespace Hevo.Charting.Core
         /// </summary>
         private double _pixelsPerDip = 1.0;
 
+        /// <summary>所在屏的 DPI 缩放(物理像素 / DIP)。Loaded / DpiChanged 时更新,未挂入可视树前为 1。</summary>
+        internal double PixelsPerDip => _pixelsPerDip;
+
+#if DEBUG
+        private HashSet<IChartLayer>? _denseViewportWarned;
+
+        /// <summary>
+        /// 视口过密诊断:ViewportManagerFeature 开了 MinBarSpacingPx 时把可见根数卡在绘图区物理宽度以内,
+        /// 但外部直接发 XAxisTrait / 直接写 ActiveRange / AxisFeature 读别的端口都能绕开它。
+        /// 这里只告警(每个图层一次)不改范围:改了图层看到的范围就跟坐标轴、十字线对不上。
+        /// X 不是按根索引的图层(散点图等)可能误报。
+        /// </summary>
+        private void WarnTooDenseViewport(List<RenderTask> tasks)
+        {
+            for (int i = 0; i < tasks.Count; i++)
+            {
+                var data = tasks[i].DataSnapshot;
+                var limits = data.Get<Features.ViewportSpanLimitsTrait>();
+                if (limits == null || double.IsInfinity(limits.MaxSpanByPixels)) continue;
+                var xAxis = data.Get<XAxisTrait>();
+                // 容差 1 根:ISnappableScale 取整、浮点误差
+                if (xAxis == null || !xAxis.Viewport.IsValid || xAxis.Viewport.Span <= limits.MaxSpanByPixels + 1) continue;
+
+                var layer = tasks[i].Layer;
+                if (!(_denseViewportWarned ??= new HashSet<IChartLayer>()).Add(layer)) continue;
+                System.Diagnostics.Debug.WriteLine(
+                    $"[Charting] 图层 {layer.Name}({layer.GetType().Name})收到的 X 视口跨度 {xAxis.Viewport.Span:F0} 超过像素上限 {limits.MaxSpanByPixels:F0}" +
+                    "(ViewportManagerFeature.MinBarSpacingPx):视口绕开了 ViewportManagerFeature,密集时会出白缝、拖慢录制。");
+            }
+        }
+#endif
+
         private static bool RequiresUiThread(IChartLayer layer) => layer is ChartLayer { RequiresUiThread: true };
 
         internal void ExecutePipeline(RenderContext ctx, PlotMode mode)
@@ -660,6 +692,9 @@ namespace Hevo.Charting.Core
 
             // 2. 制作快照
             using var frame = ctx.PrepareTasks(_dirtyLayerBuffer);
+#if DEBUG
+            WarnTooDenseViewport(frame.Tasks);
+#endif
 
             // 3. 执行更新 (智能降级)
             if (mode == PlotMode.Parallel && frame.Tasks.Count >= 3)

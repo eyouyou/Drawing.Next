@@ -157,7 +157,10 @@ namespace Hevo.Charting.Interaction
                 var limitsTrait = _ctx.Shared().Read<ViewportSpanLimitsTrait>();
                 double maxIndex = Math.Max(0, logicalLength - 1);
                 double minSpan = limitsTrait?.MinSpan ?? 2.0;
-                double maxSpan = limitsTrait != null ? maxIndex * limitsTrait.MaxSpanMultiplier : maxIndex * 2.0;
+                // 像素上限(MinBarSpacingPx)也在这里带上,缩到底时仍按鼠标锚点停住,而不是被 VPM 事后居中收回
+                double maxSpan = limitsTrait != null
+                    ? Math.Min(maxIndex * limitsTrait.MaxSpanMultiplier, limitsTrait.MaxSpanByPixels)
+                    : maxIndex * 2.0;
                 var limits = new SpanLimits(minSpan, Math.Max(minSpan, maxSpan));
 
                 // 锚点相对位置:保留越界(不 Clamp 到 [0,1]),让策略判断锚点是否在 plot 区。

@@ -29,6 +29,7 @@ namespace Hevo.Charting.Tests
             public bool DismissOnEscape { get; init; }
             public BoxZoomOptions? BoxZoom { get; init; }
             public Hevo.Charting.Buildin.IZoomStrategy? ZoomStrategy { get; init; }
+            public double MinBarSpacingPx { get; init; }
             public Action<InteractionBuilder, Schema>? Extra { get; init; }
 
             protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
@@ -38,7 +39,8 @@ namespace Hevo.Charting.Tests
                 canvas.Seed<ScaleStrategyTrait>(ScaleStrategyTrait.CandleMode);
                 canvas
                     .Environment(env => env.SetupViewport(minVisibleCount: 5, alignment: ViewportAlignment.RightEdge,
-                        defaultVisibleCount: 30, overscrollMin: OverscrollPolicy.Hard, overscrollMax: OverscrollPolicy.Hard))
+                        defaultVisibleCount: 30, overscrollMin: OverscrollPolicy.Hard, overscrollMax: OverscrollPolicy.Hard,
+                        minBarSpacingPx: MinBarSpacingPx))
                     .Series(s => s.AddCandle(YRange, Ports))
                     .Interactions(i =>
                     {
@@ -64,9 +66,10 @@ namespace Hevo.Charting.Tests
             private readonly Window _window;
 
             public Rig(bool requireClickToActivate = false, BoxZoomOptions? boxZoom = null, bool dismissOnEscape = false,
-                Action<InteractionBuilder, Schema>? extra = null, double left = -10000, Hevo.Charting.Buildin.IZoomStrategy? zoomStrategy = null, int length = DefaultLength)
+                Action<InteractionBuilder, Schema>? extra = null, double left = -10000, Hevo.Charting.Buildin.IZoomStrategy? zoomStrategy = null, int length = DefaultLength,
+                double minBarSpacingPx = 0)
             {
-                Schema = new Schema { RequireClickToActivate = requireClickToActivate, BoxZoom = boxZoom, DismissOnEscape = dismissOnEscape, Extra = extra, ZoomStrategy = zoomStrategy };
+                Schema = new Schema { RequireClickToActivate = requireClickToActivate, BoxZoom = boxZoom, DismissOnEscape = dismissOnEscape, Extra = extra, ZoomStrategy = zoomStrategy, MinBarSpacingPx = minBarSpacingPx };
                 Cell.Template = Schema;
                 Cell.Width = 400; Cell.Height = 300;
                 _window = new Window

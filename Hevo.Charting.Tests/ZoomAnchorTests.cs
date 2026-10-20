@@ -2,6 +2,7 @@ using System.Windows;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Buildin;
 using Hevo.Charting.Core;
+using Hevo.Charting.Features;
 using Hevo.Charting.Interaction;
 
 namespace Hevo.Charting.Tests
@@ -117,6 +118,36 @@ namespace Hevo.Charting.Tests
                                 $"anchor={anchor} 第 {i + 1} 档(delta={deltas[i]})第 {bar} 根偏了 {drift:F3} 根: {rig.ActiveRange}");
                         }
                     }
+                }
+            }
+            finally { rig.Close(); }
+        });
+
+        /// <summary>开了按像素封顶(MinBarSpacingPx)后一路缩小:撞到上限就停在那,鼠标下那根照样不偏,不会被事后居中收回。</summary>
+        [Fact]
+        public void Wheel_PixelCap_StopsAtCap_AnchorStays() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var rig = new PointerRouterTests.Rig(length: LargeLength, minBarSpacingPx: 1);
+            try
+            {
+                rig.Frame();
+                double cap = State(rig).Ctx.Shared().Read<ViewportSpanLimitsTrait>()!.MaxSpanByPixels;
+                Assert.InRange(cap, 100, 600);
+
+                foreach (double anchor in new[] { 0.13, 0.37, 0.81 })
+                {
+                    Reset(rig, MiddleView);
+                    double x = AnchorX(rig, anchor);
+                    double v0 = ValueAt(rig, x);
+                    for (int i = 0; i < 25; i++)
+                    {
+                        Wheel(rig, x, -120);
+                        Assert.True(rig.ActiveRange.Span <= cap + 1, $"超过像素上限 {cap:F0}: {rig.ActiveRange}");
+                        double drift = ValueAt(rig, x) - v0;
+                        Assert.True(Math.Abs(drift) <= 0.5 + 1e-9,
+                            $"anchor={anchor} 第 {i + 1} 档鼠标下偏了 {drift:F3} 根: {rig.ActiveRange}");
+                    }
+                    Assert.True(rig.ActiveRange.Span >= cap - 1, $"缩小 25 档应停在上限 {cap:F0}: {rig.ActiveRange}");
                 }
             }
             finally { rig.Close(); }
