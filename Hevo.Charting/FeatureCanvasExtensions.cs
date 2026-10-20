@@ -112,6 +112,7 @@ namespace Hevo.Charting
         //   alignment: 数据/视口变化时的停靠侧（RightEdge=新数据贴右；LeftEdge=贴左不动）
         //   defaultVisibleCount: 首屏显示根数（null=显示全部，分页业务必传以留出滚动空间）
         //   maxSpanMultiplier: 视口最大可缩放至数据量的几倍（限制最大缩小，**约束所有 UserRange 写入**，不只是缩放）
+        //   minBarSpacingPx: 每根至少占几个物理像素(可见根数 ≤ 绘图区物理宽 / 该值);默认 0 = 不限制
         //   overscrollMin/Max: 用户拖到数据边界外时的策略
         //                       Hard=钳回（默认，适合数据量固定）
         //                       Overscroll=允许越界留白（适合分页业务，用户意图保留）
@@ -122,7 +123,8 @@ namespace Hevo.Charting
             int? defaultVisibleCount = null,
             double maxSpanMultiplier = 1.5,
             OverscrollPolicy overscrollMin = OverscrollPolicy.Hard,
-            OverscrollPolicy overscrollMax = OverscrollPolicy.Hard)
+            OverscrollPolicy overscrollMax = OverscrollPolicy.Hard,
+            double minBarSpacingPx = 0)
         {
             // PortsFeature 由 ChartReactiveSchema(chart 中间层)在 EnsureBaseFeatures 阶段 framework
             // 强制 ensure,本 helper 不再自助 add ——
@@ -137,7 +139,8 @@ namespace Hevo.Charting
                 DefaultVisibleCount = defaultVisibleCount,
                 MaxSpanMultiplier = maxSpanMultiplier,
                 OverscrollMin = overscrollMin,
-                OverscrollMax = overscrollMax
+                OverscrollMax = overscrollMax,
+                MinBarSpacingPx = minBarSpacingPx
             });
             return builder;
         }

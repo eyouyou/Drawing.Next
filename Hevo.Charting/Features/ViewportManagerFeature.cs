@@ -26,8 +26,11 @@ namespace Hevo.Charting.Features
     ///   <item>消费者：<see cref="ChartInteractionFeature"/>.HandleZoom —— 构造 <c>ZoomContext.Limits</c> 喂给策略 clamp</item>
     /// </list>
     /// 注意：MaxSpanMultiplier 是相对乘数，需要结合当前 LogicalLength 才能解析为绝对 MaxSpan。
+    /// 最终 MaxSpan = min(maxIndex × MaxSpanMultiplier, MaxSpanByPixels)。
     /// </summary>
-    public record ViewportSpanLimitsTrait(double MinSpan, double MaxSpanMultiplier) : IVisualTrait;
+    /// <param name="MaxSpanByPixels">按绘图区物理宽度折算的跨度上限(见 <see cref="ViewportManagerFeature.MinBarSpacingPx"/>);
+    /// 未开启 / 尚未布局时为 +∞。</param>
+    public record ViewportSpanLimitsTrait(double MinSpan, double MaxSpanMultiplier, double MaxSpanByPixels = double.PositiveInfinity) : IVisualTrait;
 
     /// <summary>
     /// 视口初始配置 trait（视图层产生，交互层消费）：
@@ -86,6 +89,18 @@ namespace Hevo.Charting.Features
         /// **不是缩放算法参数**。缩放具体行为由 <see cref="Buildin.IZoomStrategy"/> 决定。</summary>
         public double MaxSpanMultiplier { get; init; } = 1.5;
 
+        /// <summary>
+        /// 每根数据至少占几个物理像素(限制最大缩小倍数):可见根数 ≤ 绘图区物理宽度 / 该值。默认 0 = 不限制(原行为)。
+        /// <para>
+        /// 设 1 即一个物理像素列里最多一根。比这更密时逐根画只是在同一列像素上反复覆盖,绘制记录却随根数线性涨;
+        /// 没做按像素列合并的图层(如成交量 BarLayer)亚像素宽的柱子在 EdgeMode.Aliased 下只剩零星竖条(满屏白缝)。
+        /// 在视口这一处卡住,任何图层(含外部图层)拿到的视口都不会过密。代价是缩不到"一屏看全量历史"。
+        /// </para>
+        /// <para>开启后:窗口缩放 / 换屏 DPI 时按新宽度重算;收窄时贴停靠边的视图保持贴边;缩放到上限时按鼠标锚点停住;
+        /// BarLayer 柱宽至少 1px。</para>
+        /// </summary>
+        public double MinBarSpacingPx { get; init; }
+
         public OverscrollPolicy OverscrollMin { get; init; } = OverscrollPolicy.Hard;
         public OverscrollPolicy OverscrollMax { get; init; } = OverscrollPolicy.Hard;
         public double HistoryLoadTolerance { get; init; } = 30;
@@ -96,101 +111,177 @@ namespace Hevo.Charting.Features
         // 上次处理过的 UserRange,防止 ActiveRange 被反复回写到 UserRange 时形成死锁。
         private RealRange _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
 
+        // 按像素算出的跨度上限(MinBarSpacingPx > 0 时才有限)。只在 UI 线程(帧首的 RequestUpdate)更新;Watch 可能跑在数据线程,只读这个缓存。
+        private double _pixelMaxSpan = double.PositiveInfinity;
+        // 上次排重算时看到的视口宽 + DPI。窗口缩放 / 换屏时变化,OnProject 据此排一次重算。
+        private double _seenViewportWidth = double.NaN;
+        private double _seenPixelsPerDip = double.NaN;
+        private Action<RenderContext>? _reclamp;
+        // 排进帧队列的重算可能在 Decompose 之后才执行,用自己的引用判活,不碰会抛异常的 Chart / Schema
+        private ChartCell? _cell;
+
         protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
-            ctx.Shared().PublishData(new ViewportSpanLimitsTrait(Math.Max(0, MinVisibleCount - 1), MaxSpanMultiplier));
+            ctx.Shared().PublishData(new ViewportSpanLimitsTrait(Math.Max(0, MinVisibleCount - 1), MaxSpanMultiplier, _pixelMaxSpan));
             ctx.Shared().PublishData(new InitialViewportTrait(DefaultVisibleCount, Alignment));
 
-            flow.Watch(new object[] { Viewport.LogicalLength, Viewport.UserRange }, board =>
-            {
-                using (board.UpdateScope())
-                {
-                    int currentLength = board.Read(Viewport.LogicalLength);
-                    var userRange = board.Read(Viewport.UserRange);
-                    var activeRange = board.Read(Viewport.ActiveRange);
-
-                    if (currentLength <= 0)
-                    {
-                        // 归零等价于"上下文重置"（SwitchContext 清 buffer + Publish 会经过这条路径）。
-                        // 把内部 last 状态一并清空，下次有数据进来走"首次 layout"分支，
-                        // 避免 _lastLogicalLength 泄漏旧上下文（导致 shrink 分支用陈旧 activeRange 卡死）。
-                        //
-                        // 💥 写 default(RealRange) 而非 (0,1)：长度归 0 但 candle/value 端口写入非原子，
-                        // 端口可能仍残留旧数据。若写 (0,1) 这种 IsValid=true 的窄区间，CandleFeature 会用
-                        // xRange.Span=1 渲染旧蜡烛 → 每根宽度=整个画布 → tab 切回首帧出现超大蜡烛闪烁。
-                        // 写 default 让所有消费者通过 !IsValid 跳过该帧，等新数据到位后走首次 layout。
-                        _lastLogicalLength = -1;
-                        _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
-                        using (board.WriteScope()) board.Write(Viewport.ActiveRange, default);
-                        return;
-                    }
-
-                    double maxIndex = currentLength - 1;
-                    double minSpan = Math.Max(0, MinVisibleCount - 1);
-                    RealRange targetRange;
-
-                    if (_lastLogicalLength <= 0)
-                    {
-                        double initialSpan = DefaultVisibleCount.HasValue ? Math.Max(minSpan, Math.Min(DefaultVisibleCount.Value - 1, maxIndex)) : Math.Max(minSpan, maxIndex);
-                        targetRange = new RealRange(maxIndex - initialSpan, maxIndex);
-                    }
-                    else if (currentLength > _lastLogicalLength)
-                    {
-                        int delta = currentLength - _lastLogicalLength;
-                        double lastMaxIndex = _lastLogicalLength - 1;
-
-                        if (activeRange.IsValid && activeRange.Max >= lastMaxIndex - RightEdgeStickTolerance) targetRange = new RealRange(activeRange.Min + delta, activeRange.Max + delta);
-                        else if (activeRange.IsValid && activeRange.Min <= HistoryLoadTolerance) targetRange = new RealRange(activeRange.Min + delta, activeRange.Max + delta);
-                        else targetRange = activeRange;
-                    }
-                    else
-                    {
-                        bool isNewUserIntent = userRange.IsValid && !userRange.Equals(_lastProcessedUserRange);
-                        if (isNewUserIntent) { targetRange = userRange; _lastProcessedUserRange = userRange; }
-                        else targetRange = activeRange;
-                    }
-
-                    _lastLogicalLength = currentLength;
-
-                    // 💥 物理钳制：重心锁定 + 终极虚空法则
-                    double targetSpan = targetRange.Span;
-                    double targetCenter = targetRange.Min + targetSpan / 2.0;
-                    double clampedSpan = Math.Clamp(targetSpan, minSpan, Math.Max(minSpan, maxIndex * MaxSpanMultiplier));
-
-                    double min = targetCenter - clampedSpan / 2.0;
-                    double max = targetCenter + clampedSpan / 2.0;
-
-                    // 💥 边界处理：分两步走
-                    //   Step 1：Span 超过数据时（极致缩小），按 Alignment 选择停靠边
-                    //   Step 2：Span 在数据范围内，对各边界按 OverscrollPolicy 决定钳/越
-                    if (clampedSpan > maxIndex)
-                    {
-                        if (Alignment == ViewportAlignment.RightEdge) { max = maxIndex; min = max - clampedSpan; }
-                        else { min = 0; max = clampedSpan; }
-                    }
-                    else
-                    {
-                        // 钳位顺序：Alignment 决定哪边优先被检查（避免两边同时越界时反向覆盖）
-                        if (Alignment == ViewportAlignment.RightEdge)
-                        {
-                            ApplyMaxBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMax);
-                            ApplyMinBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMin);
-                        }
-                        else
-                        {
-                            ApplyMinBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMin);
-                            ApplyMaxBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMax);
-                        }
-                    }
-
-                    // 💥 绝对单向流：管家只负责输出现实，不再管意图！打破一切死锁。
-                    using (board.WriteScope()) board.Write(Viewport.ActiveRange, new RealRange(min, max));
-                }
-            });
-
+            _cell = chart;
+            _reclamp = Reclamp;
+            flow.Watch(new object[] { Viewport.LogicalLength, Viewport.UserRange }, Clamp);
         }
 
-        protected override void OnProject(FeatureContext ctx) { }
+        // 只在环境纪元变化(尺寸 / DPI / 首次挂载)时被调到:视口宽或 DPI 变了就排一次重算。
+        // 不在这里重算:绘图区由同为 Layout 阶段的 GridLayoutFeature 算,本帧未必已更新,
+        // 放到下一帧帧首(那时 PlotAreaTrait 已是新的),而且 OnProject 不写黑板。
+        protected override void OnProject(FeatureContext ctx)
+        {
+            if (MinBarSpacingPx <= 0) return;
+            var size = ctx.Shared().Read<ViewportSizeTrait>();
+            if (size == null) return;
+            var cell = _cell;
+            if (cell == null) return;
+            double ppd = cell.PixelsPerDip;
+            if (size.Width == _seenViewportWidth && ppd == _seenPixelsPerDip) return;
+            _seenViewportWidth = size.Width;
+            _seenPixelsPerDip = ppd;
+            cell.RequestUpdate(_reclamp!);
+        }
+
+        protected override void OnDecompose()
+        {
+            base.OnDecompose();
+            _cell = null;
+            _seenViewportWidth = _seenPixelsPerDip = double.NaN;
+        }
+
+        private void Reclamp(RenderContext ctx)
+        {
+            var cell = _cell;
+            if (cell == null) return;
+            double cap = ComputePixelMaxSpan(ctx.GetPlotArea(), cell.PixelsPerDip, MinBarSpacingPx);
+            if (cap == _pixelMaxSpan) return;
+            _pixelMaxSpan = cap;
+            ctx.Shared().PublishData(new ViewportSpanLimitsTrait(Math.Max(0, MinVisibleCount - 1), MaxSpanMultiplier, cap));
+
+            var board = CurrentBoardOrNull;
+            if (board == null || board.IsDisposed) return;
+            Clamp(board);
+        }
+
+        /// <summary>
+        /// 绘图区物理宽度能容下的最大跨度:可见根数 ≈ Span + 1(居中刻度两端各留半根),
+        /// 每根至少 <paramref name="minBarSpacingPx"/> 物理像素。绘图区未布局 / 不限制时为 +∞。
+        /// </summary>
+        internal static double ComputePixelMaxSpan(HevoRect plotArea, double pixelsPerDip, double minBarSpacingPx)
+        {
+            if (minBarSpacingPx <= 0 || plotArea.IsEmpty || plotArea.Width <= 0 || pixelsPerDip <= 0) return double.PositiveInfinity;
+            return Math.Max(0, plotArea.Width * pixelsPerDip / minBarSpacingPx - 1);
+        }
+
+        private void Clamp(DataBlackboard board)
+        {
+            using (board.UpdateScope())
+            {
+                int currentLength = board.Read(Viewport.LogicalLength);
+                var userRange = board.Read(Viewport.UserRange);
+                var activeRange = board.Read(Viewport.ActiveRange);
+
+                if (currentLength <= 0)
+                {
+                    // 归零等价于"上下文重置"（SwitchContext 清 buffer + Publish 会经过这条路径）。
+                    // 把内部 last 状态一并清空，下次有数据进来走"首次 layout"分支，
+                    // 避免 _lastLogicalLength 泄漏旧上下文（导致 shrink 分支用陈旧 activeRange 卡死）。
+                    //
+                    // 💥 写 default(RealRange) 而非 (0,1)：长度归 0 但 candle/value 端口写入非原子，
+                    // 端口可能仍残留旧数据。若写 (0,1) 这种 IsValid=true 的窄区间，CandleFeature 会用
+                    // xRange.Span=1 渲染旧蜡烛 → 每根宽度=整个画布 → tab 切回首帧出现超大蜡烛闪烁。
+                    // 写 default 让所有消费者通过 !IsValid 跳过该帧，等新数据到位后走首次 layout。
+                    _lastLogicalLength = -1;
+                    _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
+                    using (board.WriteScope()) board.Write(Viewport.ActiveRange, default);
+                    return;
+                }
+
+                double maxIndex = currentLength - 1;
+                double minSpan = Math.Max(0, MinVisibleCount - 1);
+                RealRange targetRange;
+
+                if (_lastLogicalLength <= 0)
+                {
+                    double initialSpan = DefaultVisibleCount.HasValue ? Math.Max(minSpan, Math.Min(DefaultVisibleCount.Value - 1, maxIndex)) : Math.Max(minSpan, maxIndex);
+                    targetRange = new RealRange(maxIndex - initialSpan, maxIndex);
+                }
+                else if (currentLength > _lastLogicalLength)
+                {
+                    int delta = currentLength - _lastLogicalLength;
+                    double lastMaxIndex = _lastLogicalLength - 1;
+
+                    if (activeRange.IsValid && activeRange.Max >= lastMaxIndex - RightEdgeStickTolerance) targetRange = new RealRange(activeRange.Min + delta, activeRange.Max + delta);
+                    else if (activeRange.IsValid && activeRange.Min <= HistoryLoadTolerance) targetRange = new RealRange(activeRange.Min + delta, activeRange.Max + delta);
+                    else targetRange = activeRange;
+                }
+                else
+                {
+                    bool isNewUserIntent = userRange.IsValid && !userRange.Equals(_lastProcessedUserRange);
+                    if (isNewUserIntent) { targetRange = userRange; _lastProcessedUserRange = userRange; }
+                    else targetRange = activeRange;
+                }
+
+                _lastLogicalLength = currentLength;
+
+                // 💥 物理钳制：重心锁定 + 终极虚空法则
+                double targetSpan = targetRange.Span;
+                double targetCenter = targetRange.Min + targetSpan / 2.0;
+                double maxSpan = Math.Min(maxIndex * MaxSpanMultiplier, _pixelMaxSpan);
+                double clampedSpan = Math.Clamp(targetSpan, minSpan, Math.Max(minSpan, maxSpan));
+
+                double min = targetCenter - clampedSpan / 2.0;
+                double max = targetCenter + clampedSpan / 2.0;
+
+                // 被像素上限收窄时(典型:窗口变窄后重算)贴着停靠边的视图保持贴边,
+                // 否则居中收缩会把盯盘时的最新一根挤出右边。只看像素上限:倍数上限的收窄保持原来的居中行为。
+                if (clampedSpan < targetSpan && _pixelMaxSpan < maxIndex * MaxSpanMultiplier)
+                {
+                    if (Alignment == ViewportAlignment.RightEdge && targetRange.Max >= maxIndex - RightEdgeStickTolerance)
+                    {
+                        max = targetRange.Max;
+                        min = max - clampedSpan;
+                    }
+                    else if (Alignment == ViewportAlignment.LeftEdge && targetRange.Min <= RightEdgeStickTolerance)
+                    {
+                        min = targetRange.Min;
+                        max = min + clampedSpan;
+                    }
+                }
+
+                // 💥 边界处理：分两步走
+                //   Step 1：Span 超过数据时（极致缩小），按 Alignment 选择停靠边
+                //   Step 2：Span 在数据范围内，对各边界按 OverscrollPolicy 决定钳/越
+                if (clampedSpan > maxIndex)
+                {
+                    if (Alignment == ViewportAlignment.RightEdge) { max = maxIndex; min = max - clampedSpan; }
+                    else { min = 0; max = clampedSpan; }
+                }
+                else
+                {
+                    // 钳位顺序：Alignment 决定哪边优先被检查（避免两边同时越界时反向覆盖）
+                    if (Alignment == ViewportAlignment.RightEdge)
+                    {
+                        ApplyMaxBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMax);
+                        ApplyMinBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMin);
+                    }
+                    else
+                    {
+                        ApplyMinBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMin);
+                        ApplyMaxBoundary(ref min, ref max, maxIndex, clampedSpan, OverscrollMax);
+                    }
+                }
+
+                // 💥 绝对单向流：管家只负责输出现实，不再管意图！打破一切死锁。
+                using (board.WriteScope()) board.Write(Viewport.ActiveRange, new RealRange(min, max));
+            }
+        }
+
         public void ResetState() { _lastLogicalLength = -1; _lastProcessedUserRange = new RealRange(double.NaN, double.NaN); }
 
         // 💥 边界判定原子操作：Hard 钳回 maxIndex/0；Overscroll 直接放行（保留越界 UserRange 给 series/axis 渲染）。
