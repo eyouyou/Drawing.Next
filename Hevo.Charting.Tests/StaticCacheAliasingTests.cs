@@ -17,7 +17,9 @@ namespace Hevo.Charting.Tests
     /// 斜线是平滑的。祖先摆在小数位置时(Grid 星号行列、GridSplitter、125% DPI)同样成立,静态层与交互层都是。
     /// BitmapCache 只在元素真正进合成树时生效,所以图表要挂进窗口再截图;不挂窗口的截图照不出这个问题。
     /// 截图截的是窗口内容(cell 外面那层 Canvas),这样 cell 的原点偏移会算进来。
-    /// 祖先小数偏移靠画布给图层设的 snapping guideline(矢量)和 ChartCell 维护的位图原点平移(位图模式)消化,只作用于渲染。
+    /// 祖先小数偏移靠画布给图层设的 snapping guideline(矢量)和 ChartCell 维护的画布 / 位图原点平移消化,只作用于渲染。
+    /// 开缓存时合成器按 floor 放缓存位图、guideline 按就近取整,原点小数部分 ≥ 0.5 时静态层会整层比交互层偏 1 像素且线条照样清晰,
+    /// 所以除了数半透明像素,还要直接比静态层和交互层画出来的列 / 行(SameColumnAsOverlay 一组)。
     /// </summary>
     public sealed class StaticCacheAliasingTests
     {
@@ -258,13 +260,21 @@ namespace Hevo.Charting.Tests
             Assert.Equal(0, partial);
         });
 
-        [Fact]
-        public void FractionalAncestorOffset_CacheOn_MatchesCacheOff() => IncrementalTestKit.RunOnSta(() =>
+        // 小数部分 ≥ 0.5 是合成器给缓存取整跟 guideline 不一样的地方(曾经整层偏 1 像素),横向 / 纵向分开测
+        [Theory]
+        [InlineData(20.4, 20.4, RenderMode.Software)]
+        [InlineData(20.6, 20.6, RenderMode.Software)]
+        [InlineData(7.5, 7.5, RenderMode.Software)]
+        [InlineData(0, 20.6, RenderMode.Software)]
+        [InlineData(20.6, 0, RenderMode.Software)]
+        [InlineData(20.6, 20.6, RenderMode.Bitmap)]
+        [InlineData(0, 54.58, RenderMode.Bitmap)]
+        public void FractionalAncestorOffset_CacheOn_MatchesCacheOff(double x, double y, RenderMode mode) => IncrementalTestKit.RunOnSta(() =>
         {
-            var off = Render(StaticCachePolicy.Off, MixedScene, 20.4, 20.4, overlay: true);
-            var on = Render(StaticCachePolicy.On, MixedScene, 20.4, 20.4, overlay: true);
+            var off = Render(StaticCachePolicy.Off, MixedScene, x, y, overlay: true, mode: mode);
+            var on = Render(StaticCachePolicy.On, MixedScene, x, y, overlay: true, mode: mode);
             int diff = CountDiff(off, on, out int covered);
-            _out.WriteLine($"偏移 (20.4, 20.4) 开缓存 vs 关缓存:覆盖 {covered} 像素,不同 {diff}");
+            _out.WriteLine($"偏移 ({x}, {y}) {mode} 开缓存 vs 关缓存:覆盖 {covered} 像素,不同 {diff}");
             Assert.True(covered > 2000, "场景没画出来");
             Assert.Equal(0, diff);
         });
@@ -311,16 +321,20 @@ namespace Hevo.Charting.Tests
             finally { win.Close(); }
         });
 
-        // 对齐只作用于渲染:画布没有附加变换,鼠标换算(GetPosition(DrawingCanvas) 与 TranslatePoint 同一套变换)不变,
-        // 像素中心落在画出来的那一列上(画面挪动 ≤ 半个设备像素)
+        // 静态画布带着把原点贴到最近设备像素的平移(≤ 半个设备像素),鼠标换算(GetPosition(DrawingCanvas) 与 TranslatePoint 同一套变换)跟着平移,
+        // 像素中心正好落在画出来的那一列上;开 / 关缓存同一条规则,换算结果一样
         [Theory]
-        [InlineData(20.4, RenderMode.Software)]
-        [InlineData(20.6, RenderMode.Software)]
-        [InlineData(20.4, RenderMode.Bitmap)]
-        [InlineData(20.6, RenderMode.Bitmap)]
-        public void FractionalAncestorOffset_PointerMapsToDrawnPixel(double offset, RenderMode mode) => IncrementalTestKit.RunOnSta(() =>
+        [InlineData(20.4, RenderMode.Software, StaticCachePolicy.On)]
+        [InlineData(20.5, RenderMode.Software, StaticCachePolicy.On)]
+        [InlineData(20.6, RenderMode.Software, StaticCachePolicy.On)]
+        [InlineData(20.9, RenderMode.Software, StaticCachePolicy.On)]
+        [InlineData(20.6, RenderMode.Software, StaticCachePolicy.Off)]
+        [InlineData(20.4, RenderMode.Bitmap, StaticCachePolicy.On)]
+        [InlineData(20.6, RenderMode.Bitmap, StaticCachePolicy.On)]
+        [InlineData(20.6, RenderMode.Bitmap, StaticCachePolicy.Off)]
+        public void FractionalAncestorOffset_PointerMapsToDrawnPixel(double offset, RenderMode mode, StaticCachePolicy policy) => IncrementalTestKit.RunOnSta(() =>
         {
-            var cell = NewCell(StaticCachePolicy.On);
+            var cell = NewCell(policy);
             var win = Show(cell, offset, offset);
             try
             {
@@ -331,7 +345,7 @@ namespace Hevo.Charting.Tests
 
                 // 竖线画在画布 x = 100(1px 线宽,占画布里 [100, 101) 这一列)
                 var hit = cell.DrawingCanvas.TranslatePoint(new Point(100.5, 120), (UIElement)win.Content);
-                Assert.Equal(offset + 100.5, hit.X, 6);
+                Assert.Equal(Math.Floor(offset + 0.5) + 100.5, hit.X, 6);
                 int col = (int)Math.Floor(hit.X), row = (int)Math.Floor(hit.Y), stride = Stride(1.0);
                 _out.WriteLine($"{mode} 画布 (100.5, 120) → 窗口 {hit},该像素 0x{px[row * stride + col]:X8}");
                 Assert.Equal(0xFF000000u, px[row * stride + col]);
@@ -444,11 +458,13 @@ namespace Hevo.Charting.Tests
             finally { win.Close(); }
         });
 
-        // 位图模式 + 小数偏移:开缓存后静态层的位图平移要归零(缓存自己贴整像素),关缓存再恢复,都不用重挂
+        // 运行中切缓存:图层不重录,开 / 关缓存的画面都跟一开始就关缓存的一样(小数部分 ≥ 0.5 时也是)
         [Theory]
         [InlineData(0.0, RenderMode.Software)]
         [InlineData(20.4, RenderMode.Software)]
         [InlineData(20.4, RenderMode.Bitmap)]
+        [InlineData(20.6, RenderMode.Software)]
+        [InlineData(20.6, RenderMode.Bitmap)]
         public void TurningCacheOn_ReplaysLayersWithoutReRecording(double offset, RenderMode mode) => IncrementalTestKit.RunOnSta(() =>
         {
             var expected = Render(StaticCachePolicy.Off, MixedScene, offset, offset, mode: mode);
@@ -474,6 +490,172 @@ namespace Hevo.Charting.Tests
                 diff = CountDiff(expected, Capture(win), out _);
                 _out.WriteLine($"偏移 {offset} {mode} 再关缓存:不同 {diff}");
                 Assert.Equal(0, diff);
+            }
+            finally { win.Close(); }
+        });
+
+        // ---------- 静态层与交互层同列 ----------
+        // 静态层画蓝线、交互层画红线:同一个画布坐标(竖线 x = 100、横线 y = 80)分段画,互不重叠,各自量落在窗口的哪一列 / 行。
+        // 开缓存时线条始终清晰,整层偏 1 像素只有这样比才看得出来。
+        private static readonly HevoPen BluePen = new(new HevoSolidBrush(Colors.Blue), 1);
+        private static readonly HevoPen RedPen = new(new HevoSolidBrush(Colors.Red), 1);
+        private static readonly HevoPen ThickGrayPen = new(new HevoSolidBrush(Color.FromRgb(128, 128, 128)), 2);
+
+        private static void StaticLines(IDrawingSink d, bool fracBounds)
+        {
+            d.DrawLine(BluePen, new HevoPoint(100, 90), new HevoPoint(100, 155));
+            d.DrawLine(BluePen, new HevoPoint(120, 80), new HevoPoint(235, 80));
+            // 2px 斜线让内容包围盒左上角落在 7.553(小数部分 ≥ 0.5);画布没有背景时缓存位图原点取包围盒,也会错开一列
+            if (fracBounds)
+            {
+                d.DrawLine(ThickGrayPen, new HevoPoint(8, 30), new HevoPoint(10, 31));
+                d.DrawLine(ThickGrayPen, new HevoPoint(30, 8), new HevoPoint(31, 10));
+            }
+        }
+
+        private sealed class OverlayLines : ChartLayer
+        {
+            public OverlayLines() { Level = ChartLayerType.Interaction; Name = "overlay-lines"; }
+            protected override void OnUpdate(IVisualData data, IDrawingSink d, WidgetBuffer widgetSink)
+            {
+                d.DrawLine(RedPen, new HevoPoint(100, 5), new HevoPoint(100, 70));
+                d.DrawLine(RedPen, new HevoPoint(5, 80), new HevoPoint(90, 80));
+            }
+        }
+
+        private static (ChartCell Cell, Window Win) ShowLines(StaticCachePolicy policy, double x, double y, RenderMode mode, bool fracBounds = false)
+        {
+            var cell = NewCell(policy);
+            var win = Show(cell, x, y);
+            var s = new ScriptLayer(d => StaticLines(d, fracBounds)) { Mode = mode };
+            var o = new OverlayLines { Mode = mode };
+            cell.AddUnmanagedLayer(s);
+            cell.AddUnmanagedLayer(o);
+            o.MarkDirty();
+            o.Update(NoData.Instance);
+            Record(cell, s);
+            return (cell, win);
+        }
+
+        // 预乘 BGRA、背景透明:蓝线权重取 B 通道,红线取 R 通道。返回权重质心(像素中心 = 整数 + 0.5)
+        private static double Centroid(uint[] px, int x0, int x1, int y0, int y1, bool blue, bool alongX)
+        {
+            int stride = Stride(1.0);
+            double sw = 0, sp = 0;
+            for (int y = y0; y < y1; y++)
+                for (int x = x0; x < x1; x++)
+                {
+                    uint p = px[y * stride + x];
+                    double w = blue ? (p & 0xFF) : ((p >> 16) & 0xFF);
+                    sw += w;
+                    sp += w * ((alongX ? x : y) + 0.5);
+                }
+            return sw > 0 ? sp / sw : double.NaN;
+        }
+
+        // 窗口里静态层 / 交互层竖线所在列、横线所在行(cell 原点在 (x, y))
+        private static (double StaticCol, double OverlayCol, double StaticRow, double OverlayRow) Measure(uint[] px, double x, double y)
+        {
+            int X(double v) => (int)Math.Floor(x + v);
+            int Y(double v) => (int)Math.Floor(y + v);
+            return (Centroid(px, X(90), X(111), Y(95), Y(150), true, true),
+                    Centroid(px, X(90), X(111), Y(10), Y(65), false, true),
+                    Centroid(px, X(125), X(145), Y(70), Y(91), true, false),
+                    Centroid(px, X(10), X(85), Y(70), Y(91), false, false));
+        }
+
+        private void AssertSameColumn(uint[] px, double x, double y, string label)
+        {
+            var m = Measure(px, x, y);
+            _out.WriteLine($"{label}:静态列 {m.StaticCol:F2} 交互列 {m.OverlayCol:F2};静态行 {m.StaticRow:F2} 交互行 {m.OverlayRow:F2}");
+            Assert.Equal(m.OverlayCol, m.StaticCol, 3);
+            Assert.Equal(m.OverlayRow, m.StaticRow, 3);
+            // 质心落在像素中心:单列实心,不是糊在两列上
+            Assert.Equal(0.5, m.StaticCol - Math.Floor(m.StaticCol), 3);
+            Assert.Equal(0.5, m.StaticRow - Math.Floor(m.StaticRow), 3);
+        }
+
+        public static IEnumerable<object[]> SameColumnCases()
+        {
+            foreach (var f in new[] { 0.0, 0.4, 0.5, 0.6, 0.9, 0.999 })
+                foreach (var policy in new[] { StaticCachePolicy.On, StaticCachePolicy.Off })
+                    foreach (var mode in new[] { RenderMode.Software, RenderMode.Bitmap })
+                        foreach (var fracBounds in new[] { false, true })
+                        {
+                            yield return new object[] { 20 + f, 20.0, policy, mode, fracBounds };
+                            if (f != 0) yield return new object[] { 20.0, 20 + f, policy, mode, fracBounds };
+                        }
+        }
+
+        // 静态层(开 / 关缓存、矢量 / 位图、内容包围盒整数 / 小数)和十字线所在的交互层落在同一列、同一行
+        [Theory]
+        [MemberData(nameof(SameColumnCases))]
+        public void FractionalAncestorOffset_StaticLayer_SameColumnAsOverlay(double x, double y, StaticCachePolicy policy, RenderMode mode, bool fracBounds) => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (_, win) = ShowLines(policy, x, y, mode, fracBounds);
+            try { AssertSameColumn(Capture(win), x, y, $"({x}, {y}) {policy} {mode} 包围盒{(fracBounds ? "小数" : "整数")}"); }
+            finally { win.Close(); }
+        });
+
+        // 父布局变化(GridSplitter 拖动一类)后不重录图层,开缓存的静态层仍跟交互层同列
+        [Theory]
+        [InlineData(RenderMode.Software)]
+        [InlineData(RenderMode.Bitmap)]
+        public void CachedStaticLayer_FollowsLayoutChange(RenderMode mode) => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (cell, win) = ShowLines(StaticCachePolicy.On, 20.4, 20.4, mode);
+            try
+            {
+                AssertSameColumn(Capture(win), 20.4, 20.4, $"{mode} (20.4, 20.4)");
+                var border = (System.Windows.Controls.Border)cell.Parent;
+                System.Windows.Controls.Canvas.SetLeft(border, 33.7);
+                System.Windows.Controls.Canvas.SetTop(border, 9.65);
+                win.UpdateLayout();
+                AssertSameColumn(Capture(win), 33.7, 9.65, $"{mode} 挪到 (33.7, 9.65) 后");
+            }
+            finally { win.Close(); }
+        });
+
+        // 祖先 RenderTransform 动画停在小数位置(不触发布局):下一帧画图层前重算画布平移,开缓存的静态层回到交互层那一列
+        [Theory]
+        [InlineData(RenderMode.Software)]
+        [InlineData(RenderMode.Bitmap)]
+        public void CachedStaticLayer_SameColumnAfterAncestorAnimationStops(RenderMode mode) => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (cell, win) = ShowLines(StaticCachePolicy.On, 0, 0, mode);
+            try
+            {
+                var shift = new TranslateTransform();
+                ((System.Windows.Controls.Border)cell.Parent).RenderTransform = shift;
+                win.UpdateLayout();
+                var duration = new Duration(TimeSpan.FromMilliseconds(60));
+                shift.BeginAnimation(TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(3.6, duration));
+                shift.BeginAnimation(TranslateTransform.YProperty, new System.Windows.Media.Animation.DoubleAnimation(5.7, duration));
+                var until = DateTime.UtcNow.AddSeconds(5);
+                while ((shift.X != 3.6 || shift.Y != 5.7) && DateTime.UtcNow < until)
+                    win.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.Equal(3.6, shift.X);
+                Assert.Equal(5.7, shift.Y);
+
+                cell.Invalidate(); // 下一帧:图层不脏也走渲染入口
+                AssertSameColumn(Capture(win), 3.6, 5.7, $"{mode} 祖先动画停在 (3.6, 5.7) 后下一帧");
+            }
+            finally { win.Close(); }
+        });
+
+        // 祖先带缩放:设备像素和局部坐标不再一一对应,画布平移归零(退回不对齐),不抛异常
+        [Fact]
+        public void ScaledAncestor_CanvasSnapIsZero() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (cell, win) = ShowLines(StaticCachePolicy.On, 20.6, 20.6, RenderMode.Software);
+            try
+            {
+                ((System.Windows.Controls.Border)cell.Parent).RenderTransform = new ScaleTransform(1.5, 1.5);
+                win.UpdateLayout();
+                cell.Invalidate();
+                var t = Assert.IsType<TranslateTransform>(cell.DrawingCanvas.RenderTransform);
+                Assert.Equal(0, t.X);
+                Assert.Equal(0, t.Y);
             }
             finally { win.Close(); }
         });
