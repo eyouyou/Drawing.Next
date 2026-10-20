@@ -36,6 +36,9 @@ namespace Hevo.Charting.Interaction
         private Func<RealRange>? _readActive;
         private IPointerHost? _clock;
         private Action? _tickHandler;
+        // 拓扑追踪用:惯性帧由宿主帧时钟回调,不在任何 Feature 作用域里,
+        // 写 UserRange 时要显式进入发起惯性的 Feature 作用域,否则时而记成数据源。
+        private object? _traceOwner;
 
         public bool IsRunning => _running;
 
@@ -50,9 +53,10 @@ namespace Hevo.Charting.Interaction
 
         /// <summary>抬手时启动衰减循环;速度低于阈值则不启动。可重复调 Start —— 内部先 Stop 旧循环。</summary>
         /// <param name="applyPxDelta">平移若干像素,返回真正消费的像素(按整根吸附时可能是 0)。</param>
-        public void Start(InertiaPanOptions config, IPointerHost clock, Func<double, double> applyPxDelta, Func<RealRange> readActiveRange)
+        public void Start(InertiaPanOptions config, IPointerHost clock, Func<double, double> applyPxDelta, Func<RealRange> readActiveRange, object? traceOwner = null)
         {
             Stop();
+            _traceOwner = traceOwner;
             _windowMs = config.VelocityWindowMs;
             double v = EstimateVelocity();
             if (Math.Abs(v) < config.MinVelocityPxPerSec) return;
@@ -102,6 +106,9 @@ namespace Hevo.Charting.Interaction
         private void Tick()
         {
             if (!_running || _applyDelta == null || _readActive == null) { Stop(); return; }
+#if DEBUG
+            using var traceScope = DevTools.TopologyTracer.EnterScope(_traceOwner);
+#endif
 
             long now = NowMs();
             double dt = (now - _lastTickMs) / 1000.0;

@@ -116,6 +116,10 @@ namespace Hevo.Charting.DevTools
         public readonly ConcurrentDictionary<string, (long TotalTicks, int Samples)> FeatureCost = new();
 
         public const string PIPE_ID = "PIPE";
+        // 另外两种"不是 Feature 的写入方":跨图镜像桥(联动 dashboard 把别的格子的写入同步过来),
+        // 环境(尺寸 / DPI / 可见性 / Transact 让环境纪元失效)。不单列的话会被记成数据源或冒充别的 Feature。
+        public const string MIRROR_ID = "MIRROR";
+        public const string ENV_ID = "ENV";
 
         // ─── port id → owner feature id ───
         // 静态扫描期(TopologyScanner.Scan)记录"这根 port 是哪个 feature 声明的",
@@ -154,6 +158,99 @@ namespace Hevo.Charting.DevTools
             public TimelineEvent(long ticks, EventKind kind, string target, string? summary)
             {
                 TicksFromStart = ticks; Kind = kind; TargetId = target; Summary = summary;
+            }
+        }
+
+        // ─── 触发捕获 ───
+        // 监控里按空格:等下一次写入(通常是数据源推送,也可能是交互),把这一波触发(写 → 读 → 写 …)
+        // 按时间顺序录下来,回答"一次推送是怎么一路传到图层的"。只录一个窗口,录完自动停;
+        // 没在捕获时每次读写只多一次 volatile 读。
+        public readonly struct FlowStep
+        {
+            /// <summary>距这一波第一次写入的 Stopwatch ticks。</summary>
+            public readonly long Ticks;
+            public readonly string Src;
+            public readonly string Tgt;
+            public readonly bool IsWrite;
+            public FlowStep(long ticks, string src, string tgt, bool isWrite) { Ticks = ticks; Src = src; Tgt = tgt; IsWrite = isWrite; }
+        }
+
+        private readonly object _captureGate = new();
+        private volatile bool _captureArmed;
+        private long _captureWaveStart;   // 0 = 还在等这一波的第一次写入
+        private long _captureWindowTicks;
+        private List<FlowStep>? _captureSteps;
+        private List<FlowStep>? _captureDone;
+
+        public bool IsCaptureArmed => _captureArmed;
+        public bool IsCaptureWaiting => _captureArmed && Interlocked.Read(ref _captureWaveStart) == 0;
+
+        /// <summary>开始等下一波:从第一次写入起录 windowMs 毫秒。数据源约 150ms 推一次,窗口要小于它,免得录进下一波。</summary>
+        public void BeginCapture(double windowMs = 100)
+        {
+            lock (_captureGate)
+            {
+                _captureSteps = new List<FlowStep>();
+                _captureDone = null;
+                _captureWaveStart = 0;
+                _captureWindowTicks = (long)(windowMs * System.Diagnostics.Stopwatch.Frequency / 1000);
+                _captureArmed = true;
+            }
+        }
+
+        public void CancelCapture()
+        {
+            lock (_captureGate)
+            {
+                _captureArmed = false;
+                _captureSteps = null;
+                _captureDone = null;
+            }
+        }
+
+        /// <summary>窗口到点就收尾;取走录好的一波(只给一次)。</summary>
+        public bool TryTakeCapture(out List<FlowStep> steps)
+        {
+            lock (_captureGate)
+            {
+                long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (_captureArmed && _captureWaveStart != 0 && now - _captureWaveStart > _captureWindowTicks)
+                {
+                    _captureDone = _captureSteps;
+                    _captureSteps = null;
+                    _captureArmed = false;
+                }
+                if (_captureDone != null)
+                {
+                    steps = _captureDone;
+                    _captureDone = null;
+                    return true;
+                }
+            }
+            steps = null!;
+            return false;
+        }
+
+        private void CaptureStep(string src, string tgt, bool isWrite)
+        {
+            if (!_captureArmed) return;
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            lock (_captureGate)
+            {
+                if (!_captureArmed || _captureSteps == null) return;
+                if (_captureWaveStart == 0)
+                {
+                    if (!isWrite) return; // 一波从写入开始,之前零散的读不算
+                    _captureWaveStart = now;
+                }
+                else if (now - _captureWaveStart > _captureWindowTicks)
+                {
+                    _captureDone = _captureSteps;
+                    _captureSteps = null;
+                    _captureArmed = false;
+                    return;
+                }
+                _captureSteps.Add(new FlowStep(now - _captureWaveStart, src, tgt, isWrite));
             }
         }
 
@@ -296,7 +393,10 @@ namespace Hevo.Charting.DevTools
             ResolvePortIds(port, out var fullId, out var displayName);
 
             RegisterNode(fullId, displayName, 1);
+            // 读取方也要登记名字:只读不写的读取方(跨图镜像、静态扫描没扫到的 Feature)否则在图上只剩裸 id
+            RegisterNode(fId, fName, fTier);
             LinkHits.AddOrUpdate((fullId, fId), 1, s_incrementFactory);
+            CaptureStep(fullId, fId, isWrite: false);
 
             // 高频 port 累计计数 —— SampleActivity 取差量打桶。
             _portReadCount.AddOrUpdate(fullId, 1, static (_, c) => c + 1);
@@ -350,11 +450,13 @@ namespace Hevo.Charting.DevTools
                 GetCallerInfo(caller, out string fId, out string fName, out int fTier);
                 RegisterNode(fId, fName, fTier);
                 LinkHits.AddOrUpdate((fId, fullId), 1, s_incrementFactory);
+                CaptureStep(fId, fullId, isWrite: true);
                 LastHitTicks[fId] = now;
             }
             else
             {
                 LinkHits.AddOrUpdate((PIPE_ID, fullId), 1, s_incrementFactory);
+                CaptureStep(PIPE_ID, fullId, isWrite: true);
                 LastHitTicks[PIPE_ID] = now;
             }
         }
@@ -465,6 +567,16 @@ namespace Hevo.Charting.DevTools
                 if (s == PIPE_ID)
                 {
                     id = PIPE_ID; name = "DataPipe (数据源)"; tier = 0;
+                    return;
+                }
+                if (s == MIRROR_ID)
+                {
+                    id = MIRROR_ID; name = "跨图镜像"; tier = 0;
+                    return;
+                }
+                if (s == ENV_ID)
+                {
+                    id = ENV_ID; name = "环境(尺寸 / 可见性)"; tier = 0;
                     return;
                 }
                 name = s.Replace("Feature", "");

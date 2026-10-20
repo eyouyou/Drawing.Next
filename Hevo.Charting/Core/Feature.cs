@@ -28,6 +28,9 @@ namespace Hevo.Charting.Core
         // 本 feature 在 chart 上挂的图层。Decompose 时统一 RemoveUnmanagedLayer + 清空。
         private readonly List<IChartLayer> _managedLayers = new();
 
+        /// <summary>本 Feature 挂到 chart 上的图层。拓扑监控用它画 Feature → 图层 的终点边。</summary>
+        internal IReadOnlyList<IChartLayer> ManagedLayers => _managedLayers;
+
         // 💥 内存泄漏终结者:专门存放与图表生命周期绑定的 Rx 句柄。Decompose 时全部 Dispose。
         private readonly List<IDisposable> _disposables = new();
 

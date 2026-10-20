@@ -415,7 +415,15 @@ namespace Hevo.Charting.Core
                     foreach (var f in addedFeatures)
                     {
                         // 建立 Feature 内部的 Rx 链条
-                        var subFlow = f.InternalCompose(_attachedChart, ctx, this, dummyFlow);
+                        IRenderFlow<DataBlackboard> subFlow;
+#if DEBUG
+                        // 跟首装配(BuildAndActivatePipeline 3c)一致:Watch 在装配期从 SetupContext 取 owner,
+                        // 不进作用域时热插拔 Feature 的读写在拓扑监控里全记成 UnknownOwner。
+                        using (DevTools.TopologyTracer.EnterSetupScope(f))
+#endif
+                        {
+                            subFlow = f.InternalCompose(_attachedChart, ctx, this, dummyFlow);
+                        }
 
                         // 订阅激活，并记录订阅句柄到字典中
                         var sub = subFlow.Subscribe(_ => { }, ex => System.Diagnostics.Debug.WriteLine($"[动态加载异常] {ex}"));
@@ -582,6 +590,10 @@ namespace Hevo.Charting.Core
             if (board == null || board.IsDisposed) return;
             try
             {
+#if DEBUG
+                // 尺寸 / DPI / 可见性 / Transact 都会走到这里,写入方统一记成"环境",不算数据源也不算调用它的 Feature
+                using var traceScope = DevTools.TopologyTracer.EnterScope(DevTools.TopologyTracer.ENV_ID);
+#endif
                 using (board.WriteScope())
                 {
                     // 利用 Ticks 保证每次写入都是不相等的新值

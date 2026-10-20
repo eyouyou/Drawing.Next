@@ -69,7 +69,8 @@ namespace Hevo.Charting.Interaction
                     readActiveRange: () =>
                     {
                         using (board.UpdateScope()) return board.Read(_s.Viewport.ActiveRange);
-                    });
+                    },
+                    traceOwner: _s.F);
             }
 
             // 单击-武装-松手不挪鼠标:按下时清了 hit 准备平移,其实没拖、松手也不动鼠标的话没人写新的 hit,

@@ -203,6 +203,12 @@ namespace Hevo.Charting.Linked
                 value = _latest;
             }
             if (board.IsDisposed) return;
+#if DEBUG
+            using var traceScope = DevTools.TopologyTracer.EnterScope(DevTools.TopologyTracer.MIRROR_ID);
+            PortMirror.TraceDepth++;
+            try
+            {
+#endif
             using (board.WriteScope())
             {
                 // 补写不是新的真实写入,按回声处理,不再分发回其它板
@@ -211,6 +217,10 @@ namespace Hevo.Charting.Linked
                 try { board.Write(_port, value); }
                 finally { PortMirror.Applying = prev; }
             }
+#if DEBUG
+            }
+            finally { PortMirror.TraceDepth--; }
+#endif
         }
 
         // 调用栈:Commit ← ForceWrite(Watch 回调里的写入当下)/ EndWriteScope(WriteScope 里所有端口通知完之后),均持源板写锁。
@@ -219,7 +229,17 @@ namespace Hevo.Charting.Linked
         {
             if (ReferenceEquals(PortMirror.Applying, this)) return;
 
+#if DEBUG
+            // 回调跑在原写入方的追踪作用域里;不切换的话,原格子会多出一条"写入方读端口"的假边。
+            // 分发途中触发的是回声(目标板 WriteScope 结束才通知,那时 Applying 已复位,靠下面的值相等短路):
+            // 它不是数据流,不记追踪,免得副图多出 端口 → 跨图镜像 的假读取和假环路。
+            var traceScope = DevTools.TopologyTracer.EnterScope(
+                PortMirror.TraceDepth > 0 ? null : DevTools.TopologyTracer.MIRROR_ID);
             var value = origin.Read(_port);
+            traceScope.Dispose();
+#else
+            var value = origin.Read(_port);
+#endif
             lock (_gate)
             {
                 if (_hasLatest && EqualityComparer<T>.Default.Equals(_latest, value)) return;
@@ -234,6 +254,17 @@ namespace Hevo.Charting.Linked
         {
             var boards = _owner?.AttachedBoards;
             if (boards == null) return;
+#if DEBUG
+            // 跨图同步的写入方记成"跨图镜像",别的格子里不再冒出原写入方的 Feature
+            using var traceScope = DevTools.TopologyTracer.EnterScope(DevTools.TopologyTracer.MIRROR_ID);
+            PortMirror.TraceDepth++;
+            try { Dispatch(origin, boards); }
+            finally { PortMirror.TraceDepth--; }
+        }
+
+        private void Dispatch(DataBlackboard origin, DataBlackboard[] boards)
+        {
+#endif
             for (int i = 0; i < boards.Length; i++)
             {
                 var b = boards[i];
@@ -262,6 +293,11 @@ namespace Hevo.Charting.Linked
     {
         // 当前线程正在执行哪个镜像器的分发写入 —— 那次写触发的回调是回声,不再分发
         [ThreadStatic] internal static object? Applying;
+
+#if DEBUG
+        // 拓扑追踪用:本线程正处在镜像分发里的层数(所有端口共用),分发途中触发的镜像回调是回声
+        [ThreadStatic] internal static int TraceDepth;
+#endif
 
         public static IPortMirror For<T>(DataPort<T> port) => new PortMirror<T>(port);
     }
