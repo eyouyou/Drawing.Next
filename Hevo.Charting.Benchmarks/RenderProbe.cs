@@ -121,6 +121,7 @@ namespace Hevo.Charting.Benchmarks
         public static int Run(string[] args)
         {
             var opt = ProbeOptions.Parse(args);
+            if (opt.Baseline != null && File.Exists(opt.Baseline)) ProbeBaseline.Load(opt.Baseline).ApplyTo(opt);
             if (opt.AllocTypes) s_allocSampler = new AllocTypeSampler();
             int exit = 0;
             var thread = new Thread(() =>
@@ -250,7 +251,7 @@ namespace Hevo.Charting.Benchmarks
 
             if (opt.WriteBaseline != null)
             {
-                File.WriteAllText(opt.WriteBaseline, ProbeBaseline.FromEntries(report.Entries).ToJson(), new UTF8Encoding(false));
+                File.WriteAllText(opt.WriteBaseline, ProbeBaseline.FromEntries(report.Entries, opt, env.DpiScale).ToJson(), new UTF8Encoding(false));
                 Console.WriteLine($"[render-probe] 计数基线已写入 {Path.GetFullPath(opt.WriteBaseline)}");
             }
 
@@ -258,7 +259,7 @@ namespace Hevo.Charting.Benchmarks
             if (opt.Baseline != null)
             {
                 var baseline = ProbeBaseline.Load(opt.Baseline);
-                var check = baseline.Check(report.Entries, opt.Tolerance);
+                var check = baseline.Check(report.Entries, opt.Tolerance, env.DpiScale);
                 Console.WriteLine(check.Text);
                 if (opt.SummaryFile != null) File.AppendAllText(opt.SummaryFile, check.Text + Environment.NewLine);
                 if (check.Regressed) exit = 3;
