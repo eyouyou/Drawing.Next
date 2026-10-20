@@ -274,7 +274,7 @@ namespace Hevo.Charting.Benchmarks
             var cell = new ChartCell { Template = schema, Width = opt.WindowWidth, Height = opt.WindowHeight, IsHitTestVisible = false };
             var window = new Window
             {
-                Title = "Hevo render probe (feed)",
+                Title = "Charting render probe (feed)",
                 SizeToContent = SizeToContent.WidthAndHeight,
                 ResizeMode = ResizeMode.NoResize,
                 Content = cell,

@@ -4,7 +4,7 @@ using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
 
 // 开发规范 §5 布林带 SOP —— 步骤 A:Trait。
-// 本目录是 Hevo.Charting.DocSamples 工程(随测试工程编译),文档只引用这里的代码,不在 md 里贴手抄副本。
+// 本目录是 Charting.DocSamples 工程(随测试工程编译),文档只引用这里的代码,不在 md 里贴手抄副本。
 // 写法按业务侧红线(LangVersion 9):块级 namespace、显式 using、不用 record struct / required。
 namespace Hevo.Charting.DocSamples.Bollinger
 {

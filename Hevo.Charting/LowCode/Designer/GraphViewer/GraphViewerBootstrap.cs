@@ -4,7 +4,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
 {
     /// <summary>
     /// GraphViewer 一键初始化:
-    /// 1. 触发 <see cref="BuiltinRegistration"/> 把 Hevo.Charting 自带 Feature/Trait/DataSource 全登记进 ComponentRegistry。
+    /// 1. 触发 <see cref="BuiltinRegistration"/> 把 Charting 自带 Feature/Trait/DataSource 全登记进 ComponentRegistry。
     /// 2. 把 GraphViewer 自带的 wrappers (<see cref="GraphViewer.Wrappers.NumericAxisFeature"/> 等) 也登记进去。
     /// 3. 给框架内置 Feature 上点端口元数据 (Output 方向、注释) —— 走
     ///    <see cref="PortMetadataRegistry"/>,绝不污染框架源码。

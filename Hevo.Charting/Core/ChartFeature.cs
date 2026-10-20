@@ -101,7 +101,7 @@ namespace Hevo.Charting.Core
 
         /// <summary>
         /// 泛型重载:保留具体 layer 类型,让强类型 <c>PublishData&lt;TLayer, TData&gt;</c> 在跨程序集
-        /// (如 Hevo.Charting.PythonNet 内 PyPlotFeature)调用时仍能命中正确的 IConsumes&lt;TData&gt; 约束。
+        /// (如 Charting.PythonNet 内 PyPlotFeature)调用时仍能命中正确的 IConsumes&lt;TData&gt; 约束。
         /// 业务侧 typed call: <c>ctx.For&lt;LineLayer&gt;(_lineLayer).PublishData(new XAxisTrait(...))</c>。
         /// </summary>
         public VisualProxy<TLayer> For<TLayer>(TLayer layer) where TLayer : IChartLayer

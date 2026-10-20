@@ -155,7 +155,7 @@ namespace Hevo.Charting.Core
         private RenderMode? _renderModeOverride;
 
         /// <summary>
-        /// 上屏后端。null(默认)= WPF DrawingVisual 回放;设成别的后端(如 Hevo.Charting.Skia 的 SkiaRenderBackend)
+        /// 上屏后端。null(默认)= WPF DrawingVisual 回放;设成别的后端(如 Charting.Skia 的 SkiaRenderBackend)
         /// 后两块 WPF 矢量画布折叠,图层指令改由后端上屏。运行时可切换,下一帧生效,不重算 Feature、不重录图层。
         /// 新建 cell 的初值取 <see cref="DefaultRenderBackendFactory"/>。
         /// <para>
@@ -775,7 +775,7 @@ namespace Hevo.Charting.Core
         }
 
         /// <summary>
-        /// 测量工具用(Hevo.Charting.Benchmarks --render-probe):不等 VSync,立刻同步跑一帧,
+        /// 测量工具用(Charting.Benchmarks --render-probe):不等 VSync,立刻同步跑一帧,
         /// 跟 CompositionTarget 回调里那一帧是同一段代码(含 RequestUpdate 排队的事务,如 SizeChanged)。
         /// 返回本帧重录的图层数。
         /// </summary>

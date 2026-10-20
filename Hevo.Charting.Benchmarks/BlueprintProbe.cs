@@ -105,7 +105,7 @@ namespace Hevo.Charting.Benchmarks
                 dash.IsHitTestVisible = false; // 不让真实鼠标位置影响首帧(悬停会多算十字光标 / tooltip)
                 window = new Window
                 {
-                    Title = "Hevo render probe (blueprint)",
+                    Title = "Charting render probe (blueprint)",
                     SizeToContent = SizeToContent.WidthAndHeight,
                     Content = dash,
                     WindowStartupLocation = WindowStartupLocation.CenterScreen,

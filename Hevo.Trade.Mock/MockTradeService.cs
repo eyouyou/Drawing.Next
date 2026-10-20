@@ -13,7 +13,7 @@ namespace Hevo.Trade.Mock
     ///
     /// <para>
     /// 设计目标:让 §D3.13 全本地形态在没有真实 broker SDK 的情况下也能跑通端到端 demo。
-    /// 真实生产用 <c>Hevo.Trade.{CTP / Tora / IB / XTP}</c> 或 <c>Hevo.Trade.Remote</c>。
+    /// 真实生产用 <c>Trade.{CTP / Tora / IB / XTP}</c> 或 <c>Trade.Remote</c>。
     /// </para>
     ///
     /// <para>

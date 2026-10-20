@@ -27,7 +27,7 @@ namespace Hevo.Charting.Tests
     /// </list>
     /// <para>
     /// 测试不跑 <c>DashboardLauncher.DryRun</c> —— 那条路径要求 MockKLineDataSource
-    /// 已注册,而该类住在 Hevo.Drawing.LowCodeDemo(WPF + Python.NET 重依赖),
+    /// 已注册,而该类住在 Drawing.LowCodeDemo(WPF + Python.NET 重依赖),
     /// 拖进测试项目得不偿失。这里只做 JSON 结构层回归,精准覆盖两条修复。
     /// </para>
     /// </summary>

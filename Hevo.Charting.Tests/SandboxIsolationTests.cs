@@ -15,7 +15,7 @@ namespace Hevo.Charting.Tests
     /// </para>
     ///
     /// <para>
-    /// <b>解法</b>:把沙箱探针嵌进 <c>Hevo.Charting.Benchmarks</c> exe 的 Program.cs(<c>--sandbox-probe</c>
+    /// <b>解法</b>:把沙箱探针嵌进 <c>Charting.Benchmarks</c> exe 的 Program.cs(<c>--sandbox-probe</c>
     /// 参数命中走 SandboxProbeMain),每个测试场景启一个新进程,进程内 Python 单例独立、
     /// BlockedImports 当次配置生效。
     /// </para>
@@ -33,7 +33,7 @@ namespace Hevo.Charting.Tests
         // ── helpers ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 跨配置兼容定位 Hevo.Charting.Benchmarks.exe —— Tests 跑 Debug,Benchmarks 一般 Release,
+        /// 跨配置兼容定位 Charting.Benchmarks.exe —— Tests 跑 Debug,Benchmarks 一般 Release,
         /// 但开发阶段 Debug 也能跑。两边都试,先找到的为准。
         /// </summary>
         private static string? FindBenchmarksExe()

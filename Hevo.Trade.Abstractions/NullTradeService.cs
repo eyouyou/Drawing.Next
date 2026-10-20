@@ -10,7 +10,7 @@ namespace Hevo.Trade
     ///
     /// <para>
     /// 设计意图:让"框架可独立运行 / 业务按需启用 broker"成立。
-    /// 跟 Hevo.Charting 的 NullPythonRuntime 同模式。
+    /// 跟 Charting 的 NullPythonRuntime 同模式。
     /// </para>
     /// </summary>
     public sealed class NullTradeService : ITradeService

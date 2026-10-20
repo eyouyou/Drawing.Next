@@ -22,7 +22,7 @@ namespace Hevo.Charting.LowCode.Designer
     /// </summary>
     public static class BuiltinRegistration
     {
-        /// <summary>登记 Hevo.Charting 程序集自带的 Feature / Trait / DataSource 基类。</summary>
+        /// <summary>登记 Charting 程序集自带的 Feature / Trait / DataSource 基类。</summary>
         public static void RegisterBuiltins()
         {
             RegisterAssembly(typeof(ChartFeature).Assembly);

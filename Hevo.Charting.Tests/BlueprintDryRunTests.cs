@@ -121,7 +121,7 @@ namespace Hevo.Charting.Tests
         private static ChartBlueprint MakeMinimalBlueprint()
         {
             // SinWaveDataSource 仅在 LowCodeDemo 注册;测试要么在框架层选一个 BuiltinRegistration
-            // 已登记的 DataSource (但 Hevo.Charting 自己没有内置 ds)。
+            // 已登记的 DataSource (但 Charting 自己没有内置 ds)。
             // 折中:用 GraphViewerBootstrap 后已登记的 ChartInteractionFeature 等内置 feature 测,
             // DataSource 用一个能找到的。简单起见:借测试自定义 DataSourceModel.TypeName,
             // 让 DryRun 在 ComponentRegistry.Resolve 阶段早 Error。但本类的非"unregistered"用例需要

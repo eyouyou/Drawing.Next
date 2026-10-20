@@ -14,7 +14,7 @@ using Xunit.Abstractions;
 namespace Hevo.Charting.Tests
 {
     /// <summary>
-    /// Skia 上屏后端(Hevo.Charting.Skia):
+    /// Skia 上屏后端(Charting.Skia):
     /// ① 增量更新(只重录脏图层、只重画有变化的合成面)与从头渲染逐像素一致;只动交互层时静态面不重画;
     /// ② 图层移除 / 隐藏后原区域被擦干净;
     /// ③ 后端切换:挂上即上屏,切回 WPF 时 DrawingVisual 全量重放(挂 Skia 期间的新内容也要带回来);

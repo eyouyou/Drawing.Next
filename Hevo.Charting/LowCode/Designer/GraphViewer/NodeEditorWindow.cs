@@ -272,7 +272,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             if (_interfaceInstanceCache.TryGetValue(interfaceType, out var cached)) return cached;
             var result = new List<(string, object)>();
             const BindingFlags F = BindingFlags.Public | BindingFlags.Static;
-            // 接口所在程序集就够了(Hevo.Charting),业务自带 IScale 子类极罕见。
+            // 接口所在程序集就够了(Charting),业务自带 IScale 子类极罕见。
             // 真有此需求时这里改成全 AppDomain 扫即可。
             foreach (var implType in interfaceType.Assembly.GetTypes())
             {

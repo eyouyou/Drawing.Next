@@ -1,6 +1,6 @@
-# Hevo.Charting.Mcp
+# Charting.Mcp
 
-MCP (Model Context Protocol) server exposing Hevo.Charting low-code blueprint capabilities to LLMs.
+MCP (Model Context Protocol) server exposing Charting low-code blueprint capabilities to LLMs.
 
 > **Status**: Initial cut. Provides 3 tools — `list_components`, `describe_component`, `validate_blueprint` — covering the LLM "see → describe → validate" loop for blueprint authoring. Runtime launch / streaming diagnostics are out of scope here (those need a host with WPF render loop).
 

@@ -19,7 +19,7 @@ namespace Hevo.Charting.LowCode.Designer
     /// <list type="bullet">
     ///   <item>接口路径需要 <c>BufferedDataSource&lt;,&gt;</c> 显式实现,DS 基类被蓝图概念污染 —— 业务的 DS 派生类
     ///         读 doc/方法签名时会看到 <c>RunBlueprint</c> 这类不属于"数据源"职责的方法</item>
-    ///   <item>wrapper 路径所有蓝图概念关在 <c>Hevo.Charting.LowCode.Designer</c> 命名空间,DS 基类只管"双缓冲读写分离 + Stream 推送"</item>
+    ///   <item>wrapper 路径所有蓝图概念关在 <c>Charting.LowCode.Designer</c> 命名空间,DS 基类只管"双缓冲读写分离 + Stream 推送"</item>
     /// </list>
     /// </summary>
     internal static class BlueprintDataSourceProbe
