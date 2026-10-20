@@ -28,6 +28,7 @@ namespace Hevo.Charting.Tests
             public bool RequireClickToActivate { get; init; }
             public bool DismissOnEscape { get; init; }
             public BoxZoomOptions? BoxZoom { get; init; }
+            public Hevo.Charting.Buildin.IZoomStrategy? ZoomStrategy { get; init; }
             public Action<InteractionBuilder, Schema>? Extra { get; init; }
 
             protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
@@ -42,7 +43,7 @@ namespace Hevo.Charting.Tests
                     .Interactions(i =>
                     {
                         i.EnableStandardPointer(Hit, ChartInteractionMode.All,
-                            boxZoomConfig: BoxZoom, requireClickToActivate: RequireClickToActivate, dismissOnEscape: DismissOnEscape,
+                            boxZoomConfig: BoxZoom, zoomStrategy: ZoomStrategy, requireClickToActivate: RequireClickToActivate, dismissOnEscape: DismissOnEscape,
                             // 速度采样窗口放宽:CI 上一帧可能很慢,默认 60ms 窗口里可能一个采样都不剩,惯性就不启动
                             inertiaPanConfig: new InertiaPanOptions { VelocityWindowMs = 2000 });
                         Extra?.Invoke(i, this);
@@ -52,7 +53,7 @@ namespace Hevo.Charting.Tests
 
         internal sealed class Rig
         {
-            private const int Length = 100;
+            private const int DefaultLength = 100;
             public readonly ChartCell Cell = new();
             public readonly Schema Schema;
             public readonly DataBlackboard Board = new();
@@ -63,9 +64,9 @@ namespace Hevo.Charting.Tests
             private readonly Window _window;
 
             public Rig(bool requireClickToActivate = false, BoxZoomOptions? boxZoom = null, bool dismissOnEscape = false,
-                Action<InteractionBuilder, Schema>? extra = null, double left = -10000)
+                Action<InteractionBuilder, Schema>? extra = null, double left = -10000, Hevo.Charting.Buildin.IZoomStrategy? zoomStrategy = null, int length = DefaultLength)
             {
-                Schema = new Schema { RequireClickToActivate = requireClickToActivate, BoxZoom = boxZoom, DismissOnEscape = dismissOnEscape, Extra = extra };
+                Schema = new Schema { RequireClickToActivate = requireClickToActivate, BoxZoom = boxZoom, DismissOnEscape = dismissOnEscape, Extra = extra, ZoomStrategy = zoomStrategy };
                 Cell.Template = Schema;
                 Cell.Width = 400; Cell.Height = 300;
                 _window = new Window
@@ -80,7 +81,7 @@ namespace Hevo.Charting.Tests
                 Interaction = Schema.ListFeatures().OfType<ChartInteractionFeature>().Single();
                 Router = Schema.ListFeatures().OfType<PointerRouterFeature>().Single();
 
-                Seed(Board, Schema, _viewport);
+                Seed(Board, Schema, _viewport, length);
                 Schema.Trigger.Push(Board);
                 Schema.InvalidateEnvironment();
                 Frame();
@@ -89,12 +90,12 @@ namespace Hevo.Charting.Tests
                 Initial = ActiveRange;
             }
 
-            /// <summary>100 根 K 线 + Y 量程 80–120。</summary>
-            public static void Seed(DataBlackboard board, Schema schema, ViewportPorts viewport)
+            /// <summary><paramref name="length"/> 根 K 线(默认 100)+ Y 量程 80–120。</summary>
+            public static void Seed(DataBlackboard board, Schema schema, ViewportPorts viewport, int length = DefaultLength)
             {
-                var time = new DateTime[Length];
-                double[] open = new double[Length], high = new double[Length], low = new double[Length], close = new double[Length];
-                for (int i = 0; i < Length; i++)
+                var time = new DateTime[length];
+                double[] open = new double[length], high = new double[length], low = new double[length], close = new double[length];
+                for (int i = 0; i < length; i++)
                 {
                     time[i] = new DateTime(2026, 1, 1).AddMinutes(i);
                     open[i] = 100 + i % 7; close[i] = 101 + i % 5; high[i] = 110; low[i] = 95;
@@ -106,7 +107,7 @@ namespace Hevo.Charting.Tests
                     board.ForceWrite(schema.Ports.High, new ReadOnlyMemory<double>(high));
                     board.ForceWrite(schema.Ports.Low, new ReadOnlyMemory<double>(low));
                     board.ForceWrite(schema.Ports.Close, new ReadOnlyMemory<double>(close));
-                    board.Write(viewport.LogicalLength, Length);
+                    board.Write(viewport.LogicalLength, length);
                     board.Write(schema.YRange, new RealRange(80, 120));
                 }
             }

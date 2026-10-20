@@ -38,6 +38,15 @@ namespace Hevo.Charting.Interaction
 
         public readonly InertiaPanRunner Inertia = new();
 
+        // 整根对齐时连续缩放的未取整视口:每步在上一步的精确结果上算,只在写出时取整。
+        // 若每步都从取整后的视口重算,Min / Max 各自四舍五入的误差会一步步累积,鼠标下那根 K 线越缩越偏。
+        // 视口被别人改了(平移 / 追加数据 / 撞墙钳制)或锚点挪了就作废,从当前视口重新起算。
+        // 锚十字光标那根的策略,十字光标换了根也算锚点挪了:新那根在未取整视口里的位置跟画面上差最多半根,接着算会跳一根。
+        private RealRange _zoomExact;
+        private RealRange _zoomWritten;
+        private double _zoomAnchorPx = double.NaN;
+        private int? _zoomHitIndex;
+
         public ChartInteractionState(ChartInteractionFeature feature, ChartCell chart, RenderContext ctx)
         {
             F = feature;
@@ -126,12 +135,21 @@ namespace Hevo.Charting.Interaction
             if (zoomFactor <= 0 || double.IsNaN(zoomFactor) || double.IsInfinity(zoomFactor)) return;
             using (board.UpdateScope())
             {
-                var baseRange = board.Read(Viewport.ActiveRange);
+                var activeRange = board.Read(Viewport.ActiveRange);
                 int logicalLength = board.Read(Viewport.LogicalLength);
                 var plotArea = _ctx.GetPlotArea();
                 var scaleStrategy = _ctx.Shared().Read<ScaleStrategyTrait>();
 
-                if (!baseRange.IsValid || plotArea.Width <= 0 || logicalLength <= 0) return;
+                if (!activeRange.IsValid || plotArea.Width <= 0 || logicalLength <= 0) return;
+
+                var hitState = board.Read(F.PointerHitPort);
+                int? hitIndex = F.ZoomStrategy is CrosshairAnchorZoomStrategy ? hitState?.Hit.LogicalIndex : null;
+                var snappable = scaleStrategy?.DomainScale as ISnappableScale;
+                bool continuing = snappable != null
+                    && activeRange.Equals(_zoomWritten)
+                    && anchorPxX.Equals(_zoomAnchorPx)
+                    && hitIndex == _zoomHitIndex;
+                var baseRange = continuing ? _zoomExact : activeRange;
 
                 double rawTargetSpan = baseRange.Span * zoomFactor;
 
@@ -157,7 +175,7 @@ namespace Hevo.Charting.Interaction
                     BaseRange: baseRange,
                     RawTargetSpan: rawTargetSpan,
                     MouseRelativeX: relativeX,
-                    HitState: board.Read(F.PointerHitPort),
+                    HitState: hitState,
                     LogicalLength: logicalLength,
                     Limits: limits,
                     DomainScale: scaleStrategy?.DomainScale,
@@ -170,7 +188,8 @@ namespace Hevo.Charting.Interaction
                 if (Math.Abs(newRange.Span - baseRange.Span) < MathTolerance.NumericEqual
                     && Math.Abs(newRange.Min - baseRange.Min) < MathTolerance.NumericEqual) return;
 
-                if (scaleStrategy?.DomainScale is ISnappableScale snappable)
+                var exactRange = newRange;
+                if (snappable != null)
                 {
                     double snappedMin = snappable.Snap(newRange.Min);
                     double snappedMax = snappable.Snap(newRange.Max);
@@ -180,6 +199,11 @@ namespace Hevo.Charting.Interaction
 
                 using (board.WriteScope())
                     board.Write(Viewport.UserRange, newRange);
+
+                _zoomExact = exactRange;
+                _zoomWritten = newRange;
+                _zoomAnchorPx = anchorPxX;
+                _zoomHitIndex = hitIndex;
             }
         }
 

@@ -61,6 +61,16 @@ namespace Hevo.Charting.Buildin
         }
 
         /// <summary>
+        /// 同上,锚点相对位置按 <paramref name="scale"/> 的 Normalize 算:Centered 标尺两端各留半格,
+        /// 不能按 (index − Min) / Span 算,否则锚定的那根每步缩放都会挪一点。scale 为 null 时同上一个重载。
+        /// </summary>
+        public static RealRange HitAnchoredZoom(RealRange baseRange, double targetSpan, double anchorLogicalIndex, IScale? scale)
+        {
+            if (scale == null) return HitAnchoredZoom(baseRange, targetSpan, anchorLogicalIndex);
+            return AnchoredZoom(baseRange, targetSpan, System.Math.Clamp(scale.Normalize(anchorLogicalIndex, baseRange), 0, 1));
+        }
+
+        /// <summary>
         /// 跨度夹紧：策略调用以保证返回的 Span 处于合法范围内。
         /// </summary>
         public static double ClampSpan(double rawSpan, SpanLimits limits)
@@ -146,7 +156,7 @@ namespace Hevo.Charting.Buildin
         {
             double span = ZoomMath.ClampSpan(ctx.RawTargetSpan, ctx.Limits);
             if (ctx.HitState is { } hit)
-                return ZoomMath.HitAnchoredZoom(ctx.BaseRange, span, hit.Hit.LogicalIndex);
+                return ZoomMath.HitAnchoredZoom(ctx.BaseRange, span, hit.Hit.LogicalIndex, ctx.DomainScale);
 
             double anchor = ctx.MouseRelativeX is >= 0 and <= 1 ? ctx.MouseRelativeX : 1.0;
             return ZoomMath.AnchoredZoom(ctx.BaseRange, span, anchor);
