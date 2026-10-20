@@ -8,9 +8,9 @@
 
 **触发条件**:`Hevo.Charting.Skia` 的 `SkiaRenderBackend` 要随产品打包,或业务开始用 `ChartCell.RenderBackend`。
 
-**问题**:Skia 后端把整张图画成一张位图,宿主元素挂在 `_rootContainer` 里。祖先摆在小数位置(`Grid *`、GridSplitter、125% DPI 下的整数 DIP)时,这张位图跟位图模式图层一样会被重采样发糊、整体错开不到一个设备像素。WPF 路径已处理(06 号文档 §14.9:矢量图层靠 `ChartDrawingCanvas.InsertVisual` 给图层设的 snapping guideline,位图图层靠 `ChartCell` 维护的原点平移,`BitmapLayerSurface.Mount` 套上),Skia 宿主没有覆盖。下面"Skia 引用移除"一节记的"±1 列错位"可能同源,重新启用时先用小数偏移复现确认。
+**问题**:Skia 后端把整张图画成一张位图,宿主元素挂在 `_rootContainer` 里。祖先摆在小数位置(`Grid *`、GridSplitter、125% DPI 下的整数 DIP)时,这张位图跟位图模式图层一样会被重采样发糊、整体错开不到一个设备像素。WPF 路径已处理(06 号文档 §14.9:矢量图层靠 `ChartDrawingCanvas.InsertVisual` 给图层设的 snapping guideline,静态画布和位图图层靠 `ChartCell.SnapCanvasOrigin` 维护的原点平移),Skia 宿主没有覆盖。下面"Skia 引用移除"一节记的"±1 列错位"可能同源,重新启用时先用小数偏移复现确认。
 
-**方案**:跟位图图层一样处理 —— `ChartCell.SnapBitmapOrigin` 算出的平移(交互层那份,宿主不挂 BitmapCache)交给后端,作为宿主元素的 `RenderTransform`,或由后端在 `DrawImage` 外面套上。只改渲染,不改宿主的布局位置;鼠标坐标照旧走 `GetPosition(DrawingCanvas)`。
+**方案**:跟位图图层一样处理 —— `ChartCell.SnapCanvasOrigin` 算出的平移(跟静态画布 `RenderTransform` 同一个偏移)交给后端,作为宿主元素的 `RenderTransform`,或由后端在 `DrawImage` 外面套上。只改渲染,不改宿主的布局位置;鼠标坐标走 `GetPosition(DrawingCanvas)`,已经含这份平移,宿主套上同一平移后口径一致。
 
 **验证**:`StaticCacheAliasingTests` 的祖先小数偏移用例加一组 `RenderBackend = new SkiaRenderBackend()`(测试工程已引用 Skia 程序集),开 / 关缓存半透明像素为 0;真实屏幕用小数偏移截图对照。
 
@@ -89,7 +89,8 @@ ChartCell 路由器自动把它送进 `_overlayCanvas`(无 cache,跟 Crosshair /
 - WPF 软件渲染(远程桌面同款路径)下缓存反而更慢:可见 120 根十字光标 / 缩放 18 → 33 ms,可见 1000 根缩放 33 → 50 ms。
   业务在这类环境可设 Off。将来若要自动切换,依据应是渲染层级(`RenderCapability.Tier`,远程桌面连上 / 断开会变),
   不是可见根数。
-- 开缓存时画面与不开逐像素一致:全图抗锯齿,横竖内容按设备像素对齐(06 号文档 §4.3 / §14.9)。
+- 开缓存时画面与不开逐像素一致、静态层跟十字线同列:全图抗锯齿,横竖内容按设备像素对齐,静态画布原点平移到设备像素(06 号文档 §4.3 / §14.9)。
+  只在 100% DPI、软件合成(RenderTier 0)上实测;125% / 150% 真机、GPU 合成待测。
 - 未测:弱独显 / 4K / 多屏混合 DPI 的真机上屏;4 图结果只测了一轮。
 
 ---

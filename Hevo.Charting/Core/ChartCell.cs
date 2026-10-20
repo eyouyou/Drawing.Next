@@ -237,7 +237,8 @@ namespace Hevo.Charting.Core
         /// 实测(latency-probe,集显 GPU,120 Hz):4 张图同屏、每张可见 1000 根 + 成交量,十字光标端到端
         /// 开缓存 16.6 ms、关缓存 33.2 ms(多等一帧);单图看不出差别。WPF 软件渲染(远程桌面)下缓存反而更慢
         /// (可见 120 根十字光标 18 → 33 ms),业务在这类环境可设 Off。
-        /// 全图抗锯齿、横竖内容按设备像素对齐,开不开缓存画面逐像素一致(见 06 号文档 §14.9)。
+        /// 全图抗锯齿、横竖内容按设备像素对齐,静态画布原点平移到设备像素(SnapCanvasOrigin),开不开缓存画面逐像素一致、
+        /// K 线 / 网格跟十字线同列(见 06 号文档 §14.9)。
         /// </para>
         /// </summary>
         public StaticCachePolicy StaticCachePolicy
@@ -267,7 +268,7 @@ namespace Hevo.Charting.Core
             {
                 _drawingCanvas.CacheMode = null;
             }
-            SnapBitmapOrigin();
+            SnapCanvasOrigin();
         }
 
         // ==========================================
@@ -401,7 +402,7 @@ namespace Hevo.Charting.Core
 
             // 全图抗锯齿(不设 EdgeMode.Aliased):横竖线 / 矩形 / 裁剪框由渲染器按设备像素对齐保持锐利,
             // 斜线 / 曲线平滑。开不开 BitmapCache 输出一样(缓存本来就按抗锯齿栅格化)。
-            // 祖先在小数位置时图层原点靠画布(ChartDrawingCanvas)给图层设的 snapping guideline 贴到设备像素上(位图模式见 SnapBitmapOrigin)。
+            // 祖先在小数位置时图层原点靠画布(ChartDrawingCanvas)给图层设的 snapping guideline 贴到设备像素上(开缓存和位图模式见 SnapCanvasOrigin)。
 
             // [关键] hit-test 兜底:_rootContainer / Canvas 默认 Background=null → 整个 chart 不 hit-test-visible
             // → mouse 事件穿透到 Window 下面,ChartInteractionFeature 的 MouseMove 订阅永远收不到。
@@ -409,12 +410,18 @@ namespace Hevo.Charting.Core
             // (Skia 时代不需要这步,因为 SKElement 渲染的位图本身 hit-test-visible。)
             _rootContainer.Background = System.Windows.Media.Brushes.Transparent;
 
+            // 静态画布挂了 BitmapCache:缓存位图的原点取内容包围盒,包围盒左上角常落在小数坐标(半根露出的 K 线、
+            // 小数位置的折线顶点),合成时整张位图被平移,影线比覆盖层上的十字线偏左 1 个像素。
+            // 透明背景把包围盒固定成整块画布,缓存位图原点就是画布原点,再由 SnapCanvasOrigin 把画布原点贴到设备像素。
+            _drawingCanvas.Background = System.Windows.Media.Brushes.Transparent;
+
             // 触屏支持:开启 WPF Manipulation 通道,触屏事件不再 promote 成 mouse,
             // 由 ChartInteractionFeature 的 ManipulationStarting/Delta 订阅接管(双指捏合 + 单指拖)。
             // 桌面无触屏场景实际开销 ~ 0(WPF 不会主动启动 PenIMC 线程)。
             IsManipulationEnabled = true;
 
-            // 按 StaticCachePolicy 挂 / 不挂 BitmapCache(默认挂)
+            // 静态画布原点贴设备像素(见 SnapCanvasOrigin);按 StaticCachePolicy 挂 / 不挂 BitmapCache(默认挂)
+            _drawingCanvas.RenderTransform = _staticCanvasSnap;
             ApplyStaticCacheState();
 
             // 基础结构:从下到上 DrawingCanvas (静态 Software) → OverlayCanvas (交互 Software) → InteractionCanvas (Widget,懒加载)
@@ -458,28 +465,32 @@ namespace Hevo.Charting.Core
         }
 
         // ==========================================
-        // 位图图层原点对齐设备像素
+        // 画布原点对齐设备像素
         // ==========================================
         //
-        // 祖先摆在小数位置时,矢量图层靠画布(ChartDrawingCanvas.InsertVisual)设的 snapping guideline 由合成器把原点贴到设备像素(只作用于渲染)。
-        // guideline 只挪几何不挪 DrawImage(实测 RTB / 真实屏幕都无效,ImageBrush 矩形、NearestNeighbor 也一样),
-        // 位图模式的图层要自己把位图挪到整像素上,否则整张位图被重采样发糊。
-        // 做法同 guideline:原点就近取整(|偏移| ≤ 半个设备像素),只加在 DrawImage 外面(BitmapLayerSurface.Mount),
-        // 不改画布的变换,布局 / 命中测试 / 鼠标坐标不受影响。同一块画布上的位图图层共用一个可变 Transform,偏移变了只改它,不用重挂。
-        // 静态层开着 BitmapCache 时位图先画进缓存(缓存自己的原点在整像素上),缓存再由 SnapsToDevicePixels 贴到设备像素,
-        // 这时静态层不能再挪(实测再挪会糊:4128 个半透明像素),所以静态层 / 交互层各一个。
-        // 祖先 RenderTransform 动画不触发布局,所以每次画位图图层前也重算一次(动画停在小数位置时,下一帧就对齐)。
-        // 局限:动画进行中位图图层不重画就跟不上(矢量 guideline 能跟上);要跟就得常驻 CompositionTarget.Rendering,违背静置不占 GPU。
-        // 不用给位图图层挂 BitmapCache(SnapsToDevicePixels):实测合成器给缓存取整跟 guideline 不一样,偏移 20.6 / 7.5 时与矢量图层差 1 个设备像素。
-        private readonly TranslateTransform _staticBitmapSnap = new();
+        // 祖先摆在小数位置时,矢量图层靠画布(ChartDrawingCanvas.InsertVisual)设的 snapping guideline 由合成器把原点就近贴到设备像素(只作用于渲染)。
+        // 静态画布挂了 BitmapCache 时 guideline 只在缓存位图内部生效,缓存位图本身由合成器按 floor 放到设备像素上,跟 guideline 的就近取整不一样:
+        // 原点小数部分 ≥ 0.5 时整个静态层比交互层(十字线)偏左 / 偏上 1 个设备像素,线条照样清晰,数半透明像素查不出来。
+        // 所以静态画布自己挂一个平移,把原点挪到最近的设备像素(取舍同 guideline):原点是整数,floor 和就近取整就一致,开不开缓存都落在同一列。
+        // 开关缓存用同一条规则,运行时切换缓存画面和鼠标坐标都不跳。
+        // 鼠标坐标走 GetPosition(DrawingCanvas),跟着平移 ≤ 半个设备像素,正好落在画出来的那一列上(交互层也画在就近取整的原点上)。
+        // 画布的透明背景(构造函数)要留着:没有它缓存位图原点取内容包围盒,包围盒小数部分 ≥ 0.5 时仍差 1 个像素。
+        //
+        // 位图模式的图层:guideline 只挪几何不挪 DrawImage(实测 RTB / 真实屏幕都无效,ImageBrush 矩形、NearestNeighbor 也一样)。
+        // 静态画布已经整体挪到整像素上,里面的位图不用再挪;交互画布没挂平移(挂了交互层的命中 / 鼠标口径就跟静态画布不一样了),
+        // 它的位图图层套 _overlayBitmapSnap(BitmapLayerSurface.Mount 里只加在 DrawImage 外面),同一块画布上的位图图层共用这个可变 Transform。
+        // 祖先 RenderTransform 动画不触发布局,所以每帧画图层前也重算一次(动画停在小数位置时,下一帧就对齐)。
+        // 局限:动画进行中不重画就跟不上(静态层最多差 1 个像素,矢量图层不发虚);要跟就得常驻 CompositionTarget.Rendering,违背静置不占 GPU。
+        // 不用给位图图层挂 BitmapCache:同上,合成器给缓存取整跟 guideline 不一样,偏移 20.6 / 7.5 时与矢量图层差 1 个设备像素。
+        // 业务不要改 DrawingCanvas.RenderTransform,它由这里维护。
+        private readonly TranslateTransform _staticCanvasSnap = new();
         private readonly TranslateTransform _overlayBitmapSnap = new();
         private EventHandler? _layoutUpdatedHandler;
 
-        // LayoutUpdated / DPI 变化 / 画位图图层前算:沿父链累加偏移,不分配;没用过位图模式就不算;偏移不变时不写 Transform。
+        // LayoutUpdated / DPI 变化 / 每帧画图层前算:沿父链累加偏移,不分配;偏移不变时不写 Transform。
         // 窗口移动不用跟:窗口客户区原点本来就在整像素上。
-        private void SnapBitmapOrigin()
+        private void SnapCanvasOrigin()
         {
-            if (_rasterProvider == null) return;
             double x = 0, y = 0;
             bool translateOnly = true;
             Visual? visual = _drawingCanvas;
@@ -488,7 +499,8 @@ namespace Hevo.Charting.Core
                 var offset = VisualTreeHelper.GetOffset(visual);
                 x += offset.X;
                 y += offset.Y;
-                if (VisualTreeHelper.GetTransform(visual) is { } t)
+                // 画布自己的 RenderTransform 就是 _staticCanvasSnap,算进去下一次会把上一次的平移当成已对齐,来回抖
+                if (!ReferenceEquals(visual, _drawingCanvas) && VisualTreeHelper.GetTransform(visual) is { } t)
                 {
                     var m = t.Value;
                     // 祖先带缩放 / 旋转时设备像素和局部坐标不再一一对应,对齐无从谈起,偏移归零
@@ -501,9 +513,8 @@ namespace Hevo.Charting.Core
 
             double tx = translateOnly ? DeviceResidual(x) : 0;
             double ty = translateOnly ? DeviceResidual(y) : 0;
+            SetOffset(_staticCanvasSnap, tx, ty);
             SetOffset(_overlayBitmapSnap, tx, ty);
-            bool cached = _drawingCanvas.CacheMode != null;
-            SetOffset(_staticBitmapSnap, cached ? 0 : tx, cached ? 0 : ty);
         }
 
         private static void SetOffset(TranslateTransform t, double x, double y)
@@ -512,7 +523,7 @@ namespace Hevo.Charting.Core
             if (Math.Abs(t.Y - y) > 1e-6) t.Y = y;
         }
 
-        // 原点到最近设备像素的距离(DIP)。半像素处向上取整,跟合成器对 guideline 的取舍一致,位图和矢量图层落在同一列
+        // 原点到最近设备像素的距离(DIP)。半像素处向上取整,跟合成器对 guideline 的取舍一致,静态画布、位图和矢量图层落在同一列
         private double DeviceResidual(double dip)
         {
             double device = dip * _pixelsPerDip;
@@ -520,7 +531,7 @@ namespace Hevo.Charting.Core
             return Math.Abs(r) < 1e-4 ? 0 : r / _pixelsPerDip;
         }
 
-        private void OnAnyLayoutUpdated(object? sender, EventArgs e) => SnapBitmapOrigin();
+        private void OnAnyLayoutUpdated(object? sender, EventArgs e) => SnapCanvasOrigin();
 
         private Window? _hookedWindow;
         private EventHandler? _stateChangedHandler;
@@ -539,7 +550,7 @@ namespace Hevo.Charting.Core
             _layoutUpdatedHandler ??= OnAnyLayoutUpdated;
             LayoutUpdated -= _layoutUpdatedHandler;
             LayoutUpdated += _layoutUpdatedHandler;
-            SnapBitmapOrigin();
+            SnapCanvasOrigin();
 
             _hookedWindow = Window.GetWindow(this);
             if (_hookedWindow != null)
@@ -588,7 +599,7 @@ namespace Hevo.Charting.Core
 
             // 按物理像素做 LOD 的图层要跟着重录:走环境纪元,下一帧全量重投影 + 重绘
             _pixelsPerDip = newDpi.PixelsPerDip;
-            SnapBitmapOrigin();
+            SnapCanvasOrigin();
             RequestUpdate(_ => (Template as IFeatureProjector)?.InvalidateEnvironment());
         }
 
@@ -843,6 +854,7 @@ namespace Hevo.Charting.Core
         /// </summary>
         private void RenderWpfLayers()
         {
+            SnapCanvasOrigin();
             RenderVisualLayers(_visualRegistry, _drawingCanvas);
             RenderVisualLayers(_overlayVisualRegistry, _overlayCanvas);
             _replayAllWpfLayers = false;
@@ -884,11 +896,10 @@ namespace Hevo.Charting.Core
             if (!RasterDrawingRenderer.CanRasterize(buffer.Drawing)) return false; // DrawVideo 只能交给 WPF
 
             _rasterProvider ??= new RasterRenderProvider(_diagnostics);
-            SnapBitmapOrigin();
             var surface = cl.BitmapSurface ??= new BitmapLayerSurface();
             surface.Render(buffer, _rasterProvider, w, h, _pixelsPerDip);
             using var dc = cl.RenderOpen();
-            surface.Mount(dc, ReferenceEquals(host, _overlayCanvas) ? _overlayBitmapSnap : _staticBitmapSnap); // 固定五条 RenderData(裁剪 / 平移 / 位图 / 出栈 ×2),跟图层指令数无关
+            surface.Mount(dc, ReferenceEquals(host, _overlayCanvas) ? _overlayBitmapSnap : Transform.Identity); // 固定五条 RenderData(裁剪 / 平移 / 位图 / 出栈 ×2),跟图层指令数无关
             return true;
         }
 
