@@ -57,7 +57,7 @@ namespace Hevo.Charting.Interaction
                     // 以前这里按 Alignment 分支,LeftEdge(SetupViewport 的默认值)复原到最早一段,跟首屏贴右对不上
                     var initial = _s.Ctx.Shared().Read<InitialViewportTrait>();
                     double minSpan = _s.Ctx.Shared().Read<ViewportSpanLimitsTrait>()?.MinSpan ?? 0;
-                    resetRange = ViewportManagerFeature.InitialRange(initial?.DefaultVisibleCount, minSpan, Math.Max(0, logicalLength - 1));
+                    resetRange = ViewportManagerFeature.InitialRange(initial?.DefaultVisibleCount, minSpan, Math.Max(0, logicalLength - 1), initial?.RightPadding ?? 0);
                 }
 
                 if (!resetRange.IsValid) return;

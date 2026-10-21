@@ -157,8 +157,17 @@ namespace Hevo.Charting
 
         /// <summary>
         /// 💥 核心：将后厨案板的数据上菜到展示柜,并通过基类 <see cref="DataSource{TSource,T}.Publish"/> 推到 Stream。
+        /// 不带变化描述:下游(视口等)按长度差判断前插 / 追加。知道自己改了什么时用 <see cref="Publish(DataChange)"/>。
         /// </summary>
-        protected void Publish()
+        protected void Publish() => PublishCore(null);
+
+        /// <summary>
+        /// 同 <see cref="Publish()"/>,并告诉下游这次相对上次改了什么(按 <see cref="LogicalLength"/> 计)。
+        /// 视口据此区分前插 / 追加 / 整段替换,不再按长度差猜。
+        /// </summary>
+        protected void Publish(DataChange change) => PublishCore(change);
+
+        private void PublishCore(DataChange? change)
         {
             lock (_lock)
             {
@@ -203,7 +212,7 @@ namespace Hevo.Charting
                         $"而不是有效条数({need})。删掉 LogicalLength 的 override(默认就是条数),或改用 SnapshotCount。");
 #endif
                 // 4. 💥 关键点：传出的是物理数组，但告诉外层有效长度是 _buffer.Count！
-                base.Publish(new DataSnapshot<TItem>(_readSnapshot, _buffer.Count, newVersion));
+                base.Publish(new DataSnapshot<TItem>(_readSnapshot, _buffer.Count, newVersion, change));
             }
         }
 
@@ -265,6 +274,13 @@ namespace Hevo.Charting
     ///   <item>需要分页 / typed 请求时,private 持一个 <see cref="RequestBus{TRequest}"/>,handler 内同样调 <see cref="UpdateBuffer"/></item>
     ///   <item>不要 override Suspend/Resume —— framework 已接管 internal bus 的拆建</item>
     /// </list>
+    /// <para>
+    /// <b>代号</b>:每次切换上下文(<see cref="SwitchContext"/> / <see cref="SwitchContextAsync"/> / <see cref="SwitchAsync"/>)
+    /// <see cref="Generation"/> 加一,并取消 <see cref="GenerationToken"/>。子类自带的 RequestBus 不归框架管,
+    /// 它的 handler 回包要用 <see cref="UpdateBuffer(long, Action{List{TItem}}, DataChange)"/> 带上发请求时的代号写入
+    /// (过期即丢),或把 <see cref="GenerationToken"/> 并进请求令牌 —— 否则切换后旧上下文的迟到回包会并进新上下文。
+    /// 不想自己处理的,继承 <see cref="DemandDataSource{TSource, TContext, TDemand, TResponse, TItem}"/>,由框架接管。
+    /// </para>
     /// </summary>
     public abstract class ReactiveDataSource<TSource, TContext, TItem> : BufferedDataSource<TSource, TItem>, Hevo.Charting.Abstractions.IRefreshable
         where TSource : ReactiveDataSource<TSource, TContext, TItem>
@@ -274,7 +290,20 @@ namespace Hevo.Charting
         // TResult = int:本次 OnFetchAsync 的回包条数,透传给 LoadAsync / SwitchContextAsync 调用方。
         private readonly RequestBus<Unit, int> _ctxBus;
 
+        // 代号与它的令牌只在 _lock 内换;令牌被取消 = 这一代已经过去
+        private long _generation;
+        private CancellationTokenSource _generationCts = new CancellationTokenSource();
+
         public TContext? Context { get; private set; }
+
+        /// <summary>当前代号。每次切换上下文加一;同一上下文内的刷新 / 翻页不变。</summary>
+        public long Generation => Interlocked.Read(ref _generation);
+
+        /// <summary>当前这一代的取消令牌:下一次切换时被取消。子类的请求令牌并上它,切换时在途请求就跟着作废。</summary>
+        protected CancellationToken GenerationToken
+        {
+            get { lock (_lock) return _generationCts.Token; }
+        }
 
         protected ReactiveDataSource()
         {
@@ -284,6 +313,44 @@ namespace Hevo.Charting
                 return await OnFetchAsync(Context, token).ConfigureAwait(false);
             });
         }
+
+        /// <summary>
+        /// 开始新的一代(锁内):换上下文、代号加一、取消上一代的令牌;<paramref name="clear"/> 时清空并发布整段替换。
+        /// </summary>
+        private long BeginGeneration(TContext context, ResetPolicy policy)
+        {
+            CancellationTokenSource old;
+            long generation;
+            lock (_lock)
+            {
+                Context = context;
+                generation = Interlocked.Increment(ref _generation);
+                old = _generationCts;
+                _generationCts = new CancellationTokenSource();
+                OnGenerationStarted(context, policy);
+                if (policy == ResetPolicy.ClearImmediately)
+                {
+                    ClearData();
+                    Publish(DataChange.Reset);
+                }
+            }
+            // 锁外取消:取消回调可能同步跑业务代码,别在锁里跑
+            old.Cancel();
+            old.Dispose();
+            return generation;
+        }
+
+        /// <summary>新一代开始时(锁内、清空之前)调。子类在这里复位"历史见底"之类的按上下文的状态。</summary>
+        protected virtual void OnGenerationStarted(TContext context, ResetPolicy policy) { }
+
+        /// <summary>
+        /// 清空数据(锁内,<see cref="ResetPolicy.ClearImmediately"/> 时调)。默认清 <c>_buffer</c>;
+        /// 数据不放在 <c>_buffer</c> 里的子类(自带列存储、自己算 <see cref="BufferedDataSource{TSource, TItem}.LogicalLength"/>)覆盖它,一并清掉自己的存储。
+        /// </summary>
+        protected virtual void ClearData() => _buffer.Clear();
+
+        /// <summary>锁内判断:<paramref name="generation"/> 还是不是当前这一代。</summary>
+        protected bool IsCurrentGeneration(long generation) => generation == Interlocked.Read(ref _generation);
 
         /// <summary>
         /// 子类唯一必填:基于当前 Context 拉数据,适当时机调 <see cref="UpdateBuffer"/> 写 buffer。
@@ -307,13 +374,39 @@ namespace Hevo.Charting
             }
         }
 
+        /// <summary>同 <see cref="UpdateBuffer(Action{List{TItem}})"/>,并告诉下游这次改了什么(视口据此区分前插 / 追加 / 整段替换)。</summary>
+        protected void UpdateBuffer(Action<List<TItem>> mutation, DataChange change)
+        {
+            if (mutation == null) return;
+            lock (_lock)
+            {
+                mutation(_buffer);
+                Publish(change);
+            }
+        }
+
+        /// <summary>
+        /// 带代号写入:<paramref name="generation"/>(发请求时读的 <see cref="Generation"/>)已经过去就什么都不做、返回 false ——
+        /// 切换后旧上下文的迟到回包被丢掉,不会并进新上下文。
+        /// </summary>
+        protected bool UpdateBuffer(long generation, Action<List<TItem>> mutation, DataChange change)
+        {
+            if (mutation == null) return false;
+            lock (_lock)
+            {
+                if (!IsCurrentGeneration(generation)) return false;
+                mutation(_buffer);
+                Publish(change);
+                return true;
+            }
+        }
+
         // ----- 门面 API -----
 
         /// <summary>同步切换上下文:立即清 buffer + Publish + 异步发起首次 fetch。"宁可闪一下也要拔掉旧数据"场景用。</summary>
         public void SwitchContext(TContext context)
         {
-            Context = context;
-            lock (_lock) { _buffer.Clear(); Publish(); }
+            BeginGeneration(context, ResetPolicy.ClearImmediately);
             _ctxBus.Push(Unit.Default);
         }
 
@@ -323,8 +416,25 @@ namespace Hevo.Charting
         /// </summary>
         public Task<int> SwitchContextAsync(TContext context, CancellationToken token = default)
         {
-            Context = context;
+            BeginGeneration(context, ResetPolicy.KeepUntilLoaded);
             return _ctxBus.RequestAsync(Unit.Default, token);
+        }
+
+        /// <summary>
+        /// 切换上下文并等首包:代号加一、上一代在途请求作废;<paramref name="policy"/> 决定旧数据立即清空还是留到新数据到。
+        /// 返回本次 OnFetchAsync 报告的回包条数;被更晚的切换顶掉时返回 0(调用方不必为"切得太快"处理取消异常)。
+        /// </summary>
+        public async Task<int> SwitchAsync(TContext context, ResetPolicy policy = ResetPolicy.ClearImmediately, CancellationToken token = default)
+        {
+            long generation = BeginGeneration(context, policy);
+            try
+            {
+                return await _ctxBus.RequestAsync(Unit.Default, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested && Generation != generation)
+            {
+                return 0;
+            }
         }
 
         /// <summary>语法糖:等价 <see cref="SwitchContext"/>,跟 chart 侧 KLineDataSource.Load 协议对齐。</summary>
@@ -382,8 +492,25 @@ namespace Hevo.Charting
         public override void Dispose()
         {
             _ctxBus.Dispose();
+            CancellationTokenSource cts;
+            lock (_lock) cts = _generationCts;
+            cts.Cancel();
             base.Dispose();
         }
+    }
+
+    /// <summary>切换上下文时旧数据怎么处理。</summary>
+    public enum ResetPolicy
+    {
+        /// <summary>
+        /// 立即清空再拉(默认)。长度先归零,视口、分页墙随之复位,新数据按首屏规则布局。代价是拉取期间画面空白一下。
+        /// </summary>
+        ClearImmediately,
+
+        /// <summary>
+        /// 旧数据留到新一代首包到了再整段替换,没有空白期。首包以整段替换发布,视口照样回到首屏布局。
+        /// </summary>
+        KeepUntilLoaded,
     }
 
     /// <summary>

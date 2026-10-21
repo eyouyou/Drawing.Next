@@ -11,11 +11,20 @@ public readonly struct DataSnapshot<TItem>
         /// <summary>数据纪元令牌：查脏的绝对真理！</summary>
         public readonly VersionToken Version;
 
+        /// <summary>相对上一次发布改了什么。发布方没描述时为 null,下游按长度差处理。</summary>
+        public readonly DataChange? Change;
+
         public DataSnapshot(TItem[] items, int count, VersionToken version)
+            : this(items, count, version, null)
+        {
+        }
+
+        public DataSnapshot(TItem[] items, int count, VersionToken version, DataChange? change)
         {
             Items = items;
             Count = count;
             Version = version;
+            Change = change;
         }
 
         /// <summary>

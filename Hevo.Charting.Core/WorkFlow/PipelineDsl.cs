@@ -98,7 +98,8 @@ namespace Hevo.Charting.WorkFlow
         {
             // 在内部调用自己的 Inject，逻辑极其自洽
             var linker = this.Inject(ds => ds.LogicalLength);
-            if (vp != null) linker.ForwardTo(vp.LogicalLength);
+            // 长度连同这次发布的变化描述一起写(数据源没描述变化时只写长度,同旧行为)
+            if (vp != null) _pipe.AddIngestor(new ViewportExtentIngestor<TSource, TItem>(_dataSource, vp));
             extra?.Invoke(linker);
             return linker.End();
         }
@@ -385,6 +386,28 @@ namespace Hevo.Charting.WorkFlow
             // Compute 节点属于第二阶段的派生计算，不需要遍历 Span。
             // 直接读取黑板上第一阶段 Map 好的基础数据，执行纯数学运算！
             _computeAction(board, _source, _state);
+        }
+    }
+
+    // ProjectExtent 的视口长度写入:按快照版本去重(Reevaluate 重放同一版本不再记账),长度 + 变化描述一起写
+    internal sealed class ViewportExtentIngestor<TSource, TItem> : IDataIngestor<TItem>
+        where TSource : BufferedDataSource<TSource, TItem>
+    {
+        private readonly TSource _source;
+        private readonly ViewportPorts _vp;
+        private VersionToken _lastVersion;
+
+        public ViewportExtentIngestor(TSource source, ViewportPorts vp)
+        {
+            _source = source;
+            _vp = vp;
+        }
+
+        public void Process(DataSnapshot<TItem> snapshot, DataBlackboard board)
+        {
+            if (snapshot.Version == _lastVersion) return;
+            _lastVersion = snapshot.Version;
+            _vp.WriteLength(board, _source.LogicalLength, snapshot.Change);
         }
     }
 }

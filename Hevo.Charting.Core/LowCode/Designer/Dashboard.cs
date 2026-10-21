@@ -25,7 +25,7 @@ namespace Hevo.Charting.LowCode.Designer
     /// }
     /// </code>
     /// <para>
-    /// <b>跨 cell 联动</b>:框架现有 <see cref="Hevo.Charting.Linked.LinkedChartContext"/> 默认镜像 4 个共享端口
+    /// <b>跨 cell 联动</b>:框架现有 <see cref="Hevo.Charting.Linked.LinkedChartContext"/> 默认镜像 5 个共享端口
     /// (UserRange / ActiveRange / LogicalLength / SharedHit),所有 Master/Pane 角色的 cell 自动加入镜像。
     /// 这是 v1 协议:不暴露"哪些 port 被镜像"的精细配置,够用 K线主+量副+MACD 这类典型场景。
     /// 真要业务自定义 port 镜像,通过 DashboardLauncher 时传入扩展过的 LinkedChartContext 子类(逃逸阀)。

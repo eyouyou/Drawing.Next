@@ -12,6 +12,25 @@ namespace Hevo.Charting.Core
         /// <summary>数据总规模：bar 数。视图管家用作 clamp 上界。</summary>
         public DataPort<int> LogicalLength { get; } = new("VP_LogicalLength");
 
+        /// <summary>
+        /// 逻辑长度的变化累计(前插 / 追加 / 整段替换)。数据源发布时带了 <see cref="DataChange"/> 才写;
+        /// 视口管家据此区分前插和追加,没写过(旧发布方)时照旧按长度差处理。
+        /// </summary>
+        public DataPort<DataChangeLog> LengthChange { get; } = new("VP_LengthChange");
+
+        /// <summary>
+        /// 写逻辑长度并记一笔变化,须在 WriteScope 内。<paramref name="change"/> 为 null 时只写长度(同旧行为)。
+        /// 变化只有末根原地改时不记账:长度没变,视口不需要被唤醒(tick 热路径不多一次写)。
+        /// </summary>
+        public void WriteLength(DataBlackboard board, int length, DataChange? change)
+        {
+            board.Write(LogicalLength, length);
+            if (change is not { } c) return;
+            var log = board.Read(LengthChange);
+            if ((c.IsEmpty || c.IsTailOnly) && log.Sequence > 0 && log.Length == length) return;
+            board.Write(LengthChange, log.Record(c, length));
+        }
+
         /// <summary>用户意图范围：交互层（Pan/Zoom/Keyboard）写入。可越界（视 OverscrollPolicy）。</summary>
         public DataPort<RealRange> UserRange { get; } = new("VP_UserRange");
 
