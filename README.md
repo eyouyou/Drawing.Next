@@ -1,16 +1,16 @@
 # Drawing.Next
 
-> 一套通用的 C# 高性能图表引擎,为金融产品场景打造。针对千万级数据点设计,0-GC 渲染管线、强类型引脚、声明式装配,配套低代码蓝图与 LLM 工具链;同一套代码可以跑在 WPF 和 Avalonia 上。
+> 面向金融场景的高性能 .NET 图表引擎。支持 WPF 与 Avalonia,千万级数据点、0-GC 渲染管线、声明式装配,内置低代码蓝图与 LLM 工具链。
 
-## 这是什么
+## 简介
 
-一套自研的图表内核。它在设计上是通用的:折线、柱状、散点、K 线和自定义图层都用同一套 Feature / Layer 模型来写;而它要解决的,是金融产品里那些对数据量、交互和帧率都很苛刻的场景,比如 K 线、分时、指标和行情看板。
+Drawing.Next 是一个通用的 .NET 图表引擎,重点服务于金融类产品:K 线、分时、技术指标、多图联动看板等对数据规模、交互响应和帧率要求较高的场景。
 
-内核本身不依赖任何 UI 框架。同一份 Feature、Schema 或蓝图,既可以挂在 WPF 上,也可以挂在 Avalonia 上(Windows / macOS)。
+引擎核心与 UI 框架解耦。图表的数据流、图层与交互逻辑只需编写一次,即可运行在 WPF 或 Avalonia(Windows / macOS)上。
 
 核心能力：
 
-- **内核与宿主分离**：图层只负责录制绘制指令,画到屏幕上是宿主的事。WPF 宿主按场景分成位图回放、`DrawingVisual` 矢量、控件交互三层,也可以换用 Skia 合成;Avalonia 宿主借助 Skia 把指令录成 `SKPicture`,静态内容和十字线等交互内容分开回放。内核没有任何 UI 框架或第三方渲染库的依赖。
+- **跨 UI 框架**：核心库不依赖任何 UI 框架,图层输出与平台无关的绘制指令,由宿主负责呈现。WPF 宿主提供位图、矢量、控件三层渲染(可选 Skia 合成);Avalonia 宿主基于 Skia 渲染,静态内容与交互内容分层合成。
 - **0-GC 渲染管线**：列式内存布局（SoA）、`ArrayPool` 复用、原位更新；Project 帧严禁分配闭包，昂贵计算用 `ctx.UseMemo` 按依赖缓存。
 - **自研响应式流（`IWorkflow<T>`）**：弃用 `System.Reactive`，搭配 `DataBlackboard` + `ReaderWriterLockSlim` 实现多引脚的"时空一致性"。
 - **强类型引脚 `DataPort<T>`**：贯穿数据源 → 计算 → 渲染的物理线缆，杜绝魔术字符串与隐式耦合。
@@ -76,7 +76,7 @@ dotnet run --project Hevo.Charting.Avalonia.Demo
 | — | [AGENTS.md](./AGENTS.md) | AI 助手 | 唤醒词、阅读顺序、硬约束速记、文档约定。 |
 | 00 | [架构协议与开发规范](./Hevo.Charting/00.架构协议与开发规范.md) | AI / 架构师 / 开发者 | 架构红线、System Prompt、ECS 协议、并发与上下文边界。**最高纲领文件。** |
 | 01 | [业务 Feature 设计](./Hevo.Charting/01.业务Feature设计.md) | 业务开发者 | Feature 铁律、`OnCompose` / `OnProject` 切分、`DataBlackboard` / `UsePort` 物理读取限制。 |
-| 04 | [交互层架构](./Hevo.Charting/04.交互层架构.md) | 交互 Feature 开发者 | 一次鼠标 / 触屏输入如何经指针路由器、`ChartInteractionFeature` 变成视口变化和命中广播。 |
+| 04 | [交互层架构](./Hevo.Charting/04.交互层架构.md) | 交互 Feature 开发者 | 输入事件经指针路由器、`ChartInteractionFeature` 转化为视口变化与命中广播的完整链路。 |
 | 06 | [WPF 渲染规约](./Hevo.Charting/06.WPF%20渲染规约.md) | 渲染层维护者 | 像素对齐契约、snap 实现、WPF 后端性能路线图。 |
 | — | [Renderer.md](./Hevo.Charting/Renderer.md) | 渲染层维护者 | 接入新渲染后端（Skia / WPF / 自定义）的指南。 |
 | — | [LowCode/Designer/低代码.md](./Hevo.Charting/LowCode/Designer/低代码.md) | 低代码 / 业务开发者 | 蓝图编译器、`ChartBlueprint` / `BlueprintRunner` / `ComponentRegistry` 六件套。 |
@@ -153,4 +153,4 @@ dotnet publish "Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj" -c Rel
 
 > 实测首张图冷启动(装配 + 首帧)JIT 约 242ms → R2R 约 194ms,热启动不变;数据见 [Benchmarks README](./Hevo.Charting.Benchmarks/README.md)。
 
-> 目标平台：Any CPU / x64。内核、Skia 翻译层和 Avalonia 宿主面向 `net10.0`,在 Windows 和 macOS 上都能编译;WPF 宿主以及依赖它的 MCP、测试、基准工程面向 `net10.0-windows10.0.19041.0`。
+> 目标平台：Any CPU / x64。核心库、Skia 渲染层与 Avalonia 宿主面向 `net10.0`,支持 Windows 与 macOS;WPF 宿主及依赖它的 MCP、测试、基准工程面向 `net10.0-windows10.0.19041.0`。
