@@ -18,7 +18,7 @@ namespace Hevo.Charting.CodeAnalysis
         public const string RuleId = "HEVO008";
 
         public const string HelpLink =
-            "https://github.com/eyouyou/WPFDrawing.Next/blob/main/Hevo.Charting/01.%E4%B8%9A%E5%8A%A1Feature%E8%AE%BE%E8%AE%A1.md#usememo-%E6%8A%A5%E9%94%99%E6%80%8E%E4%B9%88%E6%94%B9";
+            "https://github.com/eyouyou/Drawing.Next/blob/main/Hevo.Charting/01.%E4%B8%9A%E5%8A%A1Feature%E8%AE%BE%E8%AE%A1.md#usememo-%E6%8A%A5%E9%94%99%E6%80%8E%E4%B9%88%E6%94%B9";
 
         private const string Why = "UseMemo 的缓存按代码行存,不按调用方存:这一行被几处调用、或一帧执行几次,就共用一份缓存,互相覆盖,依赖一交替缓存就每次失效。";
         private const string DocHint = "详见 Hevo.Charting/01.业务Feature设计.md「UseMemo 报错怎么改」。";

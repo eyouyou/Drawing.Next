@@ -69,7 +69,7 @@ dotnet build "Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj" -nologo
 整解决方案:
 
 ```bash
-dotnet build "Hevo.Drawing.slnx" -nologo
+dotnet build "Drawing.Next.slnx" -nologo
 ```
 
 测试(xUnit,400 多个用例;文档示例的回归在 `DocSampleTests`):
