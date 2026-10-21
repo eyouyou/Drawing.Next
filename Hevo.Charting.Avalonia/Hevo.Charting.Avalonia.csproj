@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- Avalonia 宿主:不在 .NET 5 兼容红线内(Avalonia 本身要 net8+),不进 scripts/check-net5.ps1。
+		     包版本、引用写法跟接入方 FuturesPC 一致:Avalonia 12.0.4,SkiaSharp 不直接引用(随 Avalonia.Skia 来) -->
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<LangVersion>preview</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<RootNamespace>Hevo.Charting.Avalonia</RootNamespace>
+		<!-- 实验性宿主:同 Hevo.Charting.Skia,不进打包产物 -->
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Avalonia.Skia 12.0.4 带 SkiaSharp 3.119.4,跟 Hevo.Charting.Skia 同版本(Avalonia 11 绑死 SkiaSharp 2.88,所以不用 11) -->
+		<PackageReference Include="Avalonia" Version="12.0.4" />
+		<PackageReference Include="Avalonia.Skia" Version="12.0.4" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Hevo.Charting.Core\Hevo.Charting.Core.csproj" />
+		<ProjectReference Include="..\Hevo.Charting.Skia\Hevo.Charting.Skia.csproj" />
+		<!-- 图层的 IConsumes<T> 由生成器补(Layer 用 partial class) -->
+		<ProjectReference Include="..\Hevo.Charting.CodeAnalysis\Hevo.Charting.CodeAnalysis.csproj">
+			<ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+			<OutputItemType>Analyzer</OutputItemType>
+		</ProjectReference>
+	</ItemGroup>
+</Project>
