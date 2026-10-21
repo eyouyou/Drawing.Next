@@ -22,20 +22,21 @@ namespace Hevo.Charting.Tests
             => new Rig(extra: (i, s) => i.Remove<ChartInteractionFeature>().EnableStandardPointer(s.Hit, modes, doubleClickResetConfig: options)).Isolated();
 
         /// <summary>
-        /// LeftEdge 时复原到数据开头那一屏。注意首屏(ViewportManager 首次布局)不看 Alignment、总是贴右,
-        /// 所以这里复原目标跟 rig.Initial 不同。
+        /// LeftEdge(SetupViewport 的默认值)时也复原到首屏:首屏不看 Alignment、总是贴最新一根,复原跟它一致。
+        /// 以前这里按 Alignment 复原到数据开头 (0,29),打开时看的是最新、双击却跳到最早。
         /// </summary>
         [Fact]
-        public void LeftEdgeAlignment_ResetsToDataStart() => IncrementalTestKit.RunOnSta(() =>
+        public void LeftEdgeAlignment_ResetsToFirstScreen() => IncrementalTestKit.RunOnSta(() =>
         {
             var rig = new Rig(extra: (i, s) => i.Canvas.Environment(env => env.SetupViewport(minVisibleCount: 5, alignment: ViewportAlignment.LeftEdge,
                 defaultVisibleCount: 30, overscrollMin: OverscrollPolicy.Hard, overscrollMax: OverscrollPolicy.Hard))).Isolated();
             try
             {
+                InteractionRigExtensions.AssertRange(70, 99, rig.Initial);
                 MoveViewport(rig, 40, 69);
                 rig.Click(300, 100);
                 rig.Click(300, 100);
-                InteractionRigExtensions.AssertRange(0, 29, rig.ActiveRange);
+                InteractionRigExtensions.AssertRange(70, 99, rig.ActiveRange);
             }
             finally { rig.Close(); }
         });

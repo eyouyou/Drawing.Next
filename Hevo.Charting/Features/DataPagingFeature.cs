@@ -91,7 +91,19 @@ namespace Hevo.Charting.Features
                 {
                     var activeRange = board.Read(Viewport.ActiveRange);
                     int logicalLength = board.Read(Viewport.LogicalLength);
-                    if (!activeRange.IsValid || logicalLength <= 0) return;
+                    // 切上下文(切股票)时长度先归 0:这时视口无效、下面不会走到,得在这里记下归零并解开两侧墙,
+                    // 否则新数据长度不小于旧长度时"变短才重置"的判断永远不成立,新股票沿用旧墙锁
+                    if (logicalLength <= 0)
+                    {
+                        if (_lastSeenLength > 0 || _isLeftWallHit || _isRightWallHit)
+                        {
+                            _isLeftWallHit = _isRightWallHit = false;
+                            _lastSeenLength = 0;
+                            PublishAvailability(board);
+                        }
+                        return;
+                    }
+                    if (!activeRange.IsValid) return;
                     CheckBoundaries(activeRange, logicalLength, board);
                 }
             });
@@ -169,7 +181,7 @@ namespace Hevo.Charting.Features
             if (OnRequireDataAsync is not { } requestData) return;
             _isFetching = true;
 
-            bool isNetworkFault = false, hasMoreData = true;
+            bool isNetworkFault = false, hasMoreData = true, completedSynchronously = false;
             TimeSpan delay = FetchConfig.Pacing;
 
             // 记下请求前的物理真理（用于后续判断业务层是否欺骗了我们）
@@ -183,14 +195,15 @@ namespace Hevo.Charting.Features
             {
                 try
                 {
-                    hasMoreData = await requestData.Invoke(anchorIndex, offsetAmount);
+                    var request = requestData.Invoke(anchorIndex, offsetAmount);
+                    completedSynchronously = request.IsCompleted;
+                    hasMoreData = await request;
                 }
                 catch (OperationCanceledException)
                 {
-                    // HttpClient 超时：免除额外熔断惩罚
+                    // HttpClient 超时：免除额外熔断惩罚,常规 Pacing 照旧
                     Debug.WriteLine($"⚠️ [Paging] Timeout occurred. Bypassing additional throttle penalty.");
                     isNetworkFault = true;
-                    delay = TimeSpan.Zero;
                 }
                 catch (Exception ex)
                 {
@@ -238,7 +251,10 @@ namespace Hevo.Charting.Features
                 // 注意：UpgradeableReadLock 而非 ReadLock —— CheckBoundaries 内部 PublishAvailability 需要升级到 WriteLock
                 try
                 {
-                    if (board != null && !board.IsDisposed)
+                    // 回调同步就失败、又没有等待时间时,这里重判会同步再发一笔、再同步失败……一路递归到栈溢出。
+                    // 这种情况不立即重试,等下一次视口变化再触发
+                    bool wouldRecurse = isNetworkFault && completedSynchronously && delay <= TimeSpan.Zero;
+                    if (!wouldRecurse && board != null && !board.IsDisposed)
                     {
                         using (board.UpdateScope())
                         {

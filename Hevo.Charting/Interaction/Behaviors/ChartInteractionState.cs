@@ -257,6 +257,13 @@ namespace Hevo.Charting.Interaction
             double logicalValue = scaleStrategy.DomainScale.Denormalize(relativeX, activeRange);
             int globalIndex = (int)Math.Round(logicalValue); // 吸附到最近的 K线索引
 
+            // 收进"可见整数索引"范围,保证正向投影回来的 centerX ∈ [plot.Left, plot.Right]。
+            // 指针压在绘图区边沿时 logicalValue 恰为 Min-0.5 / Max+0.5,Math.Round 银行家舍入按奇偶决定方向,
+            // 不收的话会命中视口外那根,十字线画到绘图区外。
+            int visibleLeft = (int)Math.Ceiling(scaleStrategy.DomainScale.Denormalize(0.0, activeRange));
+            int visibleRight = (int)Math.Floor(scaleStrategy.DomainScale.Denormalize(1.0, activeRange));
+            if (visibleLeft <= visibleRight) globalIndex = Math.Clamp(globalIndex, visibleLeft, visibleRight);
+
             // 2. 校验有效性边界
             int validCount = ValidCount(board);
 
@@ -266,10 +273,7 @@ namespace Hevo.Charting.Interaction
             // 3. 吸附防线:是否强制把越界的光标拉回合法数据区
             if (F.PointerSnapMode == PointerOutOfBoundsStrategy.SnapToValidData)
             {
-                // 同时收进"可见整数索引"范围,保证正向投影回来的 centerX ∈ [plot.Left, plot.Right],
-                // 让竖线与交点圆点和 series 画出来的柱子/点位严格对齐。
-                int visibleLeft = (int)Math.Ceiling(scaleStrategy.DomainScale.Denormalize(0.0, activeRange));
-                int visibleRight = (int)Math.Floor(scaleStrategy.DomainScale.Denormalize(1.0, activeRange));
+                // 再收进数据范围,让竖线与交点圆点和 series 画出来的柱子/点位严格对齐。
                 int lo = Math.Max(0, visibleLeft);
                 int hi = Math.Min(validCount - 1, visibleRight);
                 // 可见范围与数据范围无交集时回退到数据范围(极端缩放场景)

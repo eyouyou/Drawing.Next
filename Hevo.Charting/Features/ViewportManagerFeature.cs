@@ -75,7 +75,7 @@ namespace Hevo.Charting.Features
         // 联动 dashboard 改 SharedViewport 由 LinkedMaster/Pane 在 PortsFeature.Ports 上 mutate,
         // VPM 不再参与那条路径(纯钳制业务,联动副图根本不挂 VPM 避免双写竞态)。
 
-        /// <summary>数据/视口变化时的停靠侧。RightEdge = 默认贴右(行情图常态);LeftEdge = 贴左。也用于双击复原方向。</summary>
+        /// <summary>数据/视口变化时的停靠侧。RightEdge = 默认贴右(行情图常态);LeftEdge = 贴左。首屏和双击复原不看它,总是贴最新一根。</summary>
         public ViewportAlignment Alignment { get; init; } = ViewportAlignment.RightEdge;
 
         /// <summary>视口最少需要包含几根数据（限制最大放大倍数）。同时也是 SafeBuffer 的下限。</summary>
@@ -169,6 +169,18 @@ namespace Hevo.Charting.Features
         }
 
         /// <summary>
+        /// 首屏视口:贴最新一根往前 DefaultVisibleCount 根(null = 全部)。不看 <see cref="Alignment"/>——
+        /// 行情图打开时总要看到最新数据;双击复原也调这里,保证回到的就是打开时的样子。
+        /// </summary>
+        internal static RealRange InitialRange(double? defaultVisibleCount, double minSpan, double maxIndex)
+        {
+            double initialSpan = defaultVisibleCount.HasValue
+                ? Math.Max(minSpan, Math.Min(defaultVisibleCount.Value - 1, maxIndex))
+                : Math.Max(minSpan, maxIndex);
+            return new RealRange(maxIndex - initialSpan, maxIndex);
+        }
+
+        /// <summary>
         /// 绘图区物理宽度能容下的最大跨度:可见根数 ≈ Span + 1(居中刻度两端各留半根),
         /// 每根至少 <paramref name="minBarSpacingPx"/> 物理像素。绘图区未布局 / 不限制时为 +∞。
         /// </summary>
@@ -208,8 +220,7 @@ namespace Hevo.Charting.Features
 
                 if (_lastLogicalLength <= 0)
                 {
-                    double initialSpan = DefaultVisibleCount.HasValue ? Math.Max(minSpan, Math.Min(DefaultVisibleCount.Value - 1, maxIndex)) : Math.Max(minSpan, maxIndex);
-                    targetRange = new RealRange(maxIndex - initialSpan, maxIndex);
+                    targetRange = InitialRange(DefaultVisibleCount, minSpan, maxIndex);
                 }
                 else if (currentLength > _lastLogicalLength)
                 {

@@ -43,9 +43,12 @@ namespace Hevo.Charting.Tests
             public readonly DataPagingFeature Paging;
             public readonly ViewportPorts Vp;
             private readonly List<Call> _calls = new();
+            private readonly Func<int, int, Task<bool>>? _responder;
 
-            public Rig(DataFetchOptions? fetch = null)
+            /// <param name="responder">给了就由它直接给结果(可同步完成);不给则每笔挂一个 TCS 由测试手动完成。</param>
+            public Rig(DataFetchOptions? fetch = null, Func<int, int, Task<bool>>? responder = null)
             {
+                _responder = responder;
                 SynchronizationContext.SetSynchronizationContext(null);
                 Paging = new DataPagingFeature
                 {
@@ -71,7 +74,7 @@ namespace Hevo.Charting.Tests
             {
                 var tcs = new TaskCompletionSource<bool>();
                 lock (_calls) _calls.Add(new Call(anchor, count, tcs));
-                return tcs.Task;
+                return _responder?.Invoke(anchor, count) ?? tcs.Task;
             }
 
             public IReadOnlyList<Call> Calls { get { lock (_calls) return _calls.ToArray(); } }
@@ -293,7 +296,8 @@ namespace Hevo.Charting.Tests
             Assert.Equal(200, rig.Last.Anchor);
         });
 
-        [Fact(Skip = "BUG: 切上下文时长度先归 0 再恢复,分页 Feature 看不到归 0(ActiveRange 无效直接返回),新数据长度不小于旧长度时左右墙都不解锁")]
+        /// <summary>切股票时长度先归 0 再恢复:新数据不比旧的短,也要解开两侧墙(以前看不到归 0,新股票沿用旧墙锁)。</summary>
+        [Fact]
         public void ContextReset_ThroughZero_ResetsWalls() => IncrementalTestKit.RunOnSta(() =>
         {
             var rig = Rig.StartedAt200();
@@ -347,13 +351,36 @@ namespace Hevo.Charting.Tests
             Assert.False(rig.Availability.LeftExhausted);
         });
 
-        [Fact(Skip = "BUG: 超时分支把 delay 置 0,连常规 Pacing 也免了;回调同步返回已取消的任务时会在 finally 的重判里无限递归重试")]
+        /// <summary>超时只免额外的熔断冷却,常规 Pacing 照旧(以前连 Pacing 一起免了)。</summary>
+        [Fact]
         public void Timeout_StillHonoursPacing() => IncrementalTestKit.RunOnSta(() =>
         {
             var rig = Rig.StartedAt200(new DataFetchOptions { Pacing = TimeSpan.FromMilliseconds(300), NetworkFaultThrottle = TimeSpan.FromSeconds(10) });
             Assert.True(WaitUntil(() => { rig.Pan(100); rig.Pan(20); return rig.Calls.Count == 2; }));
             rig.Last.Tcs.SetCanceled();
-            Assert.Equal(2, rig.Calls.Count);         // 注释说只免"额外熔断惩罚",常规节流应保留
+            Assert.Equal(2, rig.Calls.Count);
+            Assert.True(WaitUntil(() => rig.Calls.Count == 3), "Pacing 过后没有重试");
+        });
+
+        /// <summary>
+        /// 回调同步返回已取消的任务、Pacing 为 0:以前在 finally 的重判里同步再发、再失败,一路递归到栈溢出。
+        /// 现在这一笔失败后不立即重试,下一次视口变化再试。
+        /// </summary>
+        [Fact]
+        public void SynchronousTimeout_ZeroPacing_DoesNotRecurse() => IncrementalTestKit.RunOnSta(() =>
+        {
+            bool cancel = false;
+            var rig = new Rig(new DataFetchOptions { Pacing = TimeSpan.Zero, NetworkFaultThrottle = TimeSpan.FromSeconds(10) },
+                (_, _) => cancel ? Task.FromCanceled<bool>(new CancellationToken(true)) : Task.FromResult(false));
+            rig.SetLength(200);
+            Assert.Single(rig.Calls);
+
+            cancel = true;
+            rig.Pan(20);
+            Assert.Equal(2, rig.Calls.Count);
+            rig.Pan(10);
+            Assert.Equal(3, rig.Calls.Count);
+            Assert.False(rig.Availability.LeftExhausted);
         });
 
         // ---------------- 装配 ----------------
