@@ -1,10 +1,15 @@
 # Charting.Skia
 
-Charting 的 Skia 上屏后端，**WPF 专用**：合成面是 WPF 元素（`WriteableBitmap` / `SKGLElement`），挂在 `ChartCell` 里。图表的 Feature 投影、图层录制、DrawCmd 缓冲都不变，只把"指令 → 像素"这一步从 WPF `DrawingVisual` 换成 Skia。
+Charting 的 Skia 上屏后端，分两个程序集：
 
-核心库 `Hevo.Charting` 仍然零第三方依赖；SkiaSharp 只在这个程序集里。
+- `Hevo.Charting.Skia`：DrawCmd → `SKCanvas` 翻译层（`SkiaChartRenderer`），只依赖 `Hevo.Charting.Core` 和 SkiaSharp，不引任何 UI 框架。主题资源笔刷 / 资源字体 / 宿主图片由宿主实现 `ISkiaHostResources` 提供。Avalonia 等直接拿 `SKCanvas` 的宿主用这一层。
+- `Hevo.Charting.Skia.Wpf`：WPF 合成面（`WriteableBitmap` / `SKGLElement`）和 `SkiaRenderBackend`，挂在 `ChartCell` 里；`WpfSkiaResources` 查 Application 资源字典。
 
-> **状态：实验性，暂不引入产品。** 代码留在仓库里随测试编译，但不进任何打包产物（`IsPackable=false`），业务工程（含 LowCodeDemo）不引用本程序集。要试用，在自己的工程里加 `ProjectReference` 后按下文挂到 `ChartCell.RenderBackend`。
+图表的 Feature 投影、图层录制、DrawCmd 缓冲都不变，只把"指令 → 像素"这一步从 WPF `DrawingVisual` 换成 Skia。
+
+核心库仍然零第三方依赖；SkiaSharp 只在这两个程序集里。
+
+> **状态：实验性，暂不引入产品。** 代码留在仓库里随测试编译，但不进任何打包产物（`IsPackable=false`），业务工程（含 LowCodeDemo）不引用本程序集。要试用，在自己的工程里加 `Hevo.Charting.Skia.Wpf` 的 `ProjectReference` 后按下文挂到 `ChartCell.RenderBackend`。
 
 ## 用法
 

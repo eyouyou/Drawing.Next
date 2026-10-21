@@ -39,7 +39,7 @@ namespace Hevo.Charting.Skia
         private static readonly Action<RenderContext> s_noop = _ => { };
 
         private readonly SkiaRenderTarget _target;
-        private readonly SkiaChartRenderer _renderer = new();
+        private readonly SkiaChartRenderer _renderer = new(WpfSkiaResources.Instance);
         private readonly Dictionary<ChartLayer, SKPicture?> _pictures = new();
         private readonly Group _static = new();
         private readonly Group _overlay = new();
