@@ -20,15 +20,13 @@ namespace Hevo.Charting.Core
 
         /// <summary>
         /// 写逻辑长度并记一笔变化,须在 WriteScope 内。<paramref name="change"/> 为 null 时只写长度(同旧行为)。
-        /// 变化只有末根原地改时不记账:长度没变,视口不需要被唤醒(tick 热路径不多一次写)。
+        /// 只改末根 / 没变化时不记变化:长度没变,视口不需要被唤醒,tick 热路径不多读写一次。
         /// </summary>
         public void WriteLength(DataBlackboard board, int length, DataChange? change)
         {
             board.Write(LogicalLength, length);
-            if (change is not { } c) return;
-            var log = board.Read(LengthChange);
-            if ((c.IsEmpty || c.IsTailOnly) && log.Sequence > 0 && log.Length == length) return;
-            board.Write(LengthChange, log.Record(c, length));
+            if (change is not { } c || c.IsEmpty || c.IsTailOnly) return;
+            board.Write(LengthChange, board.Read(LengthChange).Record(c, length));
         }
 
         /// <summary>用户意图范围：交互层（Pan/Zoom/Keyboard）写入。可越界（视 OverscrollPolicy）。</summary>
