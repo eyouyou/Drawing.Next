@@ -171,21 +171,6 @@ class LabelProvider
             Assert.Empty(ds);
         }
 
-        [Fact]
-        public async Task UseMemo_WithPortVersionDependency_IsAllowed()
-        {
-            // 内容版本是只读令牌、不是 Hook:并进 UseMemo 依赖、放进分支都不报
-            var (ds, _) = await RunAsync(@"
-    private readonly DataPort<ReadOnlyMemory<double>> _port = new DataPort<ReadOnlyMemory<double>>(""p"");
-    protected override void OnProject(FeatureContext ctx)
-    {
-        var (closes, _) = ctx.UsePort(_port);
-        ctx.UseMemo((closes, ctx.PortVersion(_port)), static d => d.closes.Length);
-        if (closes.Length > 0) { var v = ctx.PortVersion(_port); }
-    }");
-            Assert.Empty(ds);
-        }
-
         // ---- 01 号文档「UseMemo 报错怎么改」引用的改前 / 改后 ----
 
         private static string DocSample(string file)

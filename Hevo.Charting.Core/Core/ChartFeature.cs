@@ -186,18 +186,6 @@ namespace Hevo.Charting.Core
         }
 
         /// <summary>
-        /// 端口的内容版本:每次写入(含原地改最后一根后的 ForceWrite)都变。给 <c>UseMemo</c> 当依赖:
-        /// 列依赖只比引用 / 起点 / 长度,末根原地改后三者都没变,缓存就停在旧值;把它并进依赖
-        /// (<c>ctx.UseMemo((closes, ctx.PortVersion(Close)), ...)</c>)即可。
-        /// 不是 Hook:不订阅、不占槽位,可放在分支里;要随端口变化被唤醒,同一端口仍需先 <see cref="UsePort{T}"/>。
-        /// </summary>
-        public VersionToken PortVersion<T>(DataPort<T> port)
-        {
-            AssertProjecting(nameof(PortVersion));
-            return _board.GetVersion(port);
-        }
-
-        /// <summary>
         /// 动态批量引脚订阅:端口个数运行期才知道时,一次读一组,任一端口变了就返回 true。
         /// 允许安全地订阅一组引脚,数据直接写入 buffer,全程 0-GC。
         /// </summary>

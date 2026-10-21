@@ -18,7 +18,7 @@ namespace Hevo.Charting.Linked
     /// <para>
     /// 业务方有两种用法:
     /// <list type="number">
-    ///   <item>直接 new <see cref="LinkedChartContext"/>:已经够用 5 个默认镜像 port</item>
+    ///   <item>直接 new <see cref="LinkedChartContext"/>:已经够用 4 个默认镜像 port</item>
     ///   <item>派生子类(如 <c>LinkedKLineContext : LinkedChartContext</c>),在子类里
     ///         挂业务自有的数据源/扩展端口,用 <see cref="RegisterMirror{T}"/> 加更多镜像 port</item>
     /// </list>
@@ -57,7 +57,7 @@ namespace Hevo.Charting.Linked
         public ChartLength HorizontalRight { get; init; } = ChartLength.Pixel(0);
 
         // ── 端口镜像桥 ─────────────────────────────────────────────────────
-        // 列表锁定哪些 port 跨 cell 镜像。默认 5 个(viewport 4 + linkedHit);业务方可通过 RegisterMirror / RegisterFromConfig 扩展。
+        // 列表锁定哪些 port 跨 cell 镜像。默认 4 个(viewport 3 + linkedHit);业务方可通过 RegisterMirror / RegisterFromConfig 扩展。
         private readonly List<IPortMirror> _mirrors;
         // 写时复制:镜像分发可能在任意线程上遍历,AttachBoard 在 UI 线程上换新数组
         private DataBlackboard[] _boards = Array.Empty<DataBlackboard>();
@@ -74,8 +74,6 @@ namespace Hevo.Charting.Linked
             {
                 PortMirror.For(SharedViewport.UserRange),
                 PortMirror.For(SharedViewport.ActiveRange),
-                // 变化记录排在长度前面:镜像按登记顺序分发,对端先拿到记录再拿到长度,视口才能按变化处理
-                PortMirror.For(SharedViewport.LengthChange),
                 PortMirror.For(SharedViewport.LogicalLength),
                 PortMirror.For(defaultHit),
             };

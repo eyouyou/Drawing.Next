@@ -39,8 +39,7 @@ namespace Hevo.Charting.Features
     /// </summary>
     /// <param name="DefaultVisibleCount">首屏显示根数；null = 显示全部</param>
     /// <param name="Alignment">数据/视口变化时的停靠侧</param>
-    /// <param name="RightPadding">首屏右侧留白根数(见 <see cref="ViewportManagerFeature.InitialRightPadding"/>)</param>
-    public record InitialViewportTrait(double? DefaultVisibleCount, ViewportAlignment Alignment, double RightPadding = 0) : IVisualTrait;
+    public record InitialViewportTrait(double? DefaultVisibleCount, ViewportAlignment Alignment) : IVisualTrait;
 
     /// <summary>
     /// 视口管家:把 UserRange(用户意图) + LogicalLength(数据现实) 钳制成最终的 ActiveRange(渲染真相)。
@@ -107,24 +106,8 @@ namespace Hevo.Charting.Features
         public double HistoryLoadTolerance { get; init; } = 30;
         public double RightEdgeStickTolerance { get; init; } = 2;
 
-        /// <summary>
-        /// 整段替换(切合约 / 切周期)后沿用替换前的可见根数,而不是回到 <see cref="DefaultVisibleCount"/>。默认 false(原行为)。
-        /// 只在数据源带变化描述发布、或替换时先清空(长度归零)时生效。
-        /// </summary>
-        public bool KeepVisibleCountOnReset { get; init; }
-
-        /// <summary>
-        /// 首屏右侧留白(根数)。默认 0(原行为)。右边界是 <see cref="OverscrollPolicy.Hard"/> 时留白会被钳掉,
-        /// 要留白须同时设 <see cref="OverscrollMax"/> = <see cref="OverscrollPolicy.Overscroll"/>。双击复原同样留白。
-        /// </summary>
-        public double InitialRightPadding { get; init; }
-
         // 上次见到的 LogicalLength。-1 = 首次进入,走"首屏初始化"分支;长大 = 心跳/拉历史,走"Stick to edge"分支。
         private int _lastLogicalLength = -1;
-        // 上次对上了长度的变化记录(游标)。对不上(有人只写了长度没记账)时按长度差处理
-        private DataChangeLog _changeCursor;
-        // KeepVisibleCountOnReset:替换前的跨度,下次首屏用它;NaN = 没有
-        private double _spanBeforeReset = double.NaN;
         // 上次处理过的 UserRange,防止 ActiveRange 被反复回写到 UserRange 时形成死锁。
         private RealRange _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
 
@@ -140,12 +123,11 @@ namespace Hevo.Charting.Features
         protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             ctx.Shared().PublishData(new ViewportSpanLimitsTrait(Math.Max(0, MinVisibleCount - 1), MaxSpanMultiplier, _pixelMaxSpan));
-            ctx.Shared().PublishData(new InitialViewportTrait(DefaultVisibleCount, Alignment, InitialRightPadding));
+            ctx.Shared().PublishData(new InitialViewportTrait(DefaultVisibleCount, Alignment));
 
             _cell = chart;
             _reclamp = Reclamp;
-            // LengthChange:长度不变的整段替换(同根数换合约)也要回首屏;只有带变化描述的数据源才写它
-            flow.Watch(new object[] { Viewport.LogicalLength, Viewport.UserRange, Viewport.LengthChange }, Clamp);
+            flow.Watch(new object[] { Viewport.LogicalLength, Viewport.UserRange }, Clamp);
         }
 
         // 只在环境纪元变化(尺寸 / DPI / 首次挂载)时被调到:视口宽或 DPI 变了就排一次重算。
@@ -190,21 +172,12 @@ namespace Hevo.Charting.Features
         /// 首屏视口:贴最新一根往前 DefaultVisibleCount 根(null = 全部)。不看 <see cref="Alignment"/>——
         /// 行情图打开时总要看到最新数据;双击复原也调这里,保证回到的就是打开时的样子。
         /// </summary>
-        internal static RealRange InitialRange(double? defaultVisibleCount, double minSpan, double maxIndex, double rightPadding = 0)
+        internal static RealRange InitialRange(double? defaultVisibleCount, double minSpan, double maxIndex)
         {
             double initialSpan = defaultVisibleCount.HasValue
                 ? Math.Max(minSpan, Math.Min(defaultVisibleCount.Value - 1, maxIndex))
                 : Math.Max(minSpan, maxIndex);
-            double pad = rightPadding > 0 ? rightPadding : 0;
-            return new RealRange(maxIndex - initialSpan + pad, maxIndex + pad);
-        }
-
-        private RealRange FirstScreen(double minSpan, double maxIndex)
-        {
-            double? count = DefaultVisibleCount;
-            if (KeepVisibleCountOnReset && !double.IsNaN(_spanBeforeReset)) count = _spanBeforeReset + 1;
-            _spanBeforeReset = double.NaN;
-            return InitialRange(count, minSpan, maxIndex, InitialRightPadding);
+            return new RealRange(maxIndex - initialSpan, maxIndex);
         }
 
         /// <summary>
@@ -235,10 +208,8 @@ namespace Hevo.Charting.Features
                     // 端口可能仍残留旧数据。若写 (0,1) 这种 IsValid=true 的窄区间，CandleFeature 会用
                     // xRange.Span=1 渲染旧蜡烛 → 每根宽度=整个画布 → tab 切回首帧出现超大蜡烛闪烁。
                     // 写 default 让所有消费者通过 !IsValid 跳过该帧，等新数据到位后走首次 layout。
-                    if (KeepVisibleCountOnReset && activeRange.IsValid) _spanBeforeReset = activeRange.Span;
                     _lastLogicalLength = -1;
                     _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
-                    _changeCursor = board.Read(Viewport.LengthChange);
                     using (board.WriteScope()) board.Write(Viewport.ActiveRange, default);
                     return;
                 }
@@ -247,51 +218,9 @@ namespace Hevo.Charting.Features
                 double minSpan = Math.Max(0, MinVisibleCount - 1);
                 RealRange targetRange;
 
-                // 数据源带了变化描述:从上次对上的记录到现在合起来改了什么。两头长度都对得上才算数,
-                // 否则(旧发布方、有人只写了长度)保持 null,走下面按长度差猜的原逻辑。
-                DataChange? change = null;
-                var log = board.Read(Viewport.LengthChange);
-                if (log.Sequence > 0 && log.Length == currentLength)
-                {
-                    if (_changeCursor.Length == _lastLogicalLength) change = log.Since(_changeCursor);
-                    // 根数和长度差对不上(发布方按自己的口径计数,不是逻辑长度):不信它,按长度差处理
-                    if (change is { IsReset: false } k && _lastLogicalLength > 0
-                        && currentLength - _lastLogicalLength != k.Prepended + k.Appended) change = null;
-                    _changeCursor = log;
-                }
-
                 if (_lastLogicalLength <= 0)
                 {
-                    targetRange = FirstScreen(minSpan, maxIndex);
-                }
-                else if (change is { } c && (c.IsReset || c.Prepended > 0 || c.Appended > 0))
-                {
-                    if (c.IsReset)
-                    {
-                        // 整段替换(长度可能不变):回首屏,丢掉上一份数据上的用户意图
-                        if (KeepVisibleCountOnReset && activeRange.IsValid) _spanBeforeReset = activeRange.Span;
-                        targetRange = FirstScreen(minSpan, maxIndex);
-                        _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
-                    }
-                    else if (!activeRange.IsValid)
-                    {
-                        targetRange = FirstScreen(minSpan, maxIndex);
-                    }
-                    else
-                    {
-                        // 前插:整体右移,看到的还是原来那几根(不管视图在哪);追加:只有贴着右边时才跟随
-                        double lastMaxIndex = _lastLogicalLength - 1;
-                        bool stuckRight = activeRange.Max >= lastMaxIndex - RightEdgeStickTolerance;
-                        double shift = c.Prepended + (stuckRight ? c.Appended : 0);
-                        targetRange = new RealRange(activeRange.Min + shift, activeRange.Max + shift);
-                    }
-                }
-                else if (change.HasValue)
-                {
-                    // 已知变化但长度没动(改末根 / 改历史):同原逻辑,只看用户意图
-                    bool isNewUserIntent = userRange.IsValid && !userRange.Equals(_lastProcessedUserRange);
-                    if (isNewUserIntent) { targetRange = userRange; _lastProcessedUserRange = userRange; }
-                    else targetRange = activeRange;
+                    targetRange = InitialRange(DefaultVisibleCount, minSpan, maxIndex);
                 }
                 else if (currentLength > _lastLogicalLength)
                 {
@@ -364,13 +293,7 @@ namespace Hevo.Charting.Features
             }
         }
 
-        public void ResetState()
-        {
-            _lastLogicalLength = -1;
-            _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
-            _changeCursor = default;
-            _spanBeforeReset = double.NaN;
-        }
+        public void ResetState() { _lastLogicalLength = -1; _lastProcessedUserRange = new RealRange(double.NaN, double.NaN); }
 
         // 💥 边界判定原子操作：Hard 钳回 maxIndex/0；Overscroll 直接放行（保留越界 UserRange 给 series/axis 渲染）。
         private static void ApplyMaxBoundary(ref double min, ref double max, double maxIndex, double clampedSpan, OverscrollPolicy policy)
