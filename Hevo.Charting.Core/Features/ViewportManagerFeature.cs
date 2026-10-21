@@ -120,6 +120,15 @@ namespace Hevo.Charting.Features
         // 排进帧队列的重算可能在 Decompose 之后才执行,用自己的引用判活,不碰会抛异常的 Chart / Schema
         private IChartCell? _cell;
 
+        // ---- 按键锚定(数据源发了 DataExtent 且 Keys 与长度对得上时启用;否则下面四个字段不参与) ----
+        // 锚点 = 视口左边那根的键 + 小数偏移(越界留白时为负)。数据怎么变(前插 / 补洞 / 换纪元)都按键找回,不看长度差。
+        private long? _anchorKey;
+        private double _anchorFrac;
+        // ScrollToKey 的目标还没加载进来(早于首根且没到底):裁决后别用最左那根覆盖锚点,等分页补到再落位
+        private bool _anchorPending;
+        // 上次裁决时的键:用户意图(UserRange)是按上次的下标写的,要先经它换成键;它的末根判断"有没有追加"
+        private ReadOnlyMemory<long> _lastKeys;
+
         protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             ctx.Shared().PublishData(new ViewportSpanLimitsTrait(Math.Max(0, MinVisibleCount - 1), MaxSpanMultiplier, _pixelMaxSpan));
@@ -127,7 +136,36 @@ namespace Hevo.Charting.Features
 
             _cell = chart;
             _reclamp = Reclamp;
-            flow.Watch(new object[] { Viewport.LogicalLength, Viewport.UserRange }, Clamp);
+            // Extent:等长替换(补洞 / 换纪元)长度不变也要重新按键找回
+            flow.Watch(new object[] { Viewport.LogicalLength, Viewport.UserRange, Viewport.Extent }, Clamp);
+        }
+
+        /// <summary>
+        /// 跳到某个键(宿主"跳到某天"):把它放到视口中间,跨度不变。
+        /// <para>
+        /// 只在数据源发了 <see cref="DataExtent"/> 时有效。目标早于已加载的首根时,先停在最左并把目标写进
+        /// <see cref="ViewportPorts.AnchorKey"/>;分页模块据此让数据源补到目标,补到后视口按键自然落位。
+        /// 期间用户一拖就以拖动为准;目标早于最早数据时(到底)停在第一根。还没有数据时调用无效。
+        /// </para>
+        /// </summary>
+        public void ScrollToKey(long key)
+        {
+            var board = CurrentBoardOrNull;
+            if (board == null || board.IsDisposed) return;
+            using (board.UpdateScope())
+            {
+                var extent = board.Read(Viewport.Extent);
+                var active = board.Read(Viewport.ActiveRange);
+                int length = board.Read(Viewport.LogicalLength);
+                if (!extent.IsTracked || extent.Keys.Length != length || length <= 0 || !active.IsValid) return;
+
+                _anchorKey = key;
+                _anchorFrac = -active.Span / 2.0;
+                _anchorPending = true;
+                // 跳转覆盖之前没处理的拖动
+                _lastProcessedUserRange = board.Read(Viewport.UserRange);
+                Clamp(board);
+            }
         }
 
         // 只在环境纪元变化(尺寸 / DPI / 首次挂载)时被调到:视口宽或 DPI 变了就排一次重算。
@@ -210,7 +248,12 @@ namespace Hevo.Charting.Features
                     // 写 default 让所有消费者通过 !IsValid 跳过该帧，等新数据到位后走首次 layout。
                     _lastLogicalLength = -1;
                     _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
-                    using (board.WriteScope()) board.Write(Viewport.ActiveRange, default);
+                    ClearAnchor();
+                    using (board.WriteScope())
+                    {
+                        board.Write(Viewport.ActiveRange, default);
+                        board.Write(Viewport.AnchorKey, null);
+                    }
                     return;
                 }
 
@@ -218,9 +261,19 @@ namespace Hevo.Charting.Features
                 double minSpan = Math.Max(0, MinVisibleCount - 1);
                 RealRange targetRange;
 
+                var extent = board.Read(Viewport.Extent);
+                var keys = extent.Keys.Span;
+                bool keyed = extent.IsTracked && keys.Length == currentLength;
+
                 if (_lastLogicalLength <= 0)
                 {
                     targetRange = InitialRange(DefaultVisibleCount, minSpan, maxIndex);
+                    // 按键跟踪时 UserRange 要经上次的键换算,上一个上下文留下的值不能当成新意图
+                    if (keyed) _lastProcessedUserRange = userRange;
+                }
+                else if (keyed && _anchorKey.HasValue && _lastKeys.Length > 0 && activeRange.IsValid)
+                {
+                    targetRange = KeyedTarget(keys, userRange, activeRange, extent.OlderExhausted, maxIndex);
                 }
                 else if (currentLength > _lastLogicalLength)
                 {
@@ -288,12 +341,91 @@ namespace Hevo.Charting.Features
                     }
                 }
 
+                if (keyed) RecordAnchor(extent.Keys, min);
+                else ClearAnchor();
+
                 // 💥 绝对单向流：管家只负责输出现实，不再管意图！打破一切死锁。
-                using (board.WriteScope()) board.Write(Viewport.ActiveRange, new RealRange(min, max));
+                using (board.WriteScope())
+                {
+                    board.Write(Viewport.ActiveRange, new RealRange(min, max));
+                    board.Write(Viewport.AnchorKey, _anchorKey);
+                }
             }
         }
 
-        public void ResetState() { _lastLogicalLength = -1; _lastProcessedUserRange = new RealRange(double.NaN, double.NaN); }
+        // 按键找回:锚点键在当前键里的位置 + 小数偏移。用户意图先经上次的键换成锚点(UserRange 是按上次的下标写的)。
+        // 贴右且末尾来了新的键 → 跟随最新(缓存始终含最新,右侧只有追加)。
+        private RealRange KeyedTarget(ReadOnlySpan<long> keys, RealRange userRange, RealRange activeRange, bool olderExhausted, double maxIndex)
+        {
+            var lastKeys = _lastKeys.Span;
+            RealRange basis = activeRange;
+            if (userRange.IsValid && !userRange.Equals(_lastProcessedUserRange))
+            {
+                _lastProcessedUserRange = userRange;
+                basis = userRange;
+                _anchorPending = false;
+                int f = (int)Math.Clamp(Math.Floor(userRange.Min), 0, lastKeys.Length - 1);
+                _anchorKey = lastKeys[f];
+                _anchorFrac = userRange.Min - f;
+            }
+
+            double lastMaxIndex = lastKeys.Length - 1;
+            bool appended = keys[keys.Length - 1] > lastKeys[lastKeys.Length - 1];
+            if (!_anchorPending && appended && basis.Max >= lastMaxIndex - RightEdgeStickTolerance)
+            {
+                double newMax = maxIndex + (basis.Max - lastMaxIndex);
+                return new RealRange(newMax - basis.Span, newMax);
+            }
+
+            long anchor = _anchorKey!.Value;
+            int i = LowerBound(keys, anchor);
+            // 目标已加载(或更早的已经没有了):落位完成,之后按普通锚点跟踪。到底了还早于首根 → 停在第一根,不留白
+            if (_anchorPending && (keys[0] <= anchor || olderExhausted))
+            {
+                if (keys[0] > anchor) _anchorFrac = Math.Max(_anchorFrac, 0);
+                _anchorPending = false;
+            }
+            return new RealRange(i + _anchorFrac, i + _anchorFrac + basis.Span);
+        }
+
+        private void RecordAnchor(ReadOnlyMemory<long> keys, double min)
+        {
+            if (!_anchorPending)
+            {
+                var span = keys.Span;
+                int f = (int)Math.Clamp(Math.Floor(min), 0, span.Length - 1);
+                _anchorKey = span[f];
+                _anchorFrac = min - f;
+            }
+            _lastKeys = keys;
+        }
+
+        private void ClearAnchor()
+        {
+            _anchorKey = null;
+            _anchorPending = false;
+            _lastKeys = default;
+        }
+
+        // 第一个 >= key 的下标;全都更小时取末根(跳到比最新还晚的键 = 看最新)
+        internal static int LowerBound(ReadOnlySpan<long> keys, long key)
+        {
+            int lo = 0, hi = keys.Length;
+            while (lo < hi)
+            {
+                int mid = lo + ((hi - lo) >> 1);
+                if (keys[mid] < key) lo = mid + 1;
+                else hi = mid;
+            }
+            return Math.Min(lo, keys.Length - 1);
+        }
+
+        public void ResetState()
+        {
+            _lastLogicalLength = -1;
+            _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
+            ClearAnchor();
+        }
 
         // 💥 边界判定原子操作：Hard 钳回 maxIndex/0；Overscroll 直接放行（保留越界 UserRange 给 series/axis 渲染）。
         private static void ApplyMaxBoundary(ref double min, ref double max, double maxIndex, double clampedSpan, OverscrollPolicy policy)

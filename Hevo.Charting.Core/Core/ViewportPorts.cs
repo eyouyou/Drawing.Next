@@ -18,6 +18,18 @@ namespace Hevo.Charting.Core
         /// <summary>当前显示范围：视图管家裁决后的合法 range。下游所有消费者读这一个。</summary>
         public DataPort<RealRange> ActiveRange { get; } = new("VP_ActiveRange");
 
+        /// <summary>
+        /// 数据铺到哪(每根的键 / 更早的还有没有 / 纪元):ProjectExtent 从快照转写。视口管家据此按键找回位置,
+        /// 分页模块据此判断要不要更早的,联动镜像到副图。数据源不发 <see cref="DataExtent"/> 时保持 default。
+        /// </summary>
+        public DataPort<DataExtent> Extent { get; } = new("VP_Extent");
+
+        /// <summary>
+        /// "正看着哪个键":视口管家每次裁决后写(最左那根的键;ScrollToKey 时是目标键),分页模块读来决定要多少更早的。
+        /// null = 没在按键跟踪(数据源没发 Extent)。
+        /// </summary>
+        public DataPort<long?> AnchorKey { get; } = new("VP_AnchorKey");
+
         // 默认 ctor 留空 —— 历史 debug trace 已删除(详见低代码.md §8 PyPlotFeature Viewport bug 修复)。
         public ViewportPorts() { }
 

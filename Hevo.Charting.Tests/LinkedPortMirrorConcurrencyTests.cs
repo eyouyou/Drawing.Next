@@ -59,6 +59,31 @@ namespace Hevo.Charting.Tests
         }
 
         [Fact]
+        public void Extent_IsMirrored_AndArrivesBeforeLength()
+        {
+            var context = new LinkedChartContext();
+            var a = new DataBlackboard();
+            var b = new DataBlackboard();
+            context.AttachBoard(a);
+            context.AttachBoard(b);
+            var vp = context.SharedViewport;
+            var extent = new Hevo.Charting.Core.DataExtent(new object(), new long[] { 1, 2, 3 }, false);
+
+            // 对端长度变化时,键必须已经对得上(否则那次 Clamp 退回按长度差猜)
+            int keysWhenLengthArrived = -1;
+            b.AddWatch(new object[] { vp.LogicalLength }, board => keysWhenLengthArrived = board.Read(vp.Extent).Keys.Length);
+
+            using (a.WriteScope())
+            {
+                a.Write(vp.LogicalLength, 3);
+                a.Write(vp.Extent, extent);
+            }
+
+            Assert.Equal(3, keysWhenLengthArrived);
+            using (b.ReadScope()) Assert.True(b.Read(vp.Extent).Equals(extent));
+        }
+
+        [Fact]
         public void MirroredWrite_IsVisibleToAllOtherBoards()
         {
             var context = new LinkedChartContext();

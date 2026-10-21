@@ -98,7 +98,12 @@ namespace Hevo.Charting.WorkFlow
         {
             // 在内部调用自己的 Inject，逻辑极其自洽
             var linker = this.Inject(ds => ds.LogicalLength);
-            if (vp != null) linker.ForwardTo(vp.LogicalLength);
+            if (vp != null)
+            {
+                linker.ForwardTo(vp.LogicalLength);
+                // 每根的键 / 到底 / 纪元跟长度同一事务写,视口一次 Clamp 里两者对得上
+                _pipe.AddIngestor(new ViewportExtentIngestor<TSource, TItem>(_dataSource, vp.Extent));
+            }
             extra?.Invoke(linker);
             return linker.End();
         }
@@ -385,6 +390,40 @@ namespace Hevo.Charting.WorkFlow
             // Compute 节点属于第二阶段的派生计算，不需要遍历 Span。
             // 直接读取黑板上第一阶段 Map 好的基础数据，执行纯数学运算！
             _computeAction(board, _source, _state);
+        }
+    }
+
+    // ProjectExtent 的 Extent 转写。不按快照版本去重:ProcessTo 会把同一快照压进另一块板;
+    // 黑板 Write 判等(DataExtent 按引用比较),tick 改末根时键数组引用不变,不通知。
+    internal sealed class ViewportExtentIngestor<TSource, TItem> : IDataIngestor<TItem>
+        where TSource : BufferedDataSource<TSource, TItem>
+    {
+        private readonly TSource _source;
+        private readonly DataPort<DataExtent> _port;
+#if DEBUG
+        private bool _lengthWarned;
+#endif
+
+        public ViewportExtentIngestor(TSource source, DataPort<DataExtent> port)
+        {
+            _source = source;
+            _port = port;
+        }
+
+        public void Process(DataSnapshot<TItem> snapshot, DataBlackboard board)
+        {
+            var extent = snapshot.Extent;
+#if DEBUG
+            // 对不上时视口静默退回按长度差猜,接错了看不出来:提示一次
+            if (extent.IsTracked && !_lengthWarned && extent.Keys.Length != _source.LogicalLength)
+            {
+                _lengthWarned = true;
+                System.Diagnostics.Trace.TraceWarning(
+                    $"[{typeof(TSource).Name}] DataExtent.Keys 长度({extent.Keys.Length})与 LogicalLength({_source.LogicalLength})不符," +
+                    "视口将退回按长度差猜测。Keys 应与发布的每根一一对应。");
+            }
+#endif
+            board.Write(_port, extent);
         }
     }
 }
