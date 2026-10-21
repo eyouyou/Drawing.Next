@@ -127,6 +127,9 @@ namespace Hevo.Charting
         // 最近一次 Publish 的有效长度(锁内写)。_buffer.Count 可能在两次 Publish 之间被子类改过,不能代替它。
         private int _publishedCount;
 
+        // 最近一次 Publish 带的 Extent(锁内写):GetSnapshot(订阅首帧 / Resume 补推)要带上,否则补推帧被当成"不跟踪"
+        private DataExtent _publishedExtent;
+
         /// <summary>最近一次 Publish 的有效长度。开了 <see cref="ReserveSnapshotCapacity"/> 的子类,LogicalLength 要用它而不是 <c>_readSnapshot.Length</c>。</summary>
         protected int SnapshotCount => Volatile.Read(ref _publishedCount);
 
@@ -158,7 +161,13 @@ namespace Hevo.Charting
         /// <summary>
         /// 💥 核心：将后厨案板的数据上菜到展示柜,并通过基类 <see cref="DataSource{TSource,T}.Publish"/> 推到 Stream。
         /// </summary>
-        protected void Publish()
+        protected void Publish() => Publish(default(DataExtent));
+
+        /// <summary>
+        /// 同 <see cref="Publish()"/>,并带上 <paramref name="extent"/>(每根的键 / 更早的还有没有 / 纪元)。
+        /// 分页数据源用:视口据此按键找回位置,分页模块据此判断要不要更早的。无参版发的是 default(不跟踪)。
+        /// </summary>
+        protected void Publish(DataExtent extent)
         {
             lock (_lock)
             {
@@ -190,6 +199,7 @@ namespace Hevo.Charting
                 //    所以锁外读者不能直接拿 _readSnapshot,见 GetSnapshot)
                 _buffer.CopyTo(_readSnapshot);
                 _publishedCount = _buffer.Count;
+                _publishedExtent = extent;
 
                 // 3. 拨动时钟(融合 Advance+Snapshot,单次 Interlocked.Increment 取新值)
                 VersionToken newVersion = _dataClock.AdvanceAndSnapshot();
@@ -203,7 +213,7 @@ namespace Hevo.Charting
                         $"而不是有效条数({need})。删掉 LogicalLength 的 override(默认就是条数),或改用 SnapshotCount。");
 #endif
                 // 4. 💥 关键点：传出的是物理数组，但告诉外层有效长度是 _buffer.Count！
-                base.Publish(new DataSnapshot<TItem>(_readSnapshot, _buffer.Count, newVersion));
+                base.Publish(new DataSnapshot<TItem>(_readSnapshot, _buffer.Count, newVersion, extent));
             }
         }
 
@@ -226,7 +236,7 @@ namespace Hevo.Charting
             {
                 int n = _publishedCount;
                 var copy = n == 0 ? Array.Empty<TItem>() : _readSnapshot.AsSpan(0, n).ToArray();
-                return new DataSnapshot<TItem>(copy, n, _dataClock.Snapshot());
+                return new DataSnapshot<TItem>(copy, n, _dataClock.Snapshot(), _publishedExtent);
             }
         }
 
@@ -293,6 +303,15 @@ namespace Hevo.Charting
         protected abstract Task<int> OnFetchAsync(TContext context, CancellationToken token);
 
         /// <summary>
+        /// 切上下文前的钩子:<see cref="SwitchContext"/> 和 <see cref="SwitchContextAsync"/> 开头都调(此时 <see cref="Context"/> 还是旧值)。默认空。
+        /// <para>
+        /// 两条路行为不同:同步版清 buffer 发空帧,异步版不清不发(级联 ContextDriver 走异步版)。
+        /// 需要"切换一定先发空帧"的子类(分页数据源:视口靠长度归零回首屏)在这里取消在途、清自己的存储并 Publish,两条路都覆盖。
+        /// </para>
+        /// </summary>
+        protected virtual void OnContextSwitching(TContext context) { }
+
+        /// <summary>
         /// 💥 唯一的 buffer 写入通道:加锁 → 执行 mutation → Publish。
         /// 子类的 OnFetchAsync 跟自带 RequestBus handler 都通过它写 buffer,语义对称、并发安全。
         /// 调用即视为"产生了变更",基类无条件 Publish;子类判断无需变更则不调用即可。
@@ -312,6 +331,7 @@ namespace Hevo.Charting
         /// <summary>同步切换上下文:立即清 buffer + Publish + 异步发起首次 fetch。"宁可闪一下也要拔掉旧数据"场景用。</summary>
         public void SwitchContext(TContext context)
         {
+            OnContextSwitching(context);
             Context = context;
             lock (_lock) { _buffer.Clear(); Publish(); }
             _ctxBus.Push(Unit.Default);
@@ -323,6 +343,7 @@ namespace Hevo.Charting
         /// </summary>
         public Task<int> SwitchContextAsync(TContext context, CancellationToken token = default)
         {
+            OnContextSwitching(context);
             Context = context;
             return _ctxBus.RequestAsync(Unit.Default, token);
         }
