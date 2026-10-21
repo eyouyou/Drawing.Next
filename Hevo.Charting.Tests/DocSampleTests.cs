@@ -462,5 +462,53 @@ namespace Hevo.Charting.Tests
             Assert.Equal(solid, american);
             Assert.Equal(1, barWidth);
         });
+
+        // ── 按键分页(开发规范 §12.1) ─────────────────────────────────────
+
+        private static (DocSamples.Paging.PagedSampleSchema Schema, ViewportPorts Vp) BuildPaged(int total, int initial)
+        {
+            var keys = new long[total];
+            var closes = new double[total];
+            for (int i = 0; i < total; i++) { keys[i] = 1000 + i * 60; closes[i] = 100 + i * 0.01; }
+            var schema = new DocSamples.Paging.PagedSampleSchema(new DocSamples.Paging.PagedSampleSource(keys, closes, initial));
+            var cell = new ChartCell { Template = schema };
+            using (var ctx = cell.CreateContext()) schema.ComposeAll(cell, ctx);
+            return (schema, ViewportPorts.RequireAttached(cell));
+        }
+
+        private static (RealRange Active, DataExtent Extent) ReadViewport(DataBlackboard board, ViewportPorts vp)
+        {
+            using (board.ReadScope()) return (board.Read(vp.ActiveRange), board.Read(vp.Extent));
+        }
+
+        [Fact]
+        public void PagedSample_DragIntoBuffer_PrependsOlder_ViewStaysOnSameBars() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (schema, vp) = BuildPaged(total: 2000, initial: 300);
+            var board = schema.CurrentBoard!;
+            long leftKey;
+            using (board.WriteScope()) board.Write(vp.UserRange, new RealRange(10, 69));
+            using (board.ReadScope()) leftKey = board.Read(vp.Extent).Keys.Span[10];
+
+            Assert.True(schema.Source.PendingFill.Wait(TimeSpan.FromSeconds(10)));
+            var (active, extent) = ReadViewport(board, vp);
+            Assert.True(extent.Keys.Length > 300);
+            Assert.Equal(leftKey, extent.Keys.Span[(int)Math.Floor(active.Min)]);
+        });
+
+        [Fact]
+        public void PagedSample_JumpToUnloadedKey_FillsGapAndCenters() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (schema, vp) = BuildPaged(total: 2000, initial: 300);
+            var board = schema.CurrentBoard!;
+            long target = 1000 + 500 * 60;                 // 第 500 根,缓存只有最后 300 根
+
+            schema.JumpTo(target);
+            Assert.True(schema.Source.PendingFill.Wait(TimeSpan.FromSeconds(10)));
+
+            var (active, extent) = ReadViewport(board, vp);
+            int center = (int)Math.Round((active.Min + active.Max) / 2);
+            Assert.Equal(target, extent.Keys.Span[center]);
+        });
     }
 }

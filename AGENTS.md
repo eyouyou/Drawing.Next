@@ -22,6 +22,7 @@
 - 坐标只走 `IScale.Normalize` / `CoordinateExtensions`(`ProjectToScreen` / `ProjectDomainToScreen` / `ProjectDomainSlotWidth`),不手写 `(x - min) / span * width`。柱宽取整数设备像素用 `ColumnWidth`(见 06 §4.6),其余像素取整留给渲染器。
 - Layer 用 `partial class`,`IConsumes<T>` 交给生成器,不手写。
 - 往端口发布的列每次一块新缓冲(`ColumnPublisher<T>` / `ResultBufferPool`),不原地改已发布数组。唯一例外:K 线类数据块的**最后一根**可以原地改再 `ForceWrite`(实时 tick);历史段(除最后一根)要改先换新数组(写时复制)。`CandleFeature` 按列的引用版本(`ctx.PortIdentity`,底层引用换了才变)判断历史变没变,原地改历史会让静态层停在旧值。
+- 分页数据源发 `DataExtent`(每根的键)让视口按键锚定;`DataPagingFeature.OnRequireBefore` 回调在黑板锁内被调,立即返回,不同步 `Publish`(00 号文档 §12.1)。
 - 不引入 `System.Reactive`。
 - `Hevo.Charting.Core` 不引任何 UI 框架(`PointerBackgroundTests.Source_CoreHasNoWpf` 守着):颜色用 `HevoColor` / `HevoColors`,坐标 `HevoPoint` / `HevoRect`,交互走指针路由器;要 WPF 控件 / 事件 / Dispatcher 的东西放 `Hevo.Charting`(WPF 宿主),核心需要时经 `IChartCellHost` / `ChartHostServices` 由宿主提供。Feature 拿到的是 `IChartCell`,确需 WPF 成员时转 `(ChartCell)chart`。
 
