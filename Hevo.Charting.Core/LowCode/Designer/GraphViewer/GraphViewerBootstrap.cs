@@ -35,7 +35,8 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             FeatureCategoryRegistry.Register<ViewportManagerFeature>(FeatureCategory.Environment);
             FeatureCategoryRegistry.Register<UniversalAutoScaleFeature>(FeatureCategory.Environment);
             FeatureCategoryRegistry.Register<PlotAreaDecorFeature>(FeatureCategory.Environment);
-            FeatureCategoryRegistry.Register<UniversalHeaderFeature>(FeatureCategory.Environment);
+            // 按基类登记:WPF / Avalonia 的头部实现沿继承链命中同一类别
+            FeatureCategoryRegistry.Register<UniversalHeaderFeatureBase>(FeatureCategory.Environment);
             FeatureCategoryRegistry.Register<DataPagingFeature>(FeatureCategory.Environment);
 
             FeatureCategoryRegistry.Register<AxisFeature>(FeatureCategory.Axes);
