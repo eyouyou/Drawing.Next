@@ -26,9 +26,17 @@ namespace Hevo.Charting.Tests
         private static readonly ConstructorInfo ArgsCtor = ArgsType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Single(c => c.GetParameters().Length == 2 && c.GetParameters()[1].ParameterType == ReportBaseType);
 
+        private static readonly PropertyInfo ReportProperty = ArgsType.GetProperty("Report", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        private static readonly PropertyInfo ActionsProperty = ReportType.GetProperty("Actions", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        private static readonly PropertyInfo ReportXProperty = ReportType.GetProperty("X", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        private static readonly PropertyInfo ReportYProperty = ReportType.GetProperty("Y", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        private static readonly long AbsoluteMoveFlag = Convert.ToInt64(Enum.Parse(ActionsType, "AbsoluteMove"));
+
         private readonly PresentationSource _source;
         private readonly UIElement _root;
         private int _timestamp = Environment.TickCount;
+        // 正在处理注入的按下时的设备坐标;null = 不在按下处理中
+        private (int X, int Y)? _pressAt;
 
         public RawMouse(Window window)
         {
@@ -38,6 +46,22 @@ namespace Hevo.Charting.Tests
             // 跟注入的报告交错,造成假的 MouseLeave / 移动。窗口只吃注入的鼠标移动与按键。
             // WM_CAPTURECHANGED 不拦:WPF 靠它得知捕获已释放
             ((HwndSource)_source).AddHook(SwallowRealMouse);
+            // 按下时控件抓鼠标,WPF 抓捕获会按真光标位置(GetCursorPos)同步补一条纯移动报告,不走窗口消息,上面的钩子拦不到。
+            // 窗口在屏幕外,真光标不在它上面:这条移动会被当成"按下后挪了一大段"(分隔条把单击当成拖动)。
+            // 只在处理注入的按下期间、只丢坐标对不上的纯移动,别的时候 WPF 自己的同步照常
+            InputManager.Current.PreProcessInput += DropCaptureSync;
+            window.Closed += (_, _) => InputManager.Current.PreProcessInput -= DropCaptureSync;
+        }
+
+        private void DropCaptureSync(object sender, PreProcessInputEventArgs e)
+        {
+            if (_pressAt is not { } at) return;
+            var input = e.StagingItem.Input;
+            if (!ArgsType.IsInstanceOfType(input)) return;
+            var report = ReportProperty.GetValue(input);
+            if (report == null || !ReportType.IsInstanceOfType(report)) return;
+            if (Convert.ToInt64(ActionsProperty.GetValue(report)) != AbsoluteMoveFlag) return;
+            if ((int)ReportXProperty.GetValue(report)! != at.X || (int)ReportYProperty.GetValue(report)! != at.Y) e.Cancel();
         }
 
         public void Move(UIElement relativeTo, Point p) => Send(relativeTo, p, 0, "AbsoluteMove");
@@ -77,7 +101,10 @@ namespace Hevo.Charting.Tests
             });
             var args = (InputEventArgs)ArgsCtor.Invoke(new object?[] { Mouse.PrimaryDevice, report });
             args.RoutedEvent = PreviewInputReportEvent;
-            InputManager.Current.ProcessInput(args);
+            bool press = actions.Any(a => a.EndsWith("Press"));
+            if (press) _pressAt = ((int)Math.Round(device.X), (int)Math.Round(device.Y));
+            try { InputManager.Current.ProcessInput(args); }
+            finally { if (press) _pressAt = null; }
         }
     }
 
