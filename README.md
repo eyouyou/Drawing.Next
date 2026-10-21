@@ -1,10 +1,10 @@
-# Charting
+# Drawing.Next
 
-> 基于 C# / WPF 的高性能金融图表引擎，针对千万级数据点设计，0-GC 渲染管线、强类型引脚、声明式装配，配套低代码蓝图与 LLM 工具链。
+> 基于 C# 的高性能金融图表引擎:平台无关核心 + WPF / Avalonia 两个宿主,针对千万级数据点设计,0-GC 渲染管线、强类型引脚、声明式装配,配套低代码蓝图与 LLM 工具链。
 
 ## 这是什么
 
-一套自研的金融行情图表内核，目标是替代传统 WPF 图表库在大数据量、强交互、严苛帧率场景下的能力短板。它不是一个通用 BI 图表库，而是面向 K 线、分时、指标这类**高频量化场景**的专用引擎。
+一套自研的金融行情图表内核，目标是替代传统桌面图表库在大数据量、强交互、严苛帧率场景下的能力短板。核心不绑 UI 框架,同一份 Feature / Schema / 蓝图既能挂在 WPF 上,也能挂在 Avalonia(Windows / macOS)上。它不是一个通用 BI 图表库，而是面向 K 线、分时、指标这类**高频量化场景**的专用引擎。
 
 核心能力：
 
@@ -22,14 +22,20 @@
 
 第一次接触本项目:先读 [15 分钟上手](./docs/15分钟上手.md)(L1 改蓝图 JSON 加指标 → L2 写一个 C# 指标类 → L3 自定义 Trait + Layer),遇到生词查 [术语表](./docs/术语表.md)。
 
-跑起来看看示例（K 线 + 指标 + Python handler + Mock 交易面板）：
+跑起来看看 WPF 示例（K 线 + 指标 + Python handler + Mock 交易面板）：
 
 ```bash
-dotnet build "Hevo.Drawing.slnx" -nologo
+dotnet build "Drawing.Next.slnx" -nologo
 dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 ```
 
 > 要求：Windows + 支持 WPF 的 .NET 10 SDK（当前 TFM 为 `net10.0-windows10.0.19041.0`）。首次启动会同步嵌入式 Python 312 运行时与 demo 指标。
+
+Avalonia 示例(手写看板 / 蓝图 JSON 看板 / 蓝图编辑器三页,Windows / macOS 都能跑):
+
+```bash
+dotnet run --project Hevo.Charting.Avalonia.Demo
+```
 
 启动后能看到：低代码 Node Editor、内嵌的 K 线 Dashboard、AvalonEdit Python 编辑器、Mock 撮合面板。改完蓝图 JSON 热加载即可生效。
 
@@ -39,15 +45,20 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 |------|------|------|
 | [Charting.Core](./Hevo.Charting.Core) | 引擎核心(平台无关) | 抽象层、Feature 库、Layer、帧管线(`ChartEngine`)、黑板、指针路由、低代码蓝图运行时。不引任何 UI 框架,WPF / Avalonia 等宿主共用。 |
 | [Charting](./Hevo.Charting) | WPF 宿主 | `ChartCell` 控件、WPF 渲染器 / 位图后端、控件类图层(Tooltip)、指针适配器、联动看板、低代码 Designer。业务工程引用它(连带引用 Core)。 |
+| [Charting.Avalonia](./Hevo.Charting.Avalonia) | Avalonia 宿主 | `AvaloniaChartCell`、联动看板、头部、触屏、蓝图 / dashboard 启动器、蓝图编辑器、调试菜单;渲染只走 Skia。示例 `.Demo`、无窗口测试 `.Tests`。详见 [README](./Hevo.Charting.Avalonia/README.md)。 |
+| [Charting.Skia](./Hevo.Charting.Skia) / [Skia.Wpf](./Hevo.Charting.Skia.Wpf) | 渲染后端 | DrawCmd → SKCanvas 翻译层(Avalonia 宿主用它上屏);WPF 下的可选 Skia 合成面。 |
+| [Charting.Samples](./Hevo.Charting.Samples) | 示例共用 | 模拟数据源、手写 K 线 schema、示例看板蓝图 JSON,WPF / Avalonia 示例共用。 |
 | [Charting.CodeAnalysis](./Hevo.Charting.CodeAnalysis) | 编译期 | Roslyn 分析器与源生成器：`UseMemo` 位置校验、跨帧缓存检测、Trait Consumer / Required 校验、Port Generator。 |
 | [Drawing.LowCodeDemo](./Hevo.Drawing.LowCodeDemo) | 示例宿主 | 低代码蓝图运行时 + Node Editor + Python 编辑器 + Mock 撮合的 WPF 演示工程。 |
 | [Charting.PythonNet](./Hevo.Charting.PythonNet) | 集成层 | Python 集成：`IPythonRuntime` + `PythonHandlerRegistry` + 蓝图层 `PyFeature` 节点。详见 [PYTHON_HANDLER_GUIDE](./Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md)。 |
 | [Charting.Mcp](./Hevo.Charting.Mcp) | LLM 工具链 | MCP 服务进程，向 LLM 暴露 ComponentRegistry 与 DryRun 校验器，闭合"see → describe → validate"循环。详见 [README](./Hevo.Charting.Mcp/README.md)。 |
-| [Charting.Tests](./Hevo.Charting.Tests) | 测试 | xUnit 单元 / 集成测试(400 多个用例)。 |
+| [Charting.Tests](./Hevo.Charting.Tests) | 测试 | xUnit 单元 / 集成测试(1200 多个用例);Avalonia 宿主的测试在 `Hevo.Charting.Avalonia.Tests`。 |
 | [Charting.Tests/DocSamples](./Hevo.Charting.Tests/DocSamples) | 文档示例 | 开发规范 / 15 分钟上手引用的示例代码,按业务侧约束(`LangVersion 9` + 生成器)编译,由 `DocSampleTests` 回归。 |
 | [Charting.Benchmarks](./Hevo.Charting.Benchmarks) | 基准 | BenchmarkDotNet 量化基准，覆盖蓝图编译化、反射 vs 编译 setter、端到端管线等。详见 [README](./Hevo.Charting.Benchmarks/README.md)。 |
 | [Trade.Abstractions](./Hevo.Trade.Abstractions) | 交易抽象 | `ITradeService` 接口 + DTO + `NullTradeService`；不依赖 Charting / WPF / Skia，可独立引用。 |
 | [Trade.Mock](./Hevo.Trade.Mock) | 交易实现 | `ITradeService` 的内存 Mock 实装，给 demo / 测试 / 策略回放用。 |
+
+迁移到拆分后结构(核心 / 宿主)的业务改动见 [变更说明:核心拆分](./docs/变更说明-核心拆分-2026-10.md)。
 
 ## 文档导航
 
@@ -95,7 +106,7 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
     ├─► 计算 Feature : ComputeFeature / PlotFeature,后台算指标写回黑板
     ├─► 渲染 Feature : OnProject 里 UsePort 读黑板 → 发布 Trait
     ▼
-[ChartLayer] 录制绘制指令 → WPF DrawingVisual (Software) / 位图回放 (Bitmap) / Widget (Interaction)
+[ChartLayer] 录制绘制指令 → 宿主上屏:WPF DrawingVisual (Software) / 位图回放 (Bitmap) / Widget (Interaction);Avalonia SKPicture 回放
 ```
 
 ## 不可逾越的红线（节选）
@@ -122,7 +133,7 @@ dotnet build "Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj" -nologo
 整解决方案：
 
 ```bash
-dotnet build "Hevo.Drawing.slnx" -nologo
+dotnet build "Drawing.Next.slnx" -nologo
 ```
 
 测试 / 基准：

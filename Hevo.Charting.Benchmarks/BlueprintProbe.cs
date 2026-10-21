@@ -169,8 +169,8 @@ namespace Hevo.Charting.Benchmarks
         internal static string RepoRoot()
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Hevo.Drawing.slnx"))) dir = dir.Parent;
-            return dir?.FullName ?? throw new InvalidOperationException("找不到仓库根(Hevo.Drawing.slnx)");
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Drawing.Next.slnx"))) dir = dir.Parent;
+            return dir?.FullName ?? throw new InvalidOperationException("找不到仓库根(Drawing.Next.slnx)");
         }
     }
 

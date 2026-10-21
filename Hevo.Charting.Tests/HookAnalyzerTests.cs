@@ -176,7 +176,7 @@ class LabelProvider
         private static string DocSample(string file)
         {
             var dir = new DirectoryInfo(System.AppContext.BaseDirectory);
-            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Hevo.Drawing.slnx"))) dir = dir.Parent;
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Drawing.Next.slnx"))) dir = dir.Parent;
             Assert.NotNull(dir);
             return File.ReadAllText(Path.Combine(dir!.FullName, "Hevo.Charting.Tests", "DocSamples", "UseMemo", file));
         }
