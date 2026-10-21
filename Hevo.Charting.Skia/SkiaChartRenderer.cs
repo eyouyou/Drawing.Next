@@ -4,8 +4,6 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Hevo.Charting.Core;
 using Hevo.Charting.Renderers;
 using SkiaSharp;
@@ -13,7 +11,9 @@ using SkiaSharp;
 namespace Hevo.Charting.Skia
 {
     /// <summary>
-    /// DrawCmd → SKCanvas 回放器。几何口径与 <see cref="WpfDrawingRenderer"/> 逐分支对齐(同样的像素对齐规则、
+    /// DrawCmd → SKCanvas 回放器,不依赖任何 UI 框架(WPF 合成面在 Hevo.Charting.Skia.Wpf,Avalonia 等宿主直接拿 SKCanvas 用它)。
+    /// 资源笔刷 / 资源字体 / 宿主图片由 <see cref="ISkiaHostResources"/> 按宿主解析。
+    /// 几何口径与 WPF 的 WpfDrawingRenderer 逐分支对齐(同样的像素对齐规则、
     /// 同样的相邻 DrawLine 合批、DrawRectangles 逐个画、Pen 的线端 / 虚线端 / 斜接上限取 WPF 的值)。
     /// <para>
     /// 按设备像素录制:<see cref="PixelsPerDip"/> ≠ 1 时画布先整体缩放,像素对齐在设备像素上做
@@ -36,7 +36,8 @@ namespace Hevo.Charting.Skia
         private readonly LruCache<string, SKPath?> _svg;
         private readonly Dictionary<FallbackKey, SKTypeface?> _fallback = new();
         private readonly Dictionary<TextKey, TextEntry> _text = new();
-        private readonly ConditionalWeakTable<ImageSource, SKImage> _images = new();
+        private readonly ConditionalWeakTable<object, SKImage> _images = new();
+        private readonly ISkiaHostResources? _resources;
         private readonly SKPaint?[] _opacityPaints = new SKPaint?[256];
         private readonly SKPath _path = new(); // 复用:Reset 后重填,避免每条命令 new 一个原生 path
 
@@ -84,8 +85,10 @@ namespace Hevo.Charting.Skia
             }
         }
 
-        public SkiaChartRenderer()
+        /// <param name="resources">宿主资源解析(主题笔刷 / 字体、宿主图片);null = 只认纯色 / 线性渐变 / 具名字体,图片不画。</param>
+        public SkiaChartRenderer(ISkiaHostResources? resources = null)
         {
+            _resources = resources;
             _fill = new LruCache<IHevoBrush, PaintEntry?>(128, OnFillEvicted);
             _stroke = new LruCache<HevoPen, PaintEntry?>(128, OnStrokeEvicted);
             _fonts = new LruCache<(IHevoTypeface, float), SKFont>(64, f => f.Dispose());
@@ -292,7 +295,7 @@ namespace Hevo.Charting.Skia
                         break;
                     case DrawOp.DrawImage:
                     {
-                        if (cmd.RefData is not ImageSource src || Image(src) is not { } img) break;
+                        if (cmd.RefData is not { } src || Image(src) is not { } img) break;
                         canvas.DrawImage(img, R(cmd.Payload.RectArea), new SKSamplingOptions(SKFilterMode.Linear));
                         break;
                     }
@@ -385,7 +388,7 @@ namespace Hevo.Charting.Skia
             {
                 if (_text.Count >= TextCacheCapacity) ClearText();
                 // 已录进 SKPicture 的 blob 由 picture 持有引用,缓存淘汰时 Dispose 不影响已录制内容
-                t = BuildText(WpfRenderRegistry.ResolveString(info.Text), info.Typeface, font, size);
+                t = BuildText(_resources?.ResolveText(info.Text) ?? HevoStrings.Resolve(info.Text), info.Typeface, font, size);
                 _text[key] = t;
             }
             if (t.Blob == null) return;
@@ -510,7 +513,7 @@ namespace Hevo.Charting.Skia
             e?.Dispose();
         }
 
-        private static PaintEntry? CreateFill(IHevoBrush desc)
+        private PaintEntry? CreateFill(IHevoBrush desc)
         {
             // 填充不开 AA:与 WPF 后端画布的 EdgeMode.Aliased 一致,K 线实体边缘锐利,光栅也更快
             var paint = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = false };
@@ -560,8 +563,8 @@ namespace Hevo.Charting.Skia
             return SKPathEffect.CreateDash(arr, strokeWidth / 2f);
         }
 
-        /// <summary>纯色直接取;渐变记下参数(shader 按图元建);资源笔刷借 WPF 注册表解析成真实画刷(主题)。</summary>
-        private static bool ApplyBrush(SKPaint paint, IHevoBrush desc, out Gradient? gradient)
+        /// <summary>纯色直接取;渐变记下参数(shader 按图元建);资源笔刷交给宿主解析成真实画刷(主题)。</summary>
+        private bool ApplyBrush(SKPaint paint, IHevoBrush desc, out Gradient? gradient)
         {
             gradient = null;
             switch (desc)
@@ -578,34 +581,14 @@ namespace Hevo.Charting.Skia
                     };
                     return true;
             }
-            switch (WpfRenderRegistry.CreateBrush(desc))
+            if (_resources == null || !_resources.TryResolveBrush(desc, out var r) || r.Colors.Length == 0) return false;
+            if (!r.IsGradient)
             {
-                case SolidColorBrush sc:
-                    paint.Color = C(sc.Color).WithAlpha((byte)(sc.Color.A * Math.Clamp(sc.Opacity, 0, 1)));
-                    return true;
-                case LinearGradientBrush lg when lg.GradientStops.Count > 0:
-                {
-                    var stops = lg.GradientStops.OrderBy(s => s.Offset).ToArray();
-                    double op = Math.Clamp(lg.Opacity, 0, 1);
-                    gradient = new Gradient
-                    {
-                        Colors = stops.Select(s => C(s.Color).WithAlpha((byte)(s.Color.A * op))).ToArray(),
-                        Positions = stops.Select(s => (float)Math.Clamp(s.Offset, 0, 1)).ToArray(),
-                        Start = P(lg.StartPoint), End = P(lg.EndPoint),
-                        Relative = lg.MappingMode == BrushMappingMode.RelativeToBoundingBox,
-                    };
-                    return true;
-                }
-                case GradientBrush gb when gb.GradientStops.Count > 0:
-                {
-                    // 径向等其它渐变:取首个色标当纯色(同位图后端)
-                    var c = gb.GradientStops[0].Color;
-                    paint.Color = C(c).WithAlpha((byte)(c.A * Math.Clamp(gb.Opacity, 0, 1)));
-                    return true;
-                }
-                default:
-                    return false;
+                paint.Color = r.Colors[0];
+                return true;
             }
+            gradient = new Gradient { Colors = r.Colors, Positions = r.Positions, Start = r.Start, End = r.End, Relative = r.Relative };
+            return true;
         }
 
         /// <summary>取画笔:纯色原样返回;渐变按图元包围盒(画布坐标)换算起止点、现建 shader。</summary>
@@ -680,9 +663,7 @@ namespace Hevo.Charting.Skia
             if (face is HevoTypeface ht) { family = ht.FontFamily; weight = ht.FontWeight; italic = ht.IsItalic; }
             else if (face is HevoResourceTypeface rt)
             {
-                var res = System.Windows.Application.Current?.TryFindResource(rt.ResourceKey);
-                if (res is FontFamily ff) family = ff.Source;
-                else if (res is string s) family = s;
+                if (_resources?.ResolveFontFamily(rt.ResourceKey) is { } resolved) family = resolved;
                 weight = rt.FontWeight; italic = rt.IsItalic;
             }
             tf = SKTypeface.FromFamilyName(family, (SKFontStyleWeight)weight, SKFontStyleWidth.Normal,
@@ -691,15 +672,10 @@ namespace Hevo.Charting.Skia
             return tf;
         }
 
-        private SKImage? Image(ImageSource src)
+        private SKImage? Image(object src)
         {
             if (_images.TryGetValue(src, out var img)) return img;
-            if (src is not BitmapSource bmp) return null;
-            var conv = bmp.Format == PixelFormats.Pbgra32 ? bmp : new FormatConvertedBitmap(bmp, PixelFormats.Pbgra32, null, 0);
-            int w = conv.PixelWidth, h = conv.PixelHeight, stride = w * 4;
-            var pixels = new byte[stride * h];
-            conv.CopyPixels(pixels, stride, 0);
-            img = SKImage.FromPixelCopy(new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Premul), pixels, stride);
+            img = _resources?.CreateImage(src);
             if (img != null) _images.Add(src, img);
             return img;
         }
@@ -708,9 +684,9 @@ namespace Hevo.Charting.Skia
         private static SKRect R(HevoRect r) => new(r.X, r.Y, r.X + r.Width, r.Y + r.Height);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static SKColor C(Color c) => new(c.R, c.G, c.B, c.A);
+        private static SKColor C(HevoColor c) => new(c.R, c.G, c.B, c.A);
 
-        private static SKPoint P(System.Windows.Point p) => new((float)p.X, (float)p.Y);
+        private static SKPoint P(HevoPoint p) => new(p.X, p.Y);
 
         private void ClearText()
         {
