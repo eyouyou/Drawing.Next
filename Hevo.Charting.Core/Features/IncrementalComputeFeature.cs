@@ -130,10 +130,38 @@ namespace Hevo.Charting.Features
         /// </summary>
         public Delegate? Compute { get; init; }
 
+        /// <summary>
+        /// 输入数据的 <see cref="DataExtent"/>(通常指向 <c>Chart.Viewport.Extent</c>)。配了时,调 handler 前核对:
+        /// 纪元换了(复权 / 换月),或上次算到的那根不在原下标(前插历史 / 补洞)→ 清掉 state 从头算;
+        /// 追加和改末根照旧续算。默认 null = 原行为(state 只增不清)。
+        /// <para>不进 Watch:它和输入同一事务写,只变它(如到底标记)时不该重跑 handler。</para>
+        /// </summary>
+        public DataPort<DataExtent>? ExtentPort { get; init; }
+
         // §D2.6.4 关键:state 装 feature 内部字段,不入 board 端口。
         // schema 实例 lifetime 内有效,schema 重建即丢(预期语义)。
         // 单线程 watcher 内 read+write,不需要锁(flow.Watch 串行调度)。
         private ReadOnlyMemory<double> _state = ReadOnlyMemory<double>.Empty;
+
+        // ExtentPort 核对用:上次见到的纪元、上次算到的末根下标和键
+        private object? _seenEpoch;
+        private int _lastIndex = -1;
+        private long _lastKey;
+
+        // 已算过的那段被换掉了(换纪元 / 前插 / 补洞)就清 state;只追加或改末根时那根还在原下标
+        private void ResetStateIfReshaped(DataBlackboard board)
+        {
+            if (ExtentPort == null) return;
+            var extent = board.Read(ExtentPort);
+            if (!extent.IsTracked) return;
+            var keys = extent.Keys.Span;
+            bool reshaped = !ReferenceEquals(extent.Epoch, _seenEpoch)
+                            || _lastIndex < 0 || _lastIndex >= keys.Length || keys[_lastIndex] != _lastKey;
+            if (reshaped) _state = ReadOnlyMemory<double>.Empty;
+            _seenEpoch = extent.Epoch;
+            _lastIndex = keys.Length - 1;
+            if (_lastIndex >= 0) _lastKey = keys[_lastIndex];
+        }
 
         protected override void OnComputeCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
@@ -182,6 +210,7 @@ namespace Hevo.Charting.Features
                 {
                     var input = board.Read(InputPort);
                     if (input.Length == 0) return;
+                    ResetStateIfReshaped(board);
 
                     ReadOnlyMemory<double> output;
                     ReadOnlyMemory<double> nextState;
@@ -245,6 +274,7 @@ namespace Hevo.Charting.Features
                         if (v.Length == 0) return;          // 任一输入未就绪 → 整体跳过
                         argsBuf[i] = v;
                     }
+                    ResetStateIfReshaped(board);
                     argsBuf[orderedPorts.Length] = _state;  // 末位:prev_state(首帧 length=0)
 
                     ReadOnlyMemory<double> output;
