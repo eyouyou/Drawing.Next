@@ -53,18 +53,11 @@ namespace Hevo.Charting.Interaction
                 }
                 else
                 {
-                    // 走 ViewportManager publish 的 InitialViewportTrait,与首屏视口完全一致
+                    // 跟 ViewportManager 首屏用同一个算法,回到的就是打开时的样子。
+                    // 以前这里按 Alignment 分支,LeftEdge(SetupViewport 的默认值)复原到最早一段,跟首屏贴右对不上
                     var initial = _s.Ctx.Shared().Read<InitialViewportTrait>();
-                    double maxIndex = Math.Max(0, logicalLength - 1);
-                    double initialSpan = initial?.DefaultVisibleCount.HasValue == true
-                        ? Math.Min(initial.DefaultVisibleCount.Value - 1, maxIndex)
-                        : maxIndex;
-                    initialSpan = Math.Max(0, initialSpan);
-
-                    var alignment = initial?.Alignment ?? ViewportAlignment.RightEdge;
-                    resetRange = alignment == ViewportAlignment.RightEdge
-                        ? new RealRange(maxIndex - initialSpan, maxIndex)
-                        : new RealRange(0, initialSpan);
+                    double minSpan = _s.Ctx.Shared().Read<ViewportSpanLimitsTrait>()?.MinSpan ?? 0;
+                    resetRange = ViewportManagerFeature.InitialRange(initial?.DefaultVisibleCount, minSpan, Math.Max(0, logicalLength - 1));
                 }
 
                 if (!resetRange.IsValid) return;

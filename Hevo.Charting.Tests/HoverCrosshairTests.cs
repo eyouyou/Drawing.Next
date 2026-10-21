@@ -148,10 +148,10 @@ namespace Hevo.Charting.Tests
 
         /// <summary>
         /// 指针压在绘图区边沿(容差内),Free 模式应命中边上那根可见 K 线。
-        /// 现状:relativeX 收到 0 / 1 后 Denormalize 得到 Min-0.5 / Max+0.5,Math.Round 银行家舍入按奇偶决定方向,
-        /// 视口 [70,99] 的右沿落到第 100 根(数据外、视口外,centerX=385.5 超出 Right=380);视口 [69,98] 的左沿同理落到第 68 根。
+        /// relativeX 收到 0 / 1 后 Denormalize 得到 Min-0.5 / Max+0.5,Math.Round 银行家舍入按奇偶决定方向;
+        /// 以前视口 [70,99] 的右沿落到第 100 根(centerX 超出绘图区),视口 [69,98] 的左沿落到第 68 根。
         /// </summary>
-        [Fact(Skip = "BUG: Free 模式指针在绘图区边沿时 Math.Round(Max+0.5) 银行家舍入命中视口外一根(右沿 index=100 / 左沿 index=Min-1),十字线画到绘图区外")]
+        [Fact]
         public void EdgeTolerance_Free_PlotEdge_HitsEdgeVisibleBar() => IncrementalTestKit.RunOnSta(() =>
         {
             var rig = new Rig().Isolated();
