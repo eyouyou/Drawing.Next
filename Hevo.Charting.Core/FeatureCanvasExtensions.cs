@@ -114,6 +114,8 @@ namespace Hevo.Charting
         public DataPort<int>? ValidCountPort { get; init; }
         public DataPort<PointerHitState?>? HitPort { get; init; }
         public Func<int, int, Task<bool>>? OnRequireDataAsync { get; init; }
+        /// <summary>按键分页回调,见 <see cref="DataPagingFeature.OnRequireBefore"/>;与 <see cref="OnRequireDataAsync"/> 二选一。</summary>
+        public Action<long, int>? OnRequireBefore { get; init; }
     }
 
     // ==========================================
@@ -371,7 +373,7 @@ namespace Hevo.Charting
             var hitPort = options.HitPort ?? new DataPort<PointerHitState?>("InternalHitState");
 
             // AvailabilityPort 是分页 Feature 的对外通道；DSL 在此唯一处建实例并穿针给两个 Feature
-            DataPort<DataAvailability>? availabilityPort = options.OnRequireDataAsync != null
+            DataPort<DataAvailability>? availabilityPort = options.OnRequireDataAsync != null || options.OnRequireBefore != null
                 ? new DataPort<DataAvailability>("DataAvailability")
                 : null;
 
@@ -397,6 +399,7 @@ namespace Hevo.Charting
                 builder.Canvas.Add(new DataPagingFeature
                 {
                     OnRequireDataAsync = options.OnRequireDataAsync,
+                    OnRequireBefore = options.OnRequireBefore,
                     FetchConfig = options.FetchConfig,
                     AvailabilityPort = availabilityPort
                 });

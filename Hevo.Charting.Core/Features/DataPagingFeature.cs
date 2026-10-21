@@ -61,6 +61,17 @@ namespace Hevo.Charting.Features
         public Func<int, int, Task<bool>>? OnRequireDataAsync { get; init; }
 
         /// <summary>
+        /// 按键分页(数据源发 <see cref="DataExtent"/> 时用):(key, count) = "键 key 之前至少还要 count 根"。
+        /// key 是 <see cref="ViewportPorts.AnchorKey"/>(最左那根,或 ScrollToKey 的目标),count = 安全缓冲 + 左侧越界留白。
+        /// 拉不拉、一页多少、到没到底都由数据源定;左墙从 <see cref="DataExtent.OlderExhausted"/> 换算写 <see cref="AvailabilityPort"/>。
+        /// <para>
+        /// 在 Watch 回调里、持黑板锁时被调:必须立即返回,拉取放到后台;不得在调用栈里同步 Publish
+        /// (那次发布会嵌进本次事务,通知被合并)。与 <see cref="OnRequireDataAsync"/> 二选一。
+        /// </para>
+        /// </summary>
+        public Action<long, int>? OnRequireBefore { get; init; }
+
+        /// <summary>
         /// 拉取行为参数：节流阀、安全缓冲、网络故障熔断等。
         /// </summary>
         public DataFetchOptions FetchConfig { get; init; } = new();
@@ -83,8 +94,21 @@ namespace Hevo.Charting.Features
         // 上次见到的 LogicalLength,用来侦测大数组扩容 / 切股票清空,以决定是否解锁墙锁。
         private int _lastSeenLength = -1;
 
+        // 按键分页的节流:同一锚点、不更多的根数,Pacing 内不重复问(拖动时 ActiveRange 每帧变)
+        private long _askedKey;
+        private int _askedCount = -1;
+        private long _askedAtTicks;
+
         protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
+            if (OnRequireBefore != null)
+            {
+                if (OnRequireDataAsync != null)
+                    throw new InvalidOperationException("DataPagingFeature:OnRequireBefore 与 OnRequireDataAsync 二选一。");
+                flow.Watch(new object[] { Viewport.ActiveRange, Viewport.AnchorKey, Viewport.Extent }, RequireBefore);
+                return;
+            }
+
             flow.Watch(new object[] { Viewport.ActiveRange }, board =>
             {
                 using (board.UpdateScope())
@@ -110,6 +134,37 @@ namespace Hevo.Charting.Features
         }
 
         protected override void OnProject(FeatureContext ctx) { }
+
+        private void RequireBefore(DataBlackboard board)
+        {
+            using (board.UpdateScope())
+            {
+                var extent = board.Read(Viewport.Extent);
+                var anchor = board.Read(Viewport.AnchorKey);
+                var active = board.Read(Viewport.ActiveRange);
+
+                // 右侧不由按键分页管(缓存始终含最新,只有追加)
+                bool leftExhausted = extent.IsTracked && extent.OlderExhausted;
+                using (board.WriteScope()) board.Write(AvailabilityPort, new DataAvailability(leftExhausted, false));
+
+                if (!extent.IsTracked || !anchor.HasValue || !active.IsValid || leftExhausted) return;
+                var keys = extent.Keys.Span;
+                if (keys.Length == 0) return;
+
+                int count = FetchConfig.SafeBuffer + (int)Math.Max(0, Math.Ceiling(-active.Min));
+                long key = anchor.Value;
+                if (key >= keys[0] && ViewportManagerFeature.LowerBound(keys, key) >= count) return;
+
+                long now = Stopwatch.GetTimestamp();
+                if (key == _askedKey && count <= _askedCount
+                    && now - _askedAtTicks < FetchConfig.Pacing.TotalSeconds * Stopwatch.Frequency) return;
+                _askedKey = key;
+                _askedCount = count;
+                _askedAtTicks = now;
+
+                OnRequireBefore!(key, count);
+            }
+        }
 
         private void PublishAvailability(DataBlackboard board)
         {

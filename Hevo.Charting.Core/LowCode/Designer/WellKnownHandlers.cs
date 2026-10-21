@@ -46,6 +46,9 @@ namespace Hevo.Charting.LowCode.Designer
         {
             /// <summary>(anchorIndex, count) → fetchedCount &gt; 0</summary>
             public static HandlerKey<Func<int, int, Task<bool>>> OnRequireDataAsync(string name) => new(name);
+
+            /// <summary><see cref="Features.DataPagingFeature.OnRequireBefore"/>:(key, count),立即返回</summary>
+            public static HandlerKey<Action<long, int>> OnRequireBefore(string name) => new(name);
         }
 
         /// <summary>
