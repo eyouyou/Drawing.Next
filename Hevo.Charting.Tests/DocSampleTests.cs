@@ -428,5 +428,39 @@ namespace Hevo.Charting.Tests
             Assert.Equal(60, feed.Read<LevelLineTrait>()!.Y);
             Assert.Equal(1, cell.LastFrameDirtyLayers);
         });
+
+        // ── K 线样式变体:三种样式画出来就是文档说的样子 ─────────────────────
+
+        [Fact]
+        public void CandleStyleSamples_RenderAsDocumented() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var up = HevoColor.FromRgb(0xE5, 0x2E, 0x3D);
+            var down = HevoColor.FromRgb(0x2B, 0xAB, 0x60);
+            float w = CandleColumnPixelTests.PlotWidth(20);
+            // 测试数据全是阳线;实体中段那一行:实心 = 每根一段实体宽,空心 = 每根左右两条描边,美国线 = 每根一条竖线
+            int BodyRowRuns(Core.CandleStyle style, out int firstWidth)
+            {
+                var px = CandleColumnPixelTests.RenderCandles(w, CandleColumnPixelTests.CandleH, 1.0, style, doji: false, raster: false, out int pw, out _);
+                int row = (int)(CandleColumnPixelTests.CandleH * (130 - 105) / 50.0), runs = 0, start = -1;
+                firstWidth = 0;
+                for (int x = 0; x <= pw; x++)
+                {
+                    bool ink = x < pw && CandleColumnPixelTests.Ink(px[row * pw + x]);
+                    if (ink && start < 0) start = x;
+                    if (!ink && start >= 0) { if (runs++ == 0) firstWidth = x - start; start = -1; }
+                }
+                return runs;
+            }
+
+            int solid = BodyRowRuns(DocSamples.Candle.CandleStyleSamples.Solid(up, down), out int bodyWidth);
+            int hollow = BodyRowRuns(DocSamples.Candle.CandleStyleSamples.HollowUp(up, down), out int outlineWidth);
+            int american = BodyRowRuns(DocSamples.Candle.CandleStyleSamples.American(up, down), out int barWidth);
+            Assert.True(solid > 30);
+            Assert.True(bodyWidth > 10);
+            Assert.Equal(2 * solid, hollow);
+            Assert.Equal(1, outlineWidth);
+            Assert.Equal(solid, american);
+            Assert.Equal(1, barWidth);
+        });
     }
 }
