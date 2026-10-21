@@ -19,7 +19,7 @@ namespace Hevo.Charting.Tests
         private sealed class WatchFeature : Feature
         {
             public int Calls;
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
                 => flow.Watch(new object[] { Port }, _ => Calls++);
             protected override void OnProject(FeatureContext ctx) { }
         }
@@ -28,7 +28,7 @@ namespace Hevo.Charting.Tests
         {
             public ProbeLayer Layer { get; } = new("tx-layer") { Reads = d => Seen = d.Get<ProbeTraitA>()?.Value };
             public static int? Seen;
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             {
                 AttachLayer(Layer);
                 ctx.For(Layer).PublishData(new ProbeTraitA(7));
@@ -36,12 +36,12 @@ namespace Hevo.Charting.Tests
             protected override void OnProject(FeatureContext ctx) { }
         }
 
-        private sealed class DecoratingFeature : Feature
+        private sealed class DecoratingFeature : Feature, IWpfDecorator
         {
             public const string Marker = "tx-decorated";
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
             protected override void OnProject(FeatureContext ctx) { }
-            public override UIElement Decorate(UIElement inner) => new Border { Tag = Marker, Child = inner };
+            public UIElement Decorate(UIElement inner) => new Border { Tag = Marker, Child = inner };
         }
 
         [Fact]

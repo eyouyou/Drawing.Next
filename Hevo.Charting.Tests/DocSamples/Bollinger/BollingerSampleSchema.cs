@@ -58,7 +58,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
         public BollingerPorts Bands { get; } = new BollingerPorts("BS_Boll");
         public DataPort<ReadOnlyMemory<double>> ClosePort => _close;
 
-        protected override void DefineDataFlow(ChartCell chart)
+        protected override void DefineDataFlow(IChartCell chart)
         {
             var pipe = Source.Pipe()
                 .LinkStream(cfg => cfg.Map(_close, x => x.Close));
@@ -76,7 +76,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
             // 手写 Schema 必须 Seed 比例尺策略(蓝图里对应 InitialTraits),否则所有图层拿不到 IScale
             canvas.Seed(ScaleStrategyTrait.LineMode);
 
-            var priceMeta = FieldMeta.Literal("收盘", Colors.SteelBlue, "F2");
+            var priceMeta = FieldMeta.Literal("收盘", HevoColors.SteelBlue, "F2");
 
             // 三根轨道也进 AutoScale,Y 轴量程才能包住上下轨
             var valuePorts = new List<DataPort<ReadOnlyMemory<double>>> { _close };
@@ -98,7 +98,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
                     else if (_style == BollingerComputeStyle.ComputeNode)
                         series.AddBollingerNode(_close, Bands, period: 20, width: 2.0);
 
-                    series.AddBollinger(Bands, _yRange, Colors.Orange);
+                    series.AddBollinger(Bands, _yRange, HevoColors.Orange);
                 });
         }
 
@@ -112,7 +112,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
             Transact(canvas =>
             {
                 canvas.Remove<BollingerFeature>();
-                if (visible) canvas.Series(series => series.AddBollinger(Bands, _yRange, Colors.Orange));
+                if (visible) canvas.Series(series => series.AddBollinger(Bands, _yRange, HevoColors.Orange));
             });
         }
     }

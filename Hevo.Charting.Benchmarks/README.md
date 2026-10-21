@@ -344,7 +344,7 @@ dotnet run -c Release -- --render-probe --scenarios=Hover,Zoom --rounds=10 --out
 Tick / Pan 跟数据量无关(只碰最后一根 / 可见窗口固定 ~120 根)。Zoom 的可见跨度在 60 根和 min(数据量, 2 万) 根之间来回,
 大跨度帧由下面的按像素列 LOD 兜住。
 
-**K 线 / 折线按像素列 LOD**([PixelColumnLod](../Hevo.Charting/Renderers/PixelColumnLod.cs)):
+**K 线 / 折线按像素列 LOD**([PixelColumnLod](../Hevo.Charting.Core/Renderers/PixelColumnLod.cs)):
 单根宽度不足 1 个物理像素(按 DPI 换算)时,CandleLayer 把落在同一物理像素列的 K 线聚合成一根(首开、最高、最低、末收,
 涨跌色按聚合后的开收),LineLayer 对折线做 M4 抽稀(每列留首 / 最低 / 最高 / 末),输出量上限 ≈ 绘图区物理宽度;
 ≥1px 时走原逐根路径,行为不变。优化前 2 万根可见时每帧上 MB 的分配几乎全是 WPF 内部缓冲
@@ -487,7 +487,7 @@ float64 结果拷进调用点缓冲池(`LowCode/ResultBufferPool`),Python 这条
 
 **Blueprint:蓝图端到端**(`--scenarios=Blueprint`):`default_kline_dashboard.json`(主图 + 成交量 + 策略三张联动图)
 → `DashboardLauncher.LaunchEx`(DryRun + 实例化数据源 / Feature + 装配)→ 放进窗口 → 每张图在自己的数据到达后出第一帧。
-数据源用 `ProbeFeedSource` 以别名 `MockKLineDataSource` 顶替;strategy 图的 `bb_breakout` 是 LowCodeDemo/PyIndicators 里的真 Python handler。
+数据源是 demo 用的 `MockKLineDataSource`(`Hevo.Charting.Samples`,首批 `--feed-bars` 根、不推送;下表是换成它之前用同字段替身 `ProbeFeedSource` 测的);strategy 图的 `bb_breakout` 是 LowCodeDemo/PyIndicators 里的真 Python handler。
 
 | | LaunchEx(ms) | 显示 + 布局(ms) | 数据 → 全部首帧(ms) | 合计(ms) |
 |---|---:|---:|---:|---:|

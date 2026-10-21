@@ -65,7 +65,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void Brush_Solid_RoundTrip()
         {
-            IHevoBrush orig = new HevoSolidBrush(Color.FromRgb(0x14, 0x16, 0x1B));
+            IHevoBrush orig = new HevoSolidBrush(HevoColor.FromRgb(0x14, 0x16, 0x1B));
             var json = JsonSerializer.Serialize(orig, Opts);
             // schema 检查:必须含 kind + color 字段,key 名稳定
             Assert.Contains("\"kind\": \"solid\"", json);
@@ -155,7 +155,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void Resolver_Static_RoundTrip()
         {
-            IBrushResolver<double> orig = BrushResolver.Constant<double>(new HevoSolidBrush(Color.FromRgb(0xCC, 0xCC, 0xCC)));
+            IBrushResolver<double> orig = BrushResolver.Constant<double>(new HevoSolidBrush(HevoColor.FromRgb(0xCC, 0xCC, 0xCC)));
             var json = JsonSerializer.Serialize(orig, Opts);
             Assert.Contains("\"kind\": \"static\"", json);
             Assert.Contains("\"brush\":", json);
@@ -163,7 +163,7 @@ namespace Hevo.Charting.Tests
             var back = JsonSerializer.Deserialize<IBrushResolver<double>>(json, Opts);
             Assert.IsType<StaticBrushResolver<double>>(back);
             var sb = (StaticBrushResolver<double>)back!;
-            Assert.Equal(new HevoSolidBrush(Color.FromRgb(0xCC, 0xCC, 0xCC)), sb.DefaultBrush);
+            Assert.Equal(new HevoSolidBrush(HevoColor.FromRgb(0xCC, 0xCC, 0xCC)), sb.DefaultBrush);
         }
 
         // 兼容老蓝图里直接 record-style 序列化的 { "ConstantBrush": {...} } 形态。
@@ -236,7 +236,7 @@ namespace Hevo.Charting.Tests
             // 进而走 JsonSerializer.Deserialize<IHevoBrush>(...) 路径。
             var raw = new Dictionary<string, object?>
             {
-                ["TargetBrush"] = (IHevoBrush)new HevoSolidBrush(Color.FromRgb(0x14, 0x16, 0x1B)),
+                ["TargetBrush"] = (IHevoBrush)new HevoSolidBrush(HevoColor.FromRgb(0x14, 0x16, 0x1B)),
             };
             var json = JsonSerializer.Serialize(raw, Opts);
             var revived = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, Opts);
@@ -244,7 +244,7 @@ namespace Hevo.Charting.Tests
             var instance = new TestPropTarget();
             SmartActivator.InjectProperties(instance, revived);
             Assert.IsType<HevoSolidBrush>(instance.TargetBrush);
-            Assert.Equal(Color.FromRgb(0x14, 0x16, 0x1B), ((HevoSolidBrush)instance.TargetBrush!).Color);
+            Assert.Equal(HevoColor.FromRgb(0x14, 0x16, 0x1B), ((HevoSolidBrush)instance.TargetBrush!).Color);
         }
 
         // 测试用注入目标 —— 仅暴露 Color / IHevoBrush 两个属性。

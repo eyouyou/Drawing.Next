@@ -1222,7 +1222,7 @@ namespace Hevo.Charting.Benchmarks
         public ViewportPorts Viewport { get; private set; } = null!;
         public DataPort<PointerHitState?> HitPortForProbe => HitPort;
 
-        protected override void DefineDataFlow(ChartCell chart)
+        protected override void DefineDataFlow(IChartCell chart)
         {
             Viewport = ViewportPorts.RequireAttached(Chart);
             Trigger.BindTo(chart);
@@ -1234,14 +1234,14 @@ namespace Hevo.Charting.Benchmarks
             if (HeavyLayers > 0) canvas.Add(new HeavyLayersFeature(HeavyLayers, HeavyMs));
 
             var hitPort = HitPort;
-            var timeMeta = FieldMeta.Literal("时间", Colors.White, "yyyy-MM-dd HH:mm");
-            var priceMeta = FieldMeta.Literal("价", Colors.LightGray, "F2");
-            var smaMeta = FieldMeta.Literal("SMA20", Color.FromRgb(0xFF, 0xB7, 0x4D), "F2");
+            var timeMeta = FieldMeta.Literal("时间", HevoColors.White, "yyyy-MM-dd HH:mm");
+            var priceMeta = FieldMeta.Literal("价", HevoColors.LightGray, "F2");
+            var smaMeta = FieldMeta.Literal("SMA20", HevoColor.FromRgb(0xFF, 0xB7, 0x4D), "F2");
             var candleMetas = new CandleMetas(
-                Open: FieldMeta.Literal("开", Colors.Gray, "F2"),
-                High: FieldMeta.Literal("高", Colors.Gray, "F2"),
-                Low: FieldMeta.Literal("低", Colors.Gray, "F2"),
-                Close: FieldMeta.Literal("收", Colors.Gray, "F2"));
+                Open: FieldMeta.Literal("开", HevoColors.Gray, "F2"),
+                High: FieldMeta.Literal("高", HevoColors.Gray, "F2"),
+                Low: FieldMeta.Literal("低", HevoColors.Gray, "F2"),
+                Close: FieldMeta.Literal("收", HevoColors.Gray, "F2"));
 
             canvas
                 .Environment(env => env

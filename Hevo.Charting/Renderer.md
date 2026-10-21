@@ -73,9 +73,9 @@ public sealed class WpfRenderProvider : IRendererProvider<DrawingContext>
 
 - 实现 `Render(DrawingBuffer buffer, TContext ctx)`,遍历 `buffer.Commands` 按 `DrawOp` 分发
 - **画刷 / 笔缓存**:把 `IHevoBrush` / `HevoPen` 翻译成后端原生类型,缓存避免每帧 new
-- **像素对齐**:**必须沿用** [Renderers/PixelSnap.cs](Renderers/PixelSnap.cs) 的 `SnapEndpoints` / `InsideStroke` / `Vertex`,所有 stroke 顶点 snap 到 `.5/.0`,跨 backend 同源,保证业务侧渲染像素级一致
+- **像素对齐**:**必须沿用** [Renderers/PixelSnap.cs](../Hevo.Charting.Core/Renderers/PixelSnap.cs) 的 `SnapEndpoints` / `InsideStroke` / `Vertex`,所有 stroke 顶点 snap 到 `.5/.0`,跨 backend 同源,保证业务侧渲染像素级一致
 - **DrawOp 完整覆盖**:DrawLine / DrawRectangle / DrawRoundedRectangle / DrawEllipse / DrawPolyline / DrawLineSegments / DrawCubicBezier / DrawRectangles / DrawGeometry / DrawPolygon / DrawBand / DrawText / DrawImage / DrawVideo / PushClip / PushOpacity / PushTransform / Pop。漏一个就有 layer 不工作。
-- **填充指令**:DrawPolygon / DrawBand 的图形拆分(NaN 断带、上下穿越分段)不要自己写,实现一个 `IFigureWriter`(struct,Begin / LineTo / End)交给 [Renderers/FillGeometry.cs](Renderers/FillGeometry.cs);填充顶点用 `PixelSnap.FillVertex`、描边顶点用 `Vertex`,非零环绕。规则见 [06 号文档 §4.7](06.WPF%20渲染规约.md)。(`PushGuidelineSet` 已删除,详见 [06.WPF 渲染规约.md](06.WPF%20渲染规约.md) §3.3)
+- **填充指令**:DrawPolygon / DrawBand 的图形拆分(NaN 断带、上下穿越分段)不要自己写,实现一个 `IFigureWriter`(struct,Begin / LineTo / End)交给 [Renderers/FillGeometry.cs](../Hevo.Charting.Core/Renderers/FillGeometry.cs);填充顶点用 `PixelSnap.FillVertex`、描边顶点用 `Vertex`,非零环绕。规则见 [06 号文档 §4.7](06.WPF%20渲染规约.md)。(`PushGuidelineSet` 已删除,详见 [06.WPF 渲染规约.md](06.WPF%20渲染规约.md) §3.3)
 - **0-GC 热路径**:`Render` 每帧调用,内部循环不允许 LINQ / box / 临时 List 分配
 
 ### 3. 实现 `IRenderer<BitmapBuffer, TContext>` (位图渲染器)

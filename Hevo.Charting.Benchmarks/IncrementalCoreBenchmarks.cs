@@ -223,7 +223,7 @@ namespace Hevo.Charting.Benchmarks
     /// <summary>读一个局部 Trait + 一个全局 Trait,画 1 个矩形。</summary>
     internal sealed class BenchLayer : ChartLayer
     {
-        private static readonly IHevoBrush Brush = new HevoSolidBrush(Colors.SteelBlue);
+        private static readonly IHevoBrush Brush = new HevoSolidBrush(HevoColors.SteelBlue);
 
         public BenchLayer(string name)
         {
@@ -253,7 +253,7 @@ namespace Hevo.Charting.Benchmarks
             _withLayer = withLayer;
         }
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             if (!_withLayer) return;
             _layer = new BenchLayer(_port.Id);
@@ -272,7 +272,7 @@ namespace Hevo.Charting.Benchmarks
         private readonly Feature[] _features;
         public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
         public BenchSchema(Feature[] features) => _features = features;
-        protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+        protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
         protected override void DefineFeatures(IFeatureContext canvas)
         {
             foreach (var f in _features) canvas.Add(f);

@@ -32,7 +32,7 @@ namespace Hevo.Charting.Tests
             public double MinBarSpacingPx { get; init; }
             public Action<InteractionBuilder, Schema>? Extra { get; init; }
 
-            protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
 
             protected override void DefineFeatures(IFeatureContext canvas)
             {
@@ -200,7 +200,7 @@ namespace Hevo.Charting.Tests
 
             public override FeaturePhase Phase => FeaturePhase.Interaction;
 
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             {
                 if (Layer is ChartLayerType level) AttachLayer(new DummyLayer { Level = level });
                 flow.WatchPointer(this, (b, g, later) => { Log.Add(g); OnGesture?.Invoke(b, g, later); });
@@ -272,7 +272,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void NoRegion_BoxZoom_Zooms() => IncrementalTestKit.RunOnSta(() =>
         {
-            var rig = new Rig(boxZoom: new BoxZoomOptions { ActivationModifier = ModifierKeys.None });
+            var rig = new Rig(boxZoom: new BoxZoomOptions { Activation = PointerModifiers.None });
             rig.Drag(100, 250);
             var after = rig.ActiveRange;
             rig.Close();
@@ -361,7 +361,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void Region_ClaimsPress_NoPan_NoBoxZoom() => IncrementalTestKit.RunOnSta(() =>
         {
-            var rig = new Rig(boxZoom: new BoxZoomOptions { ActivationModifier = ModifierKeys.None });
+            var rig = new Rig(boxZoom: new BoxZoomOptions { Activation = PointerModifiers.None });
             var p = rig.Add(new Probe());
             p.Set(rig, Line(150));
             rig.Drag(100, 220);

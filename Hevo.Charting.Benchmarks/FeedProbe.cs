@@ -45,26 +45,21 @@ namespace Hevo.Charting.Benchmarks
     /// <summary>
     /// 实时数据源:OnFetchAsync 先灌一段历史,之后后台线程调 <see cref="PushTick"/>(走 UpdateBuffer:加锁改 buffer → Publish →
     /// Stream 推 DataSnapshot → pipe 的 Ingestor 写黑板 → ChartCell.RequestUpdate),跟真实行情源同一条路。
-    /// 蓝图端到端用别名 "MockKLineDataSource" 登记,顶替 LowCodeDemo 的同名数据源。
+    /// 不用示例共享的 MockKLineDataSource:每根 K 线要带推入它的 tick 序号(<see cref="ProbeFeedBar.Seq"/>),帧里据此结算 tick → 上屏延迟,
+    /// 还要在任意线程按给定速率推 tick、改写最后一根。
     /// </summary>
     public sealed class ProbeFeedSource : ReactiveDataSource<ProbeFeedSource, string, ProbeFeedBar>
     {
         public static int SeedBars = 2000;
         public static int TicksPerBar = 50;
-        /// <summary>最近一次 OnFetchAsync 完成的时刻(Stopwatch ticks),蓝图端到端用来判断首帧是否已带数据。</summary>
-        public long FetchedAt;
 
         private int _count;
         private readonly ProbeData _seed;
         private double _lastClose;
 
-        /// <summary>每创建一个实例触发一次(蓝图端到端里数据源由 DashboardLauncher 实例化,靠它拿到引用)。</summary>
-        public static event Action<ProbeFeedSource>? Created;
-
         public ProbeFeedSource()
         {
             _seed = ProbeData.Generate(SeedBars);
-            Created?.Invoke(this);
         }
 
         public override int LogicalLength => Volatile.Read(ref _count);
@@ -85,7 +80,6 @@ namespace Hevo.Charting.Benchmarks
                 _lastClose = _seed.Close[SeedBars - 1];
                 Volatile.Write(ref _count, buf.Count);
             });
-            FetchedAt = Stopwatch.GetTimestamp();
             return Task.FromResult(SeedBars);
         }
 
@@ -120,7 +114,7 @@ namespace Hevo.Charting.Benchmarks
         public required DataPort<ReadOnlyMemory<double>> SeqPort { get; init; }
         public long LastSeq = -1;
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
 
         protected override void OnProject(FeatureContext ctx)
         {
@@ -162,7 +156,7 @@ namespace Hevo.Charting.Benchmarks
         /// </summary>
         public static bool SourceMap;
 
-        protected override void DefineDataFlow(ChartCell chart)
+        protected override void DefineDataFlow(IChartCell chart)
         {
             var pipe = _ds.Pipe();
             if (SourceMap)
@@ -188,9 +182,9 @@ namespace Hevo.Charting.Benchmarks
         {
             canvas.Seed<ScaleStrategyTrait>(ScaleStrategyTrait.CandleMode);
             var hitPort = HitPort;
-            var timeMeta = FieldMeta.Literal("时间", Colors.White, "yyyy-MM-dd HH:mm");
-            var priceMeta = FieldMeta.Literal("价", Colors.LightGray, "F2");
-            var smaMeta = FieldMeta.Literal("SMA20", Color.FromRgb(0xFF, 0xB7, 0x4D), "F2");
+            var timeMeta = FieldMeta.Literal("时间", HevoColors.White, "yyyy-MM-dd HH:mm");
+            var priceMeta = FieldMeta.Literal("价", HevoColors.LightGray, "F2");
+            var smaMeta = FieldMeta.Literal("SMA20", HevoColor.FromRgb(0xFF, 0xB7, 0x4D), "F2");
 
             canvas.Add(new ComputeFeature { InputPort = ClosePort, OutputPort = _smaPort, Compute = (ComputeInto)Sma20 });
             canvas.Add(SeqFeature);
@@ -207,8 +201,8 @@ namespace Hevo.Charting.Benchmarks
                     .AddRangeAxis(_yRangePort, priceMeta, AxisPlacement.Right))
                 .Series(series => series
                     .AddCandle(rangePort: _yRangePort, ports: new CandlePorts(TimePort, OpenPort, HighPort, LowPort, ClosePort), groupName: "FeedCandle",
-                        metas: new CandleMetas(FieldMeta.Literal("开", Colors.Gray, "F2"), FieldMeta.Literal("高", Colors.Gray, "F2"),
-                                               FieldMeta.Literal("低", Colors.Gray, "F2"), FieldMeta.Literal("收", Colors.Gray, "F2")))
+                        metas: new CandleMetas(FieldMeta.Literal("开", HevoColors.Gray, "F2"), FieldMeta.Literal("高", HevoColors.Gray, "F2"),
+                                               FieldMeta.Literal("低", HevoColors.Gray, "F2"), FieldMeta.Literal("收", HevoColors.Gray, "F2")))
                     .AddLine(dataPort: _smaPort, rangePort: _yRangePort, meta: smaMeta, thickness: 1.5))
                 .Interactions(i => i.EnableStandard(domainDataPort: TimePort, domainMeta: timeMeta,
                     options: new InteractionOptions<DateTime> { HitPort = hitPort, Modes = ChartInteractionMode.All }));
@@ -220,7 +214,7 @@ namespace Hevo.Charting.Benchmarks
                 var outPort = new DataPort<ReadOnlyMemory<double>>($"F_Py{k}");
                 canvas.Add(new ComputeFeature { InputPort = ClosePort, OutputPort = outPort, Compute = compute });
                 canvas.Series(s => s.AddLine(dataPort: outPort, rangePort: _yRangePort,
-                    meta: FieldMeta.Literal(name, Colors.MediumPurple, "F2"), thickness: 1.0));
+                    meta: FieldMeta.Literal(name, HevoColors.MediumPurple, "F2"), thickness: 1.0));
             }
         }
 
@@ -312,7 +306,7 @@ namespace Hevo.Charting.Benchmarks
                 if (!ReferenceEquals(cell, rig.Cell)) return;
                 long now = Stopwatch.GetTimestamp();
                 long fp = IncrementalRenderProbe.FeatureProjections;
-                if (measuring) { featureSum += fp - featureMark; layerSum += cell.LastFrameDirtyLayers; }
+                if (measuring) { featureSum += fp - featureMark; layerSum += cell.Engine.LastFrameDirtyLayers; }
                 featureMark = fp;
                 long seen = rig.Schema.SeqFeature.LastSeq;
                 if (seen <= prevSeen) return;

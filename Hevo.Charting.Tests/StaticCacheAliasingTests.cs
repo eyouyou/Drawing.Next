@@ -44,10 +44,10 @@ namespace Hevo.Charting.Tests
             public void Publish<T>(T snapshot) where T : class { }
         }
 
-        private static readonly HevoSolidBrush RedBrush = new(Colors.Red);
-        private static readonly HevoSolidBrush GreenBrush = new(Color.FromRgb(0, 160, 0));
-        private static readonly HevoPen GridPen = new(new HevoSolidBrush(Color.FromRgb(90, 90, 90)), 1);
-        private static readonly HevoPen WickPen = new(new HevoSolidBrush(Colors.Black), 1);
+        private static readonly HevoSolidBrush RedBrush = new(HevoColors.Red);
+        private static readonly HevoSolidBrush GreenBrush = new(HevoColor.FromRgb(0, 160, 0));
+        private static readonly HevoPen GridPen = new(new HevoSolidBrush(HevoColor.FromRgb(90, 90, 90)), 1);
+        private static readonly HevoPen WickPen = new(new HevoSolidBrush(HevoColors.Black), 1);
 
         // 小数坐标的网格 + K 线(实体宽度不是整数),不对齐时最容易糊
         private static void Scene(IDrawingSink d)
@@ -96,11 +96,10 @@ namespace Hevo.Charting.Tests
         {
             return new ChartCell
             {
-                Template = new ChartTemplate { VisualTree = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter)) },
                 StaticCachePolicy = policy,
                 Width = W,
                 Height = H,
-            };
+            }.WithShell();
         }
 
         // cell 包在 Border 里、Border 摆在 (x, y):Border 不开 UseLayoutRounding,小数偏移原样传给 cell
@@ -199,10 +198,9 @@ namespace Hevo.Charting.Tests
         {
             var cell = new ChartCell
             {
-                Template = new ChartTemplate { VisualTree = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter)) },
                 Width = W,
                 Height = H,
-            };
+            }.WithShell();
             var win = Show(cell);
             try
             {
@@ -399,7 +397,7 @@ namespace Hevo.Charting.Tests
                 using (d.PushClip(new HevoRect(3.3f, 2.6f, W - 7.1f, H - 5.4f)))
                 {
                     Scene(d);
-                    d.DrawRectangle(RedBrush, new HevoPen(new HevoSolidBrush(Colors.Blue), 2), new HevoRect(30.2f, 100.7f, 40.3f, 20.6f));
+                    d.DrawRectangle(RedBrush, new HevoPen(new HevoSolidBrush(HevoColors.Blue), 2), new HevoRect(30.2f, 100.7f, 40.3f, 20.6f));
                 }
             }, k));
             _out.WriteLine($"k={k}:实心 {solid},半透明 {partial}");
@@ -497,9 +495,9 @@ namespace Hevo.Charting.Tests
         // ---------- 静态层与交互层同列 ----------
         // 静态层画蓝线、交互层画红线:同一个画布坐标(竖线 x = 100、横线 y = 80)分段画,互不重叠,各自量落在窗口的哪一列 / 行。
         // 开缓存时线条始终清晰,整层偏 1 像素只有这样比才看得出来。
-        private static readonly HevoPen BluePen = new(new HevoSolidBrush(Colors.Blue), 1);
-        private static readonly HevoPen RedPen = new(new HevoSolidBrush(Colors.Red), 1);
-        private static readonly HevoPen ThickGrayPen = new(new HevoSolidBrush(Color.FromRgb(128, 128, 128)), 2);
+        private static readonly HevoPen BluePen = new(new HevoSolidBrush(HevoColors.Blue), 1);
+        private static readonly HevoPen RedPen = new(new HevoSolidBrush(HevoColors.Red), 1);
+        private static readonly HevoPen ThickGrayPen = new(new HevoSolidBrush(HevoColor.FromRgb(128, 128, 128)), 2);
 
         private static void StaticLines(IDrawingSink d, bool fracBounds)
         {

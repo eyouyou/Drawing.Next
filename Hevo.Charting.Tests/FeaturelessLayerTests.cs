@@ -17,12 +17,11 @@ namespace Hevo.Charting.Tests
     /// </summary>
     public sealed class FeaturelessLayerTests
     {
-        private static ChartCell NewCell() => new()
+        private static ChartCell NewCell() => new ChartCell()
         {
-            Template = new ChartTemplate { VisualTree = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter)) },
             Width = 200,
             Height = 100,
-        };
+        }.WithShell();
 
         [Fact]
         public void UnmanagedLayer_FedThroughReturnedProxy_Draws() => RunOnSta(() =>
@@ -174,7 +173,7 @@ namespace Hevo.Charting.Tests
             private readonly IChartLayer _layer;
             public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
             public AddLayerSchema(IChartLayer layer) => _layer = layer;
-            protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
             // AddLayer 包出来的是 ChartFeature,要求 cell 上挂着 ViewportPorts(ChartReactiveSchema 会自动补,这里手动加)
             protected override void DefineFeatures(IFeatureContext canvas) => canvas.Add(new ViewportPortsFeature()).AddLayer(_layer);
         }

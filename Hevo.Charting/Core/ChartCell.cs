@@ -1,5 +1,6 @@
 ﻿using Hevo.Charting.Abstractions;
 using Hevo.Charting.DevTools;
+using Hevo.Charting.LowCode;
 using Hevo.Charting.Renderers;
 using Hevo.Charting.Renderers.Raster;
 using System.ComponentModel;
@@ -13,7 +14,7 @@ namespace Hevo.Charting.Core
 {
     /// <summary>
     /// 模板类型(限定只能用于 ChartCell)。
-    /// 通常你不直接 new 这个类,而是 new <see cref="ChartSchema"/> 派生类(如 ReactiveSchema)。
+    /// 通常你不直接 new 这个类:给 <see cref="ChartCell.Template"/> 赋 <see cref="ChartSchema"/>(如 ReactiveSchema),cell 自己包一层。
     /// 类型守卫由 <see cref="ChartCell.CoerceTemplateValue"/> + <see cref="ChartCell.OnTemplateChanged"/> 在 Template 赋值时强制。
     /// </summary>
     public class ChartTemplate : ControlTemplate
@@ -21,9 +22,21 @@ namespace Hevo.Charting.Core
         /// <summary>调试用模板名(无业务语义,便于日志区分多个 schema 实例)。</summary>
         public string TemplateName { get; set; } = string.Empty;
 
+        /// <summary>本模板承载的 schema(<see cref="ChartCell.Template"/> 赋值时包一层)。</summary>
+        public ChartSchema? Schema { get; }
+
         public ChartTemplate()
         {
             TargetType = typeof(ChartCell);
+        }
+
+        internal ChartTemplate(ChartSchema schema) : this()
+        {
+            Schema = schema;
+            // 它只负责产生一个"容器":外壳 UI(Aspect 装饰)挂在 PART_Root 上
+            var factory = new FrameworkElementFactory(typeof(AdornerDecorator));
+            factory.Name = "PART_Root";
+            VisualTree = factory;
         }
     }
 
@@ -37,30 +50,6 @@ namespace Hevo.Charting.Core
         On,
         /// <summary>不缓存。</summary>
         Off,
-    }
-
-    public enum ChartLayerType
-    {
-        /// <summary>
-        /// 图表的背景色、渐变背景、或者可能存在的背景水印
-        /// </summary>
-        Background = 0,
-        /// <summary>
-        /// 折线/曲线（MainVisual）、柱状图、K线实体，以及底部的网格线（Grid Lines）
-        /// </summary>
-        Main = 10,          // 
-        /// <summary>
-        /// 选中状态、高亮
-        /// </summary>
-        Selection = 20,     // 
-        /// <summary>
-        /// 十字准星（Crosshair）、橡皮框（Rubber Band / Zoom Box）、鼠标悬停时的临时标记点。
-        /// </summary>
-        Interaction = 30,   // 
-        /// <summary>
-        /// 悬浮提示框（Tooltip/Tip）、标签、图例、或者悬浮在图表上方的操作按钮
-        /// </summary>
-        Overlay = 40        // 
     }
 
     /// <summary>
@@ -78,7 +67,7 @@ namespace Hevo.Charting.Core
     /// 注:RenderMode.Hardware 枚举值在 API 层保留以避免破坏下游枚举调用,但当前所有 Hardware
     /// Layer 都被路由到 Software 路径(Skia 已从仓库移除,详见 TODO.md)。
     /// </summary>
-    public class ChartCell : ContentControl
+    public class ChartCell : ContentControl, IChartCell, IChartCellHost
     {
         // ==========================================
         // 1. 物理结构
@@ -104,34 +93,22 @@ namespace Hevo.Charting.Core
 
         // viewport 不在 ChartCell 暴露 instance accessor:
         // ChartCell 是渲染容器,不该 self-knowledge viewport(纯 1D 量程语义,跟 cell 无关)。
-        // 访问走 attached property:`ViewportPorts.GetAttached(chart)` 或 extension `chart.GetViewport()`。
+        // 访问走 `ViewportPorts.GetAttached(chart)`。
 
         // ==========================================
-        // 2. 注册表
+        // 2. 引擎与注册表
         // ==========================================
 
-        // 软件层 (WPF Retained Mode) -> 对应 _drawingCanvas (低频 / 静态: Grid / Axis / PlotAreaDecor)
-        private readonly List<(IChartLayer Layer, ChartLayerType Type)> _visualRegistry = new();
+        // 帧管线、图层注册表 / Z 序、黑板、指针区域都在核心的引擎里;本控件只做 WPF 相关的事(IChartCellHost)
+        private readonly ChartEngine _engine;
 
-        // 软件层(交互独立 host)-> 对应 _overlayCanvas
-        // 路由规则: Level == Interaction (典型: CrosshairLayer / TooltipWidgetLayer)
-        private readonly List<(IChartLayer Layer, ChartLayerType Type)> _overlayVisualRegistry = new();
-
-        // 修复 H4-c：跨帧复用的脏图层缓冲。每帧 Clear 后填充，替代
-        // `ActiveLayers.OfType<ChartLayer>().Where(l => l.IsDirty).ToList()` 的 LINQ 迭代器 + List 分配。
-        // ExecutePipeline 仅在 UI 线程 OnCompositionTargetRendering 内调用，单线程复用安全。
-        private readonly List<ChartLayer> _dirtyLayerBuffer = new();
+        /// <inheritdoc/>
+        public ChartEngine Engine => _engine;
 
         // Widget 宿主池: Layer -> 物理控件包装器
         private readonly Dictionary<IChartLayer, LayerWidgetPool> _widgetRegistry = new();
 
-        // 跨帧持久化数据
-        private readonly VisualDataBag _sharedData = new();
-        private readonly ConditionalWeakTable<IChartLayer, VisualDataBag> _localData = new();
-
-
-        // RendererProvider — 注入 per-cell diagnostics 收集器
-        private readonly RenderDiagnostics _diagnostics = new();
+        // RendererProvider — 注入 per-cell diagnostics 收集器(收集器在引擎上)
         private readonly WpfRenderProvider _wpfProvider;
 
         // 位图后端:第一次有图层走 Bitmap 时才创建(字形 / 画刷缓存跟着 cell 走)
@@ -212,19 +189,15 @@ namespace Hevo.Charting.Core
         public static Func<IChartRenderBackend?>? DefaultRenderBackendFactory { get; set; }
 
         private static readonly Action<RenderContext> s_noopUpdate = _ => { };
-        private void OnLayerModeChanged(ChartLayer _) => RequestUpdate(s_noopUpdate);
 
         /// <summary>
         /// 获取本 cell 渲染管线的诊断快照。所有计数 UI 线程累加,无锁。
         /// 业务侧典型用法:DispatcherTimer 每秒拉一次 → 绑定到 overlay TextBlock。
         /// </summary>
-        public DiagnosticsSnapshot GetDiagnostics() => _diagnostics.Snapshot();
+        public DiagnosticsSnapshot GetDiagnostics() => _engine.GetDiagnostics();
 
-        internal VisualDataBag GetSharedData() => _sharedData;
-        internal VisualDataBag GetLocalBag(IChartLayer layer)
-        {
-            return _localData.GetValue(layer, _ => new VisualDataBag());
-        }
+        internal VisualDataBag GetSharedData() => _engine.GetSharedData();
+        internal VisualDataBag GetLocalBag(IChartLayer layer) => _engine.GetLocalBag(layer);
 
         // ==========================================
         // 静态层 BitmapCache 策略 (业务可配置)
@@ -386,19 +359,21 @@ namespace Hevo.Charting.Core
         static ChartCell()
         {
             // 强制要求 Template 必须是 ChartTemplate 类型
-            TemplateProperty.OverrideMetadata(typeof(ChartCell),
+            Control.TemplateProperty.OverrideMetadata(typeof(ChartCell),
                 new FrameworkPropertyMetadata(null, OnTemplateChanged, CoerceTemplateValue));
         }
 
         public ChartCell()
         {
+            _engine = new ChartEngine(this, this);
+
             // diagnostics 注入到 renderer provider —— per-cell 计数无侵入
-            _wpfProvider = new WpfRenderProvider(_diagnostics);
+            _wpfProvider = new WpfRenderProvider(_engine.Diagnostics);
 
             UseLayoutRounding = true;
             SnapsToDevicePixels = true;
             // 显式断开默认 Template，防止污染
-            SetCurrentValue(TemplateProperty, null);
+            SetCurrentValue(Control.TemplateProperty, null);
 
             // 全图抗锯齿(不设 EdgeMode.Aliased):横竖线 / 矩形 / 裁剪框由渲染器按设备像素对齐保持锐利,
             // 斜线 / 曲线平滑。开不开 BitmapCache 输出一样(缓存本来就按抗锯齿栅格化)。
@@ -543,7 +518,7 @@ namespace Hevo.Charting.Core
             if (Template is Abstractions.IPausable p) p.Resume();
 
             // Loaded 时注入真实 DPI:visual 已挂入 visual tree,VisualTreeHelper.GetDpi(this) 才能拿到所在屏的 DPI。
-            _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            SetPixelsPerDip(VisualTreeHelper.GetDpi(this).PixelsPerDip);
             _wpfProvider.UpdateDpi(_pixelsPerDip);
 
             // LayoutUpdated 是全局事件(任何元素布局完成都会触发),父布局变化不管发生在哪一层都能跟上
@@ -598,7 +573,7 @@ namespace Hevo.Charting.Core
             _wpfProvider.UpdateDpi(newDpi.PixelsPerDip);
 
             // 按物理像素做 LOD 的图层要跟着重录:走环境纪元,下一帧全量重投影 + 重绘
-            _pixelsPerDip = newDpi.PixelsPerDip;
+            SetPixelsPerDip(newDpi.PixelsPerDip);
             SnapCanvasOrigin();
             RequestUpdate(_ => (Template as IFeatureProjector)?.InvalidateEnvironment());
         }
@@ -628,270 +603,98 @@ namespace Hevo.Charting.Core
             });
         }
 
-        /// <summary>
-        /// 核心渲染管线(每帧 VSync 由 OnCompositionTargetRendering 调一次)。
-        /// 三阶段:① schema.ProjectAll → 让所有 Feature 重算 trait;② 标脏 + 制作 snapshot 喂给 Layer.Update;
-        /// ③ 视任务量同步 / 并行执行。Parallel 阈值 ≥3 是经验值,任务太少时多线程 dispatch 反而亏。
-        /// </summary>
         private double _pixelsPerDip = 1.0;
+
+        // DPI 变了:同步给引擎(图层录制前写进 ChartLayer.PixelsPerDip)
+        private void SetPixelsPerDip(double value)
+        {
+            _pixelsPerDip = value;
+            _engine.PixelsPerDip = value;
+        }
 
         /// <summary>所在屏的 DPI 缩放(物理像素 / DIP)。Loaded / DpiChanged 时更新,未挂入可视树前为 1。</summary>
         internal double PixelsPerDip => _pixelsPerDip;
 
-#if DEBUG
-        private HashSet<IChartLayer>? _denseViewportWarned;
-
-        /// <summary>
-        /// 视口过密诊断:ViewportManagerFeature 开了 MinBarSpacingPx 时把可见根数卡在绘图区物理宽度以内,
-        /// 但外部直接发 XAxisTrait / 直接写 ActiveRange / AxisFeature 读别的端口都能绕开它。
-        /// 这里只告警(每个图层一次)不改范围:改了图层看到的范围就跟坐标轴、十字线对不上。
-        /// X 不是按根索引的图层(散点图等)可能误报。
-        /// </summary>
-        private void WarnTooDenseViewport(List<RenderTask> tasks)
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                var data = tasks[i].DataSnapshot;
-                var limits = data.Get<Features.ViewportSpanLimitsTrait>();
-                if (limits == null || double.IsInfinity(limits.MaxSpanByPixels)) continue;
-                var xAxis = data.Get<XAxisTrait>();
-                // 容差 1 根:ISnappableScale 取整、浮点误差
-                if (xAxis == null || !xAxis.Viewport.IsValid || xAxis.Viewport.Span <= limits.MaxSpanByPixels + 1) continue;
-
-                var layer = tasks[i].Layer;
-                if (!(_denseViewportWarned ??= new HashSet<IChartLayer>()).Add(layer)) continue;
-                System.Diagnostics.Debug.WriteLine(
-                    $"[Charting] 图层 {layer.Name}({layer.GetType().Name})收到的 X 视口跨度 {xAxis.Viewport.Span:F0} 超过像素上限 {limits.MaxSpanByPixels:F0}" +
-                    "(ViewportManagerFeature.MinBarSpacingPx):视口绕开了 ViewportManagerFeature,密集时会出白缝、拖慢录制。");
-            }
-        }
-#endif
-
-        private static bool RequiresUiThread(IChartLayer layer) => layer is ChartLayer { RequiresUiThread: true };
-
-        internal void ExecutePipeline(RenderContext ctx, PlotMode mode)
-        {
-            if (Template is IFeatureProjector projector)
-            {
-                projector.ProjectAll(ctx);
-            }
-            // 1. 提交与标脏
-            ctx.SubmitSync(ActiveLayers);
-            // 指针区域跟图层 Trait 同一帧提交:命中用的位置 = 这一帧画出来的位置
-            PointerRegions.Commit();
-
-            // 修复 H4-c：手写 for 循环 + 跨帧复用 _dirtyLayerBuffer，消除每帧 LINQ 迭代器 + List 分配。
-            var active = ActiveLayers;
-            _dirtyLayerBuffer.Clear();
-            for (int i = 0; i < active.Count; i++)
-            {
-                if (active[i] is ChartLayer cl && cl.IsDirty) _dirtyLayerBuffer.Add(cl);
-            }
-            if (_dirtyLayerBuffer.Count == 0) return;
-            for (int i = 0; i < _dirtyLayerBuffer.Count; i++) _dirtyLayerBuffer[i].PixelsPerDip = _pixelsPerDip;
-
-            // 2. 制作快照
-            using var frame = ctx.PrepareTasks(_dirtyLayerBuffer);
-#if DEBUG
-            WarnTooDenseViewport(frame.Tasks);
-#endif
-
-            // 3. 执行更新 (智能降级)
-            if (mode == PlotMode.Parallel && frame.Tasks.Count >= 3)
-            {
-                // 线程亲和的图层(OnUpdate 直接改 WPF 控件,如 TooltipWidgetLayer)不能进线程池,留在 UI 线程录制。
-                Parallel.ForEach(frame.Tasks, t => { if (!RequiresUiThread(t.Layer)) t.Layer.Update(t.DataSnapshot); });
-                foreach (var t in frame.Tasks) if (RequiresUiThread(t.Layer)) t.Layer.Update(t.DataSnapshot);
-            }
-            else
-            {
-                foreach (var t in frame.Tasks) t.Layer.Update(t.DataSnapshot);
-            }
-        }
+        // 帧管线在引擎里;下面是测试 / 基准 / 诊断沿用的入口
+        internal void ExecutePipeline(RenderContext ctx, PlotMode mode) => _engine.ExecutePipeline(ctx, mode);
 
         /// <summary>
         /// 申请一个事务,把 updateAction 排入下一帧的 pending 队列;
         /// 队列首次非空时才挂 CompositionTarget.Rendering(动态 VSync),帧尾立即拔除以保证静置 0 GPU 占用。
         /// </summary>
         /// <param name="updateAction">在下一帧 OnCompositionTargetRendering 内执行的事务体(写黑板 / 触发 invalidate 等)。</param>
-        private bool _isUpdateRequested = false;
+        public void RequestUpdate(Action<RenderContext> updateAction) => _engine.RequestUpdate(updateAction);
 
-        // 双缓冲队列:RequestUpdate 写 _pendingUpdates,渲染帧 swap 出 _processingBuffer 后离锁迭代。
-        // 替代原先 `Action<RenderContext> _pendingUpdateChain += action` 的 Delegate.Combine 模式 ——
-        // 那种写法每次 += 都 new MulticastDelegate + 拷贝内部 _invocationList 数组,
-        // mouse move / WebSocket 高频灌入时是 O(N²) 拷贝 + N 个递增大小的 MulticastDelegate 堆分配。
-        // 改成 List 后单次 Add 是 O(1) 摊销,跨帧复用 backing array,稳态零分配。
-        private List<Action<RenderContext>> _pendingUpdates = new(8);
-        private List<Action<RenderContext>> _processingBuffer = new(8);
-
-        // 💥 增加一把专用的调度锁
-        private readonly object _updateLock = new object();
-
-        public void RequestUpdate(Action<RenderContext> updateAction)
+        // 引擎第一笔待办入队时调(持引擎调度锁,任意线程)
+        void IChartCellHost.ArmFrame()
         {
-            // 💥 无论是后台 WebSocket 线程，还是前台鼠标线程，进来都要排队！
-            lock (_updateLock)
+            // 💥 按需挂载机制 (Dynamic VSync Hook)
+            // 只有真有任务了，才去唤醒 WPF 的 VSync 渲染泵。
+            // UI 线程同步订阅,绕过 Dispatcher.InvokeAsync 的一帧延迟(crosshair tracking 关键路径)；
+            // 后台线程仍走 InvokeAsync 跨线程投递。
+            if (Dispatcher.CheckAccess())
             {
-                _pendingUpdates.Add(updateAction);
-
-                if (!_isUpdateRequested)
-                {
-                    _isUpdateRequested = true;
-
-                    // 💥 按需挂载机制 (Dynamic VSync Hook)
-                    // 只有真有任务了，才去唤醒 WPF 的 VSync 渲染泵。
-                    // UI 线程同步订阅,绕过 Dispatcher.InvokeAsync 的一帧延迟(crosshair tracking 关键路径)；
-                    // 后台线程仍走 InvokeAsync 跨线程投递。
-                    if (Dispatcher.CheckAccess())
-                    {
-                        CompositionTarget.Rendering -= OnCompositionTargetRendering;
-                        CompositionTarget.Rendering += OnCompositionTargetRendering;
-                    }
-                    else
-                    {
-                        Dispatcher.InvokeAsync(() =>
-                        {
-                            CompositionTarget.Rendering -= OnCompositionTargetRendering;
-                            CompositionTarget.Rendering += OnCompositionTargetRendering;
-                        }, System.Windows.Threading.DispatcherPriority.Render);
-                    }
-                }
+                CompositionTarget.Rendering -= OnCompositionTargetRendering;
+                CompositionTarget.Rendering += OnCompositionTargetRendering;
             }
-        }
-
-        private void OnCompositionTargetRendering(object? sender, EventArgs e)
-        {
-            // 出了锁之后，在安全的 UI 线程里慢慢执行管线
-            if (SwapPendingUpdates()) RunSwappedFrame(PlotMode.Sync);
-        }
-
-        private bool SwapPendingUpdates()
-        {
-            // 💥 以极快的速度交换缓冲，然后立刻释放锁，绝不阻塞！
-            // swap 后 _pendingUpdates 立即可承接新写入(比如本帧 ExecutePipeline 内回流的 RequestUpdate),
-            // 本帧迭代用的是旧 _processingBuffer,锁外读不会被并发追加。
-            bool hasWork = false;
-            lock (_updateLock)
+            else
             {
-                if (_isUpdateRequested)
+                Dispatcher.InvokeAsync(() =>
                 {
-                    if (_pendingUpdates.Count > 0)
-                    {
-                        (_pendingUpdates, _processingBuffer) = (_processingBuffer, _pendingUpdates);
-                        hasWork = true;
-                    }
-                    _isUpdateRequested = false;
-
-                    // 💥 画完即休眠：立刻从 WPF 的 VSync 泵上拔除当前图表！
-                    // 这行代码是消灭 10% GPU 静置占用的核心魔法。管线处理完当前帧后，直接让 GPU 进入绝对静默状态。
                     CompositionTarget.Rendering -= OnCompositionTargetRendering;
-                }
+                    CompositionTarget.Rendering += OnCompositionTargetRendering;
+                }, System.Windows.Threading.DispatcherPriority.Render);
             }
-            return hasWork;
         }
 
-        // 一帧的完整工作:排队事务 → 管线 → 上屏。_processingBuffer 由 SwapPendingUpdates 换出。
-        private void RunSwappedFrame(PlotMode mode)
-        {
-            // 整帧(ProjectAll → 图层录制 → 上屏)登记为列读者:trait 里的列在锁外读,
-            // 摄入器在本帧结束前不会改写它可能拿到的缓冲(见 LowCode.ColumnReadScope)
-            using var readers = LowCode.ColumnReadScope.Begin();
-            using var ctx = new RenderContext(_sharedData, _localData);
+        // 待办换出后调(持调度锁,UI 线程):画完即休眠,从 WPF 的 VSync 泵上拔除
+        void IChartCellHost.DisarmFrame() => CompositionTarget.Rendering -= OnCompositionTargetRendering;
 
-            // 直接 for 索引迭代,跳过 List<T>.Enumerator 的 IDisposable 调用链。
-            var actions = _processingBuffer;
-            for (int i = 0; i < actions.Count; i++) actions[i](ctx);
-            actions.Clear(); // 释放对 captured closures 的引用,避免跨帧拖死 ctx 相关对象
-
-            ExecutePipeline(ctx, mode);
-            LastFrameDirtyLayers = _dirtyLayerBuffer.Count;
-            Invalidate();
-            DevTools.IncrementalRenderProbe.FrameRendered?.Invoke(this);
-        }
+        private void OnCompositionTargetRendering(object? sender, EventArgs e) => _engine.OnFrame();
 
         /// <summary>
         /// 测量工具用(Charting.Benchmarks --render-probe):不等 VSync,立刻同步跑一帧,
         /// 跟 CompositionTarget 回调里那一帧是同一段代码(含 RequestUpdate 排队的事务,如 SizeChanged)。
         /// 返回本帧重录的图层数。
         /// </summary>
-        internal int RunFrameNow(PlotMode mode)
-        {
-            SwapPendingUpdates();
-            RunSwappedFrame(mode);
-            return LastFrameDirtyLayers;
-        }
+        internal int RunFrameNow(PlotMode mode) => _engine.RunFrameNow(mode);
 
         /// <summary>有排队没跑的帧。指针路由器按下时据此决定要不要先同步跑一帧(让命中用的区域是最新的)。</summary>
-        internal bool HasPendingFrame { get { lock (_updateLock) return _isUpdateRequested; } }
+        internal bool HasPendingFrame => _engine.HasPendingFrame;
 
         /// <summary>本 cell 上各 Feature 发布的指针区域(纯数据,路由器在输入时读)。</summary>
-        internal Interaction.PointerRegionStore PointerRegions { get; } = new();
+        internal Interaction.PointerRegionStore PointerRegions => _engine.PointerRegions;
 
         /// <summary>微基准用:丢掉排队的事务(只测 ProjectAll 时,黑板写入排进来的空回调不跑帧也不能越积越多)。</summary>
-        internal void DiscardPendingUpdates()
-        {
-            if (SwapPendingUpdates()) _processingBuffer.Clear();
-        }
+        internal void DiscardPendingUpdates() => _engine.DiscardPendingUpdates();
 
         /// <summary>最近一帧 ExecutePipeline 判脏后重录的图层数(诊断用)。</summary>
-        internal int LastFrameDirtyLayers { get; private set; }
+        internal int LastFrameDirtyLayers => _engine.LastFrameDirtyLayers;
 
-        /// <summary>
-        /// 把后台录制好的图层指令真正"画"到屏幕上。
-        /// 三阶段:① SwapBuffer 把所有脏图层 back→front 同步到同一帧;
-        /// ② RenderWpfLayers / RenderWidgetLayers 分别派发矢量与控件指令;
-        /// ③ PostRender 清脏标记 + Diagnostics 收口。
-        /// </summary>
-        internal void Invalidate()
+        /// <summary>把后台录制好的图层指令真正"画"到屏幕上(见 <see cref="ChartEngine"/>)。</summary>
+        internal void Invalidate() => _engine.Invalidate();
+
+        // 引擎上屏:图层已 SwapBuffer、尚未清脏标记
+        void IChartCellHost.Present(IReadOnlyList<ChartLayer> staticLayers, IReadOnlyList<ChartLayer> overlayLayers)
         {
-            // diagnostics:帧首清零累加器(per-layer Render 调用会向其内累加)
-            _diagnostics.BeginFrame();
-
-            // ==========================================
-            // 阶段 1：统一同步点 (Sync Point)
-            // ==========================================
-            // 将所有后台录制好的 BackBuffer 一次性全部推到前台 FrontBuffer。
-            // 确保在这一刻之后，WPF、Skia、Widget 读到的全都是同一帧的最新数据！
-            // 走 IReadOnlyList<T> 索引 + is ChartLayer，避免 OfType<T> 的 LINQ 迭代器与 IEnumerator 装箱。
-            var swapList = ActiveLayers;
-            for (int i = 0; i < swapList.Count; i++)
-            {
-                if (swapList[i] is ChartLayer cl && cl.IsDirty) cl.SwapBuffer();
-            }
-
-            // ==========================================
-            // 阶段 2：派发渲染指令
-            // ==========================================
-
             // 管线 A: 矢量层 (保留模式，仅给脏图层发新指令)。挂了后端就交给后端,否则走 WPF DrawingVisual
-            if (_renderBackend != null) _renderBackend.Present(_staticLayers, _overlayLayers);
-            else RenderWpfLayers();
+            if (_renderBackend != null) _renderBackend.Present(staticLayers, overlayLayers);
+            else RenderWpfLayers(staticLayers, overlayLayers);
 
             // 管线 B: WPF 控件层 (仅给脏图层同步新的控件池摆放)
             RenderWidgetLayers();
-
-            // ==========================================
-            // 阶段 3：统一清理脏标记
-            // ==========================================
-            var postList = ActiveLayers;
-            for (int i = 0; i < postList.Count; i++)
-            {
-                if (postList[i] is ChartLayer cl) cl.PostRender(); // IsDirty = false
-            }
-
-            // diagnostics:帧尾收口,FrameCount++ + 拍 LastFrame 快照
-            _diagnostics.EndFrame();
         }
+
         /// <summary>
         /// --- 管线 A: WPF Drawing ---
         /// 同时刷 _drawingCanvas (静态层) 和 _overlayCanvas (交互层) 各自的 Visual。
         /// 两个 UIElement 各管自己的 dirty rect,WPF compositor 间不会牵连。
         /// </summary>
-        private void RenderWpfLayers()
+        private void RenderWpfLayers(IReadOnlyList<ChartLayer> staticLayers, IReadOnlyList<ChartLayer> overlayLayers)
         {
             SnapCanvasOrigin();
-            RenderVisualLayers(_visualRegistry, _drawingCanvas);
-            RenderVisualLayers(_overlayVisualRegistry, _overlayCanvas);
+            RenderVisualLayers(staticLayers, _drawingCanvas);
+            RenderVisualLayers(overlayLayers, _overlayCanvas);
             _replayAllWpfLayers = false;
         }
 
@@ -901,39 +704,36 @@ namespace Hevo.Charting.Core
         // 每个图层按自己的绘制策略上屏:Software → WpfRenderProvider 回放进 DrawingContext;
         // Bitmap → RasterRenderProvider 光栅化进图层自己的 WriteableBitmap。
         // 不脏的图层只在"想要的策略 ≠ 当前挂着的"时才重放前台指令(策略刚切换的那一帧)。
-        private void RenderVisualLayers(List<(IChartLayer Layer, ChartLayerType Type)> registry, ChartDrawingCanvas host)
+        private void RenderVisualLayers(IReadOnlyList<ChartLayer> layers, ChartDrawingCanvas host)
         {
-            for (int i = 0; i < registry.Count; i++)
+            for (int i = 0; i < layers.Count; i++)
             {
-                if (registry[i].Layer is not ChartLayer cl) continue;
+                var cl = layers[i];
+                if (cl.HostVisual is not LayerVisual visual) continue;
                 bool wantBitmap = (RenderModeOverride ?? cl.Mode) == RenderMode.Bitmap;
-                bool isBitmap = cl.BitmapSurface is { IsMounted: true };
+                bool isBitmap = visual.BitmapSurface is { IsMounted: true };
                 if (!cl.IsDirty && wantBitmap == isBitmap && !_replayAllWpfLayers) continue;
                 if (cl.Buffer is not LayerBuffer buffer) continue;
 
-                if (wantBitmap && TryRenderBitmap(cl, buffer, host)) continue;
+                if (wantBitmap && TryRenderBitmap(visual, buffer, host)) continue;
 
                 // 矢量路径;从位图切回(或位图这一帧画不了)时释放位图
-                if (cl.BitmapSurface != null)
-                {
-                    cl.BitmapSurface.Dispose();
-                    cl.BitmapSurface = null;
-                }
-                using var dc = cl.RenderOpen();
+                visual.ReleaseBitmap();
+                using var dc = visual.RenderOpen();
                 buffer.Execute(_wpfProvider, dc);
             }
         }
 
-        private bool TryRenderBitmap(ChartLayer cl, LayerBuffer buffer, FrameworkElement host)
+        private bool TryRenderBitmap(LayerVisual visual, LayerBuffer buffer, FrameworkElement host)
         {
             double w = host.ActualWidth, h = host.ActualHeight;
             if (w <= 0 || h <= 0) return false;                                  // 还没布局:先走矢量
             if (!RasterDrawingRenderer.CanRasterize(buffer.Drawing)) return false; // DrawVideo 只能交给 WPF
 
-            _rasterProvider ??= new RasterRenderProvider(_diagnostics);
-            var surface = cl.BitmapSurface ??= new BitmapLayerSurface();
+            _rasterProvider ??= new RasterRenderProvider(_engine.Diagnostics);
+            var surface = visual.BitmapSurface ??= new BitmapLayerSurface();
             surface.Render(buffer, _rasterProvider, w, h, _pixelsPerDip);
-            using var dc = cl.RenderOpen();
+            using var dc = visual.RenderOpen();
             surface.Mount(dc, ReferenceEquals(host, _overlayCanvas) ? _overlayBitmapSnap : Transform.Identity); // 固定五条 RenderData(裁剪 / 平移 / 位图 / 出栈 ×2),跟图层指令数无关
             return true;
         }
@@ -1004,22 +804,8 @@ namespace Hevo.Charting.Core
             var rootDecorator = GetTemplateChild("PART_Root") as AdornerDecorator;
             if (rootDecorator != null && Template is ChartSchema schema)
             {
-                var lifeTimeSession = new ChartSession();
-
-                // ⚠ 顺序关键:必须 BindTo(设置 ActiveSession) 早于 ComposeAll。
-                // ComposeAll 内部 BoundWorkflow.Subscribe 会查 GetActiveSession 决定订阅托管对象;
-                // 如果先 ComposeAll 再 BindTo,ComposeAll 期间产生的订阅会被托管给"上一次"OnApplyTemplate
-                // 留下的旧 session — 接着 BindTo 触发 ActiveSessionProperty 的 PropertyChanged callback
-                // 把旧 session Dispose,刚托管给它的新订阅瞬间被一起 dispose,boardStream.DoOnDispose 触发
-                // pipe.Dispose → board.Dispose,新 schema 一启动 board 就死了。详见调试记录:
-                // Template 替换场景下 _latestBoard != null 但 IsDisposed=true 即此 bug 链。
-                ChartLifecycle.BindTo(this, lifeTimeSession);
-                using var ctx = new RenderContext(_sharedData, _localData, lifeTimeSession);
-
-                schema.ComposeAll(this, ctx);
-                ApplyDecoration(rootDecorator, schema);
-
-                ctx.SubmitSync(ActiveLayers);
+                // 新 session → ComposeAll → 包外壳 → 首次提交(顺序约束见 ChartEngine.Compose)
+                _engine.Compose(schema, s => ApplyDecoration(rootDecorator, s));
             }
         }
 
@@ -1032,13 +818,17 @@ namespace Hevo.Charting.Core
             if (_decorationSeed != null) _decorationSeed.Content = null;
             rootDecorator.Child = null;
             _decorationSeed = new ContentPresenter { Content = base.Content };
-            rootDecorator.Child = schema.Aspect.Decorate(_decorationSeed);
+            // 沿 Aspect 链从内到外包:实现 IWpfDecorator 的切面各包一层
+            rootDecorator.Child = (UIElement)schema.Aspect.DecorateHost(_decorationSeed,
+                (aspect, inner) => aspect is IWpfDecorator d ? d.Decorate((UIElement)inner) : inner);
         }
 
         /// <summary>
         /// Aspect 链变了(Transact 增删了带外壳 UI 的 Feature)后重建外壳。模板还没应用时什么也不做 ——
         /// 之后 OnApplyTemplate 会按当时的 Aspect 链装饰。
         /// </summary>
+        void IChartCellHost.RefreshDecoration() => RefreshDecoration();
+
         internal void RefreshDecoration()
         {
             if (Template is ChartSchema schema && GetTemplateChild("PART_Root") is AdornerDecorator rootDecorator)
@@ -1052,14 +842,8 @@ namespace Hevo.Charting.Core
         /// </summary>
         public void Shutdown()
         {
-            // 拖动中的手势先以 ChartUnloaded 取消(此时各 Feature 的 Watch 还活着,能回滚)
-            PointerRegions.NotifyUnloading();
-            if (Template is ChartSchema schema && GetValue(ChartLifecycle.ActiveSessionProperty) != null)
-            {
-                using var ctx = CreateContext();
-                schema.DecomposeAll(this, ctx);
-            }
-            ClearValue(ChartLifecycle.ActiveSessionProperty);
+            // 手势取消 → DecomposeAll → 烧掉 session(见 ChartEngine.Shutdown)
+            _engine.Shutdown();
 
             // 后端归 cell 所有:Detach + Dispose,矢量画布恢复可见(cell 若被复用就回到 WPF 路径)
             if (_renderBackend != null)
@@ -1072,17 +856,11 @@ namespace Hevo.Charting.Core
         }
 
         // =================================================================
-        // 4. 层级管理逻辑
+        // 4. 层级管理逻辑(注册表与 Z 序在引擎里,这里是 WPF 上屏对象的增删)
         // =================================================================
 
         /// <summary>检查是否存在指定名称的图层(按 Layer.Name 字符串匹配)。</summary>
-        public bool HasLayer(string name)
-        {
-            if (string.IsNullOrEmpty(name)) return false;
-
-            // 使用 LINQ 遍历查找
-            return ActiveLayers.Any(layer => layer.Name == name);
-        }
+        public bool HasLayer(string name) => _engine.HasLayer(name);
 
         /// <summary>
         /// ⚠️ 添加非托管图层 (高危操作！)
@@ -1096,98 +874,84 @@ namespace Hevo.Charting.Core
         /// </para>
         /// </summary>
         public VisualProxy<TLayer> AddUnmanagedLayer<TLayer>(TLayer layer) where TLayer : IChartLayer
-        {
-            var localBag = AttachLayerVisual(layer);
-            return new VisualProxy<TLayer>(layer, localBag, new LayerFeed(this, layer, localBag));
-        }
+            => _engine.AddUnmanagedLayer(layer);
 
-        /// <summary>
-        /// Feature.AttachLayer 用:返回的代理直写本层 live 袋、不唤醒图层。Feature 在 OnCompose 里经它发静态样式,
-        /// 图层要等 OnProject 里 ctx.For(layer) 发的数据到了才第一次录 —— [RequiredTrait] 图层不会在数据到齐前被叫起。
-        /// </summary>
+        /// <summary>Feature.AttachLayer 用(见 <see cref="ChartEngine.AttachFeatureLayer{TLayer}"/>)。</summary>
         internal VisualProxy<TLayer> AttachFeatureLayer<TLayer>(TLayer layer) where TLayer : IChartLayer
-        {
-            var localBag = AttachLayerVisual(layer);
-            return new VisualProxy<TLayer>(layer, localBag, localBag);
-        }
+            => _engine.AttachFeatureLayer(layer);
 
-        private VisualDataBag AttachLayerVisual(IChartLayer layer)
-        {
-            // 路由策略:
-            //   Level == Interaction       → _overlayVisualRegistry (_overlayCanvas,跟静态层 dirty 隔离)
-            //   其它 Level                  → _visualRegistry (_drawingCanvas,静态层)
-            //   注:RenderMode.Hardware 当前等同于 Software,统一走 WPF 路径(详见 TODO.md "Skia 移除")
-            if (layer is ChartLayer v && v.Level == ChartLayerType.Interaction)
-            {
-                int insertIndex = 0;
-                for (; insertIndex < _overlayVisualRegistry.Count; insertIndex++)
-                {
-                    if (_overlayVisualRegistry[insertIndex].Type > v.Level) break;
-                }
-                _overlayCanvas.InsertVisual(insertIndex, v);
-                _overlayVisualRegistry.Insert(insertIndex, (v, v.Level));
-                v.ModeChanged = OnLayerModeChanged;
-            }
-            else if (layer is ChartLayer staticLayer)
-            {
-                int insertIndex = 0;
-                for (; insertIndex < _visualRegistry.Count; insertIndex++)
-                {
-                    if (_visualRegistry[insertIndex].Type > staticLayer.Level) break;
-                }
-                _drawingCanvas.InsertVisual(insertIndex, staticLayer);
-                _visualRegistry.Insert(insertIndex, (staticLayer, staticLayer.Level));
-                staticLayer.ModeChanged = OnLayerModeChanged;
-            }
-            UpdateActiveLayersCache();
-
-            return _localData.GetValue(layer, _ => new VisualDataBag());
-        }
-
-        // 跨帧缓存:Add/RemoveUnmanagedLayer 内部维护,避免 ActiveLayers 每次访问都拼一个 List。
-        // volatile 保证后台线程偶发读到的是已发布的最新引用(写永远在 UI 线程)。
-        private volatile IReadOnlyList<IChartLayer> _activeLayersCache = Array.Empty<IChartLayer>();
-
-        /// <summary>当前所有活跃图层的只读列表(_visualRegistry + _overlayVisualRegistry 拼接结果)。读取无锁,内部走 volatile 缓存。</summary>
-        public IReadOnlyList<IChartLayer> ActiveLayers => _activeLayersCache;
-
-        // 当你 AddLayer 或 RemoveLayer 时，同步更新这个缓存：
-        // 修复 H4-d：手写 for 循环替代 Select / AsReadOnly。
-        // List<T> 已实现 IReadOnlyList<T>，AsReadOnly 的 ReadOnlyCollection 包装在此处无额外价值。
-        private void UpdateActiveLayersCache()
-        {
-            var newList = new List<IChartLayer>(_visualRegistry.Count + _overlayVisualRegistry.Count);
-            for (int i = 0; i < _visualRegistry.Count; i++) newList.Add(_visualRegistry[i].Layer);
-            for (int i = 0; i < _overlayVisualRegistry.Count; i++) newList.Add(_overlayVisualRegistry[i].Layer);
-
-            // 原子操作：volatile 字段赋值，读侧按 IReadOnlyList<IChartLayer> 访问
-            _activeLayersCache = newList;
-
-            // 后端按 Z 序取两组图层(只在 UI 线程读写)
-            _staticLayers = FilterChartLayers(_visualRegistry);
-            _overlayLayers = FilterChartLayers(_overlayVisualRegistry);
-        }
-        private IReadOnlyList<ChartLayer> _staticLayers = Array.Empty<ChartLayer>();
-        private IReadOnlyList<ChartLayer> _overlayLayers = Array.Empty<ChartLayer>();
-
-        private static List<ChartLayer> FilterChartLayers(List<(IChartLayer Layer, ChartLayerType Type)> registry)
-        {
-            var list = new List<ChartLayer>(registry.Count);
-            for (int i = 0; i < registry.Count; i++)
-                if (registry[i].Layer is ChartLayer cl) list.Add(cl);
-            return list;
-        }
+        /// <summary>当前所有活跃图层的只读列表(静态层 + 交互层拼接结果)。读取无锁,内部走 volatile 缓存。</summary>
+        public IReadOnlyList<IChartLayer> ActiveLayers => _engine.ActiveLayers;
 
         /// <summary>按 Name 查图层(找不到返回 null)。配合 <see cref="HasLayer"/> 使用。</summary>
-        public IChartLayer? GetLayer(string name)
-        {
-            return ActiveLayers.FirstOrDefault(l => l.Name == name);
-        }
+        public IChartLayer? GetLayer(string name) => _engine.GetLayer(name);
 
         /// <summary>构造一个无 session 的渲染上下文。仅用于 Shutdown / OnTemplateChanged 等"无主"清理路径。</summary>
-        internal RenderContext CreateContext()
+        internal RenderContext CreateContext() => _engine.CreateContext();
+
+        /// <summary>
+        /// 安全移除图层，并彻底清理其关联的物理资源、控件池与状态
+        /// </summary>
+        public void RemoveUnmanagedLayer(IChartLayer layer) => _engine.RemoveUnmanagedLayer(layer);
+
+        // 图层的 WPF 上屏对象:每层一个 DrawingVisual(位图模式下再挂一块位图),按引擎给的 Z 序插进画布。
+        // 交互层(Level == Interaction)进 _overlayCanvas,跟静态层 dirty 隔离;其它进 _drawingCanvas。
+        void IChartCellHost.InsertLayerVisual(ChartLayer layer, bool overlay, int index)
         {
-            return new RenderContext(_sharedData, _localData);
+            var visual = layer.HostVisual as LayerVisual ?? new LayerVisual();
+            layer.HostVisual = visual;
+            (overlay ? _overlayCanvas : _drawingCanvas).InsertVisual(index, visual);
+        }
+
+        void IChartCellHost.RemoveLayerVisual(ChartLayer layer, bool overlay)
+        {
+            if (layer.HostVisual is LayerVisual visual) (overlay ? _overlayCanvas : _drawingCanvas).RemoveVisual(visual);
+        }
+
+        void IChartCellHost.DestroyLayerWidgets(IChartLayer layer)
+        {
+            if (_widgetRegistry.TryGetValue(layer, out var widgetPool))
+            {
+                // 1. 从字典中注销
+                _widgetRegistry.Remove(layer);
+
+                // 2. 【核心魔法】：销毁整个池子！
+                // 这会将该图层在 InteractionCanvas 上创建的 N 个 ContentPresenter 全部 Remove 掉。
+                // 彻底消灭屏幕上的“幽灵残影”和 WPF 强引用。
+                widgetPool.Destroy();
+            }
+        }
+
+        void IChartCellHost.OnLayerRemoved(ChartLayer layer) => _renderBackend?.OnLayerRemoved(layer);
+
+        IDisposable IChartCellHost.CreatePointerInput(Interaction.PointerRouter router, Interaction.PointerRegionStore store,
+            Func<DataBlackboard?> board, Func<HevoRect> plotArea, Func<double> dragThreshold)
+            => new Interaction.WpfPointerAdapter(this, router, store, board, plotArea, dragThreshold);
+
+        // UI 防御:宿主进程即将关闭(或测试里没有 Application)时不再渲染
+        ChartHostServices IChartCellHost.Services => WpfHostRegistration.Services;
+
+        bool IChartCellHost.IsShuttingDown => Application.Current == null || Dispatcher.HasShutdownStarted;
+
+        void IChartCellHost.Post(Action action, HostPostPriority priority)
+            => Dispatcher.BeginInvoke(action, priority == HostPostPriority.Background
+                ? System.Windows.Threading.DispatcherPriority.Background
+                : System.Windows.Threading.DispatcherPriority.DataBind);
+
+        void IChartCellHost.WhenLoaded(Action action)
+        {
+            if (IsLoaded)
+            {
+                action();
+                return;
+            }
+            RoutedEventHandler? handler = null;
+            handler = (_, _) =>
+            {
+                Loaded -= handler;
+                action();
+            };
+            Loaded += handler;
         }
 
         private void EnsureInteractionCanvasInitialized()
@@ -1202,83 +966,6 @@ namespace Hevo.Charting.Core
             }
         }
 
-        /// <summary>
-        /// 安全移除图层，并彻底清理其关联的物理资源、控件池与状态
-        /// </summary>
-        public void RemoveUnmanagedLayer(IChartLayer layer)
-        {
-            if (layer == null) return;
-
-            bool isRemoved = false;
-
-            // ==========================================
-            // 第一步：从底层渲染管线中连根拔起
-            //   路由策略跟 AddUnmanagedLayer 对称: Hardware / Software-Interaction / Software-其它
-            // ==========================================
-            if (layer is ChartLayer v && v.Level == ChartLayerType.Interaction)
-            {
-                // 手写 for 循环避免 LINQ FirstOrDefault 捕获 layer 产生的闭包分配。
-                for (int i = 0; i < _overlayVisualRegistry.Count; i++)
-                {
-                    if (ReferenceEquals(_overlayVisualRegistry[i].Layer, layer))
-                    {
-                        _overlayVisualRegistry.RemoveAt(i);
-                        _overlayCanvas.RemoveVisual(v);
-                        isRemoved = true;
-                        break;
-                    }
-                }
-            }
-            else if (layer is ChartLayer staticLayer)
-            {
-                for (int i = 0; i < _visualRegistry.Count; i++)
-                {
-                    if (ReferenceEquals(_visualRegistry[i].Layer, layer))
-                    {
-                        _visualRegistry.RemoveAt(i);
-                        _drawingCanvas.RemoveVisual(staticLayer);
-                        isRemoved = true;
-                        break;
-                    }
-                }
-            }
-
-            // ==========================================
-            // 第二步：从顶层交互管线中销毁控件池
-            // ==========================================
-            if (_widgetRegistry.TryGetValue(layer, out var widgetPool))
-            {
-                // 1. 从字典中注销
-                _widgetRegistry.Remove(layer);
-
-                // 2. 【核心魔法】：销毁整个池子！
-                // 这会将该图层在 InteractionCanvas 上创建的 N 个 ContentPresenter 全部 Remove 掉。
-                // 彻底消灭屏幕上的“幽灵残影”和 WPF 强引用。
-                widgetPool.Destroy();
-            }
-
-            // ==========================================
-            // 第三步：物理资源释放与重绘
-            // ==========================================
-            // 先刷新图层缓存:下面那次 Invalidate(以及后端 Present)看到的就已经是移除后的图层列表
-            UpdateActiveLayersCache();
-
-            if (isRemoved)
-            {
-                if (layer is ChartLayer removedLayer) _renderBackend?.OnLayerRemoved(removedLayer);
-
-                // 调用 Dispose 释放该图层可能持有的 Skia 画笔、路径等非托管资源
-                layer.Dispose();
-
-                // 【幕后魔法说明】
-                // 到此为止，layer 已经失去了所有的强引用。
-                // 等待 GC 扫描时，ChartCell 里的 ConditionalWeakTable 会自动发现 layer 死了，
-                // 然后静悄悄地把属于它的 VisualDataBag (状态快照) 给清理掉。0 泄漏！
-
-                // 强制触发一次空重绘，把移除图层后的最新画面刷到屏幕上
-                Invalidate();
-            }
-        }
         // =================================================================
         // 5. 辅助与校验
         // =================================================================
@@ -1309,14 +996,27 @@ namespace Hevo.Charting.Core
                 $"[ChartCell.OnTemplateChanged] cell=#{cellHash} old=#{oldHash} new=#{newHash}");
 #endif
 
-            if (d is ChartCell cell && e.OldValue is ChartSchema oldSchema)
+            if (d is not ChartCell cell) return;
+            if (e.OldValue is ChartTemplate { Schema: { } oldSchema })
             {
-                // 创建一个临时的上下文，给旧图纸最后一次机会清理自己
-                using var ctx = cell.CreateContext();
-
-                // 扣动扳机：触发旧 Schema (如 ReactiveSchema) 的 DecomposeAll，
+                // 给旧图纸最后一次机会清理自己:触发旧 Schema (如 ReactiveSchema) 的 DecomposeAll，
                 // 进而触发所有 Feature 的连根拔起和图层卸载！
-                oldSchema.DecomposeAll(cell, ctx);
+                cell._engine.DecomposeReplaced(oldSchema);
+            }
+            cell._engine.Schema = (e.NewValue as ChartTemplate)?.Schema;
+        }
+
+        /// <summary>
+        /// 挂上的 schema。赋值时包一层 <see cref="ChartTemplate"/> 交给 WPF 的 <see cref="Control.Template"/>,
+        /// 由 WPF 在布局时触发 <see cref="OnApplyTemplate"/> 装配;换掉时旧 schema 先卸载。同一个 schema 重复赋值什么也不做。
+        /// </summary>
+        public new ChartSchema? Template
+        {
+            get => (base.Template as ChartTemplate)?.Schema;
+            set
+            {
+                if (ReferenceEquals(Template, value)) return;
+                base.Template = value == null ? null : new ChartTemplate(value);
             }
         }
 
@@ -1329,15 +1029,7 @@ namespace Hevo.Charting.Core
         }
     }
 
-    public enum PlotMode
-    {
-        Sync,       // UI 线程，直接跑
-        Async,      // 后台线程，单核跑 (任务少时)
-        Parallel    // 后台线程，压榨多核 (任务多时)
-    }
-
-
-    public static class ChartPipelineExtensions
+    public static class WpfChartPipelineExtensions
     {
         /// <summary>
         /// 💥 [全局流] 为整个 Chart 播种全局特质。
@@ -1345,7 +1037,6 @@ namespace Hevo.Charting.Core
         public static ChartCell Seed<TTrait>(this ChartCell chart, TTrait trait)
             where TTrait : class, IVisualTrait
         {
-            // 直接访问你类里的 _sharedData (对应之前的 LiveGlobalData)
             chart.GetSharedData().Publish<TTrait>(trait);
             return chart;
         }

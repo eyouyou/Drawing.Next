@@ -22,7 +22,7 @@ namespace Hevo.Charting.Tests
         {
             private readonly Action<IRenderFlow<DataBlackboard>> _compose;
             public ComposeFeature(Action<IRenderFlow<DataBlackboard>> compose) => _compose = compose;
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => _compose(flow);
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => _compose(flow);
             protected override void OnProject(FeatureContext ctx) { }
         }
 

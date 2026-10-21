@@ -357,10 +357,10 @@ namespace Hevo.Charting.PythonNet
         }
 
         // 简单 hex 颜色解析:"#RRGGBB" / "#AARRGGBB"。坏字串退化成灰色,不 throw。
-        private static System.Windows.Media.Color ParseHexColor(string s)
+        private static HevoColor ParseHexColor(string s)
         {
             if (string.IsNullOrEmpty(s) || s[0] != '#')
-                return System.Windows.Media.Colors.Gray;
+                return HevoColors.Gray;
             try
             {
                 if (s.Length == 7) // #RRGGBB
@@ -368,7 +368,7 @@ namespace Hevo.Charting.PythonNet
                     byte r = System.Convert.ToByte(s.Substring(1, 2), 16);
                     byte g = System.Convert.ToByte(s.Substring(3, 2), 16);
                     byte b = System.Convert.ToByte(s.Substring(5, 2), 16);
-                    return System.Windows.Media.Color.FromRgb(r, g, b);
+                    return HevoColor.FromRgb(r, g, b);
                 }
                 if (s.Length == 9) // #AARRGGBB
                 {
@@ -376,11 +376,11 @@ namespace Hevo.Charting.PythonNet
                     byte r = System.Convert.ToByte(s.Substring(3, 2), 16);
                     byte g = System.Convert.ToByte(s.Substring(5, 2), 16);
                     byte b = System.Convert.ToByte(s.Substring(7, 2), 16);
-                    return System.Windows.Media.Color.FromArgb(a, r, g, b);
+                    return HevoColor.FromArgb(a, r, g, b);
                 }
             }
             catch { }
-            return System.Windows.Media.Colors.Gray;
+            return HevoColors.Gray;
         }
 
         public void Shutdown()

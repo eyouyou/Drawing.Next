@@ -28,7 +28,7 @@ namespace Hevo.Charting.Tests
             public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
             public required ViewportManagerFeature Vpm { get; init; }
             public required DataPagingFeature Paging { get; init; }
-            protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
             protected override void DefineFeatures(IFeatureContext canvas)
             {
                 canvas.Add(Vpm);
@@ -392,7 +392,7 @@ namespace Hevo.Charting.Tests
             public Func<int, int, Task<bool>>? OnRequire { get; init; }
             public DataFetchOptions? Fetch { get; init; }
             public IZoomStrategy? Zoom { get; init; }
-            protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
             protected override void DefineFeatures(IFeatureContext canvas)
             {
                 canvas.Seed<ScaleStrategyTrait>(ScaleStrategyTrait.CandleMode);

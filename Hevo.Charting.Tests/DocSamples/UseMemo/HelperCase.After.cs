@@ -13,7 +13,7 @@ namespace Hevo.Charting.DocSamples.UseMemo
         public WindowStats HighStats { get; private set; }
         public WindowStats LowStats { get; private set; }
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
 
         protected override void OnProject(FeatureContext ctx)
         {

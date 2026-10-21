@@ -23,7 +23,7 @@ namespace Hevo.Charting.Tests
 
             public VpSchema(double? spacing) => _spacing = spacing;
 
-            protected override void DefineDataFlow(ChartCell chart) => _trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => _trigger.BindTo(chart);
 
             protected override void DefineFeatures(IFeatureContext canvas)
             {

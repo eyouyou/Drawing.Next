@@ -20,7 +20,7 @@ namespace Hevo.Charting.Tests
         {
             public DataPort<double>? A { get; set; }
             public DataPort<double>? B { get; set; }
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
             protected override void OnProject(FeatureContext ctx) { }
         }
 

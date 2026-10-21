@@ -1,0 +1,219 @@
+﻿using Hevo.Charting.Abstractions;
+
+namespace Hevo.Charting.Core
+{
+    /// <summary>承载图表整体可用视区大小(由 ChartCell 的 SizeChanged 推送)。</summary>
+    public record ViewportSizeTrait(double Width, double Height) : IVisualTrait;
+    // =================================================================
+    // 1. 彻底正交的坐标系特质 (ECS Components)
+    // =================================================================
+
+    /// <summary>
+    /// 物理绘制区域。由 GridLayoutFeature 通过 ExecuteGrid3x3Layout 算出后挂在 Shared,
+    /// 所有 Layer/Feature 直接读取避免重复计算。
+    /// </summary>
+    public record PlotAreaTrait(HevoRect Area) : IVisualTrait
+    {
+        public static readonly PlotAreaTrait Default = new(HevoRect.Empty);
+    }
+
+    /// <summary>
+    /// X 轴逻辑视口(通常挂在 Shared,供所有常规图层共享)。
+    /// </summary>
+    /// <param name="Viewport">当前可见区间(逻辑域)。</param>
+    /// <param name="World">数据全域(World ⊇ Viewport),供分页/缩小到全景使用。default = 与 Viewport 相同。</param>
+    public record XAxisTrait(RealRange Viewport, RealRange World = default) : IVisualTrait
+    {
+        public static readonly XAxisTrait Default = new(RealRange.Empty, RealRange.Empty);
+    }
+
+    /// <summary>Y 轴逻辑视口。挂在 Layer-local 黑板上,实现同屏多轨 Y 轴(每个 Layer 自己的 RangePort 独立)。</summary>
+    public record YAxisTrait(RealRange Viewport) : IVisualTrait
+    {
+        public static readonly YAxisTrait Default = new(RealRange.Empty);
+    }
+
+    /// <summary>
+    /// 全局比例尺策略:把 X/Y 从几何方向解耦成自变量(Domain)/因变量(Value)的纯数学映射。
+    /// 业务侧通常直接选用预设(Default / LineMode / CandleMode / LogCandleMode);
+    /// 如需自定义自变量(如时间日历)或对数纵轴,直接 new 一个传入即可。
+    /// </summary>
+    /// <param name="DomainScale">自变量比例尺(时间、K线索引、类别)。</param>
+    /// <param name="ValueScale">因变量比例尺(价格、成交量、MACD 值)。</param>
+    public record ScaleStrategyTrait(
+        IScale DomainScale,
+        IScale ValueScale
+    ) : IVisualTrait
+    {
+        // 经典折线图模式：两边都是连续的线性映射，对齐边缘
+        public static readonly ScaleStrategyTrait Default = new(CategoryScale.Edge, new LinearScale());
+
+        // 折线图 + 整根对齐：端点贴边（首末点正好落在 plotArea 左右边沿），pan/zoom ratchet 到整数索引
+        public static readonly ScaleStrategyTrait LineMode = new(CategoryScale.EdgeSnapped, new LinearScale());
+
+        // 经典 K 线模式：自变量强制带有 +0.5 的居中偏移，因变量是线性映射
+        public static readonly ScaleStrategyTrait CandleMode = new(CategoryScale.CenteredSnapped, new LinearScale());
+
+        // 对数 K 线模式：自变量居中偏移，因变量是对数映射 (适合查看长期趋势)
+        public static readonly ScaleStrategyTrait LogCandleMode = new(CategoryScale.EdgeSnapped, new LogarithmicScale());
+    }
+
+    // =================================================================
+    // 3. 坐标系交互逻辑库 (保持原样，纯数学算法)
+    // =================================================================
+    public static class CoordinateLogic
+    {
+        public static RealRange Pan(RealRange current, double delta)
+        {
+            if (current.Span <= 0) return current;
+            return new RealRange(current.Min + delta, current.Max + delta);
+        }
+
+        public static RealRange Zoom(RealRange current, double pivot, double factor)
+        {
+            if (current.Span <= 0) return current;
+            double newSpan = current.Span * factor;
+            double ratio = (pivot - current.Min) / current.Span;
+            double newMin = pivot - (newSpan * ratio);
+            double newMax = newMin + newSpan;
+            return new RealRange(newMin, newMax);
+        }
+
+        public static RealRange Clamp(RealRange proposed, RealRange worldLimits)
+        {
+            if (worldLimits.Span <= 0) return proposed;
+
+            double min = proposed.Min;
+            double max = proposed.Max;
+            double span = max - min;
+
+            if (span > worldLimits.Span)
+            {
+                min = worldLimits.Min;
+                max = worldLimits.Max;
+            }
+            else if (span < double.Epsilon)
+            {
+                span = 1.0;
+                max = min + span;
+            }
+
+            if (min < worldLimits.Min)
+            {
+                min = worldLimits.Min;
+                max = min + span;
+            }
+            if (max > worldLimits.Max)
+            {
+                max = worldLimits.Max;
+                min = max - span;
+            }
+
+            return new RealRange(min, max);
+        }
+    }
+
+    // =================================================================
+    // 4. 坐标系投影映射扩展 (解耦版)
+    // 职责：输入散装的范围，输出像素。彻底与 Trait 的组装方式解耦。
+    // =================================================================
+    public static class CoordinateExtensions
+    {
+        /// <summary>
+        /// 💥 [核心咽喉] 将逻辑坐标（自变量，因变量）投射到屏幕物理坐标。
+        /// 内部计算保持 double 绝对精度，仅在出口进行 0-GC 的 float 降维。
+        /// </summary>
+        public static HevoPoint ProjectToScreen(
+            HevoRect area,
+            RealRange rangeDomain,
+            RealRange rangeValue,
+            ScaleStrategyTrait axis,
+            double logicDomain,
+            double logicValue)
+        {
+            if (area.Width <= 0 || area.Height <= 0) return new HevoPoint(0, 0);
+
+            // 1. 纯数学计算保持 double 绝对精度
+            double dNorm = axis.DomainScale.Normalize(logicDomain, rangeDomain);
+            double vNorm = axis.ValueScale.Normalize(logicValue, rangeValue);
+
+            // 2. 算完之后，在最后一步安全强制转换为 float
+            return new HevoPoint(
+                (float)(area.Left + (dNorm * area.Width)),
+                (float)(area.Top + (area.Height * (1.0 - vNorm))) // Y轴翻转逻辑
+            );
+        }
+        /// <summary>
+        /// 仅投射自变量（Domain）到屏幕水平坐标。K 线、成交量柱、十字线的中心都从这里来,
+        /// 渲染器再按同一条像素规则落列,所以同一个索引上的它们天然同列。
+        /// </summary>
+        public static float ProjectDomainToScreen(HevoRect area, RealRange rangeDomain, ScaleStrategyTrait axis, double logicDomain)
+        {
+            if (area.Width <= 0) return 0f;
+            double dNorm = axis.DomainScale.Normalize(logicDomain, rangeDomain);
+            return (float)(area.Left + (dNorm * area.Width));
+        }
+
+        /// <summary>
+        /// 自变量一格在屏幕上的宽度(DIP):<paramref name="logicDomain"/> ± 0.5 两点投影之差。
+        /// 柱状元素(K 线实体、成交量柱)的宽度都从这里来;scale 不等间距(按真实时间轴、跳过停牌等)时每格自然不同,
+        /// 只需 scale 本身正确,用到它的图层不用改。
+        /// </summary>
+        public static double ProjectDomainSlotWidth(HevoRect area, RealRange rangeDomain, ScaleStrategyTrait axis, double logicDomain)
+        {
+            if (area.Width <= 0) return 0;
+            double a = axis.DomainScale.Normalize(logicDomain - 0.5, rangeDomain);
+            double b = axis.DomainScale.Normalize(logicDomain + 0.5, rangeDomain);
+            return area.Width * Math.Abs(b - a);
+        }
+
+        /// <summary>
+        /// 仅投射因变量（Value）到屏幕高度坐标
+        /// </summary>
+        public static float ProjectValueToScreen(HevoRect area, RealRange rangeValue, ScaleStrategyTrait axis, double logicValue)
+        {
+            if (area.Height <= 0) return 0f;
+            double vNorm = axis.ValueScale.Normalize(logicValue, rangeValue);
+            return (float)(area.Top + (area.Height * (1.0 - vNorm)));
+        }
+
+    }
+
+    // =================================================================
+    // 5. 渲染上下文扩展 (业务端流式 API)
+    // =================================================================
+    public static class CoordinateContextExtensions
+    {
+        /// <summary>
+        /// 💥 [供 Feature 使用] 更新全局 X 轴 (所有 Layer 默认共享)。
+        /// 优雅调用: ctx.Shared().UpdateSharedXAxis(range);
+        /// </summary>
+        public static void UpdateSharedXAxis(
+            this VisualProxy<IVisualData> proxy,
+            RealRange viewport,
+            RealRange world = default)
+        {
+            // 如果没传 world 范围，就默认和 viewport 一样大
+            var actualWorld = world.IsEmpty ? viewport : world;
+
+            // 直接面向当前的 Proxy 对象发布更新指令！
+            proxy.UpdateData<XAxisTrait>(c =>
+                (c ?? XAxisTrait.Default) with { Viewport = viewport, World = actualWorld }
+            );
+        }
+        /// <summary>
+        /// 💥 [供 Feature 使用] 更新私有 Y 轴 (绑定给特定的 Layer)。
+        /// 优雅调用: ctx.For(_layer).UpdateYAxis(range);
+        /// </summary>
+        public static void UpdateYAxis<Layer>(
+            this VisualProxy<Layer> proxy,
+            RealRange viewport) where Layer : IChartLayer
+        {
+            // 彻底杜绝了传错 layer 参数的可能，面向对象编程的巅峰美学！
+            proxy.UpdateData<YAxisTrait>(c =>
+                (c ?? YAxisTrait.Default) with { Viewport = viewport }
+            );
+        }
+    }
+
+}

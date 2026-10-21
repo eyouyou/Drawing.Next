@@ -18,7 +18,7 @@ namespace Hevo.Charting.Benchmarks
     {
         private sealed class Owner : Feature
         {
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
             protected override void OnProject(FeatureContext ctx) { }
         }
 

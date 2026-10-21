@@ -122,7 +122,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                     IsHitTestVisible = false,
                     Focusable = false,
                     Padding = new Thickness(8, 6, 8, 4),
-                    Foreground = new SolidColorBrush(FeatureCategoryStyle.ZoneLabel(grp.Key)),
+                    Foreground = new SolidColorBrush(FeatureCategoryStyle.ZoneLabel(grp.Key).ToWpf()),
                     FontWeight = FontWeights.SemiBold,
                 });
                 foreach (var t in grp.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))

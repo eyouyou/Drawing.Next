@@ -72,8 +72,7 @@ namespace Hevo.Charting.Tests
         {
             var cell = new ChartCell
             {
-                Template = new ChartTemplate { VisualTree = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter)) },
-            };
+            }.WithShell();
             cells.Add(cell);
             cell.RenderBackend = backend;
             cell.Measure(new Size(W, H));
@@ -122,13 +121,13 @@ namespace Hevo.Charting.Tests
         /// <summary>覆盖率 = Σ alpha / 255(抗锯齿边缘按比例计)。</summary>
         private static double Coverage(uint[] px) { double s = 0; foreach (var p in px) s += (p >> 24) / 255.0; return s; }
 
-        private static readonly HevoSolidBrush Up = new(Colors.Red);
-        private static readonly HevoSolidBrush Down = new(Color.FromRgb(0, 160, 0));
-        private static readonly HevoPen Grid = new(new HevoSolidBrush(Color.FromRgb(90, 90, 90)), 1);
-        private static readonly HevoPen Cross = new(new HevoSolidBrush(Colors.White), 1, new double[] { 3, 3 });
-        private static readonly HevoPen Line = new(new HevoSolidBrush(Colors.Orange), 1.5);
+        private static readonly HevoSolidBrush Up = new(HevoColors.Red);
+        private static readonly HevoSolidBrush Down = new(HevoColor.FromRgb(0, 160, 0));
+        private static readonly HevoPen Grid = new(new HevoSolidBrush(HevoColor.FromRgb(90, 90, 90)), 1);
+        private static readonly HevoPen Cross = new(new HevoSolidBrush(HevoColors.White), 1, new double[] { 3, 3 });
+        private static readonly HevoPen Line = new(new HevoSolidBrush(HevoColors.Orange), 1.5);
         private static readonly IHevoTypeface Face = new HevoTypeface("Segoe UI");
-        private static readonly HevoSolidBrush LabelBg = new(Colors.Black);
+        private static readonly HevoSolidBrush LabelBg = new(HevoColors.Black);
 
         // 静态层:网格 + 30 根 K 线 + 一条均线;lastClose 控制最后一根的实体高度(模拟 tick)
         private static Action<IDrawingSink> Candles(Func<float> lastBody) => d =>
@@ -393,7 +392,7 @@ namespace Hevo.Charting.Tests
         public void LineCapsAndDashes_MatchBitmapBackendCoverage() => IncrementalTestKit.RunOnSta(() =>
         {
             using var cells = new Cells();
-            var brush = new HevoSolidBrush(Colors.White);
+            var brush = new HevoSolidBrush(HevoColors.White);
             // 容差:偶数线宽时段端落在整像素,两边应基本一致;奇数线宽时 Square 段端外扩 1.5px 落在半像素上,
             // 位图后端按像素中心取整(每段少算约 1 列),Skia 按面积抗锯齿,覆盖率会差几个百分点
             var cases = new (string Name, HevoPen Pen, double Tolerance)[]
@@ -472,7 +471,7 @@ namespace Hevo.Charting.Tests
         public void OnePixelLines_CoverOneDevicePixel_AtFractionalDpi(double dpi) => IncrementalTestKit.RunOnSta(() =>
         {
             using var cells = new Cells();
-            var pen = new HevoPen(new HevoSolidBrush(Colors.White), 1);
+            var pen = new HevoPen(new HevoSolidBrush(HevoColors.White), 1);
             var cell = NewCell(cells, new SkiaRenderBackend(), dpi);
             Assert.Equal(dpi, VisualTreeHelper.GetDpi(cell).PixelsPerDip);
             var layer = new ScriptLayer(d =>
@@ -507,7 +506,7 @@ namespace Hevo.Charting.Tests
             using var cells = new Cells();
             const string text = "中文字体回退测试";
             const float size = 20;
-            var red = new HevoSolidBrush(Colors.Red);
+            var red = new HevoSolidBrush(HevoColors.Red);
             Action<IDrawingSink> Draw(IHevoTypeface face) => d =>
                 d.DrawText(text, face, red, size, new HevoPoint(10, 40), TextAlignX.Left, TextAlignY.Top, null, null, 0, 0);
 

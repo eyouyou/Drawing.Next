@@ -1,7 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
+using Hevo.Charting.Core;
 using Hevo.Charting.Linked;
-using Hevo.Drawing.LowCodeDemo.CodedKLine;
+using Hevo.Charting.Samples.CodedKLine;
+using Hevo.Charting.Samples;
 
 namespace Hevo.Drawing.LowCodeDemo
 {
@@ -27,7 +29,8 @@ namespace Hevo.Drawing.LowCodeDemo
         {
             InitializeComponent();
 
-            var ctx = new LinkedChartContext();
+            // 联动时各图水平边距由上下文统一(十字线对齐);价格轴在右侧,右边留 60 给刻度文字
+            var ctx = new LinkedChartContext { HorizontalRight = ChartLength.Pixel(60) };
             _dashboard = new LinkedChartDashboard(ctx)
                 .AddMaster(new KLineMainSchema  (_dataSource), heightRatio: 3)
                 .AddPane  (new KLineVolumeSchema(_dataSource), heightRatio: 1);

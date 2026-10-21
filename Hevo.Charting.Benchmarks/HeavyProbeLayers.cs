@@ -20,7 +20,7 @@ namespace Hevo.Charting.Benchmarks
     /// </summary>
     internal sealed class HeavyProbeLayer : ChartLayer
     {
-        private static readonly IHevoBrush Brush = new HevoSolidBrush(Colors.DimGray);
+        private static readonly IHevoBrush Brush = new HevoSolidBrush(HevoColors.DimGray);
         private readonly double _ms;
 
         public HeavyProbeLayer(string name, double ms)
@@ -50,7 +50,7 @@ namespace Hevo.Charting.Benchmarks
 
         public HeavyLayersFeature(int count, double ms) { _count = count; _ms = ms; }
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             for (int i = 0; i < _count; i++)
             {

@@ -1,5 +1,4 @@
 using System;
-using System.Windows.Media;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
 
@@ -20,7 +19,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
     /// <summary>样式 Trait:上下轨与中轨各一支笔。装配期发布一次,之后不变。</summary>
     public sealed record BollingerStyle(HevoPen BandPen, HevoPen MiddlePen) : IVisualTrait
     {
-        public static BollingerStyle Create(Color color, double thickness = 1.0)
+        public static BollingerStyle Create(HevoColor color, double thickness = 1.0)
             => new BollingerStyle(
                 new HevoPen(new HevoSolidBrush(color), thickness),
                 // 中轨用虚线和上下轨区分,4/2 是线段/间隔长度(单位 = 线宽)

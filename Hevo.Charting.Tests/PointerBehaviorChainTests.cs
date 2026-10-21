@@ -194,11 +194,13 @@ namespace Hevo.Charting.Tests
         {
             public override FeaturePhase Phase => FeaturePhase.PreLayout;
 
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             {
-#pragma warning disable CS0618
-                this.OnMouse(UIElement.MouseDownEvent).Subscribe(e => e.Handled = true).OwnedBy(this);
-#pragma warning restore CS0618
+                // 模拟业务自己挂的 WPF 冒泡处理器
+                var cell = (ChartCell)chart;
+                MouseButtonEventHandler handler = (_, e) => e.Handled = true;
+                cell.AddHandler(UIElement.MouseDownEvent, handler);
+                RegisterDisposable(new DisposableAction(() => cell.RemoveHandler(UIElement.MouseDownEvent, handler)));
             }
 
             protected override void OnProject(FeatureContext ctx) { }
@@ -218,15 +220,16 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void Source_OnlyAdapterSubscribesPlatformInput()
         {
-            var root = Path.Combine(RepoRoot(), "Hevo.Charting");
-            var files = Directory.GetFiles(Path.Combine(root, "Features"), "*.cs")
-                .Concat(Directory.GetFiles(Path.Combine(root, "Interaction"), "*.cs", SearchOption.AllDirectories));
+            var files = new[] { "Hevo.Charting", "Hevo.Charting.Core" }
+                .Select(p => Path.Combine(RepoRoot(), p))
+                .SelectMany(root => new[] { Path.Combine(root, "Features"), Path.Combine(root, "Interaction") })
+                .Where(Directory.Exists)
+                .SelectMany(d => Directory.GetFiles(d, "*.cs", SearchOption.AllDirectories));
             var offenders = files
                 .Where(f => Path.GetFileName(f) != "WpfPointerAdapter.cs")
                 .Select(f => (File: f, Text: File.ReadAllText(f)))
                 .Where(x => x.Text.Contains("this.OnMouse(") || x.Text.Contains("this.OnKey(") || x.Text.Contains("AddHandler(")
-                            // BoxZoomOptions:旧 ActivationModifier 兼容属性(Obsolete)用到 ModifierKeys
-                            || (x.Text.Contains("System.Windows.Input") && Path.GetFileName(x.File) != "BoxZoomOptions.cs"))
+                            || x.Text.Contains("System.Windows.Input"))
                 .Select(x => Path.GetFileName(x.File))
                 .ToArray();
             Assert.Empty(offenders);

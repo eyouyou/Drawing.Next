@@ -17,7 +17,7 @@ namespace Hevo.Charting.DocSamples.Use
         /// <summary>重新摆放了几次(测试用)。真实 Feature 在这里换成 <c>ctx.For(layer).PublishData(...)</c>。</summary>
         public int PublishCount { get; private set; }
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
 
         protected override void OnProject(FeatureContext ctx)
         {

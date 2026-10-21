@@ -1,0 +1,409 @@
+using System;
+using System.Collections.Generic;
+using Hevo.Charting.Abstractions;
+using Hevo.Charting.Core;
+using Hevo.Charting.LowCode;
+using Hevo.Charting.WorkFlow;
+
+namespace Hevo.Charting.Features
+{
+    /// <summary>
+    /// C# 指标的零分配签名:往框架给的 <paramref name="output"/> 里写结果(长度 = 输入长度),不用自己 new 数组。
+    /// output 来自调用点缓冲池(<see cref="ResultBufferPool"/>),内容是上一轮留下的旧值,handler 要把每个元素都写一遍。
+    /// </summary>
+    public delegate void ComputeInto(ReadOnlySpan<double> input, Span<double> output);
+
+    /// <summary>
+    /// 多输入版零分配签名(输入个数不固定):<paramref name="inputs"/> 按 <see cref="ComputeFeature.InputOrder"/> 排列。
+    /// <paramref name="output"/> 长度 = 各输入长度的最小值(输入等长时就是输入长度)。同样每个元素都要写。
+    /// 蓝图里按形参名接线的 handler 用下面固定元数的 ComputeInto2 / 3 / 4(形参名就是输入名)。
+    /// </summary>
+    public delegate void ComputeIntoMulti(ReadOnlySpan<ReadOnlyMemory<double>> inputs, Span<double> output);
+
+    /// <summary>
+    /// 2 个具名输入的零分配签名。<c>[BlueprintHandler]</c> 静态方法写成
+    /// <c>void F(ReadOnlySpan&lt;double&gt; latest, ReadOnlySpan&lt;double&gt; prev_close, Span&lt;double&gt; result)</c> 即可,
+    /// 形参名(最后一个 output 除外)就是蓝图的输入名。output 长度 = 各输入长度的最小值,每个元素都要写。
+    /// </summary>
+    public delegate void ComputeInto2(ReadOnlySpan<double> a, ReadOnlySpan<double> b, Span<double> output);
+
+    /// <summary>3 个具名输入的零分配签名,规则同 <see cref="ComputeInto2"/>。</summary>
+    public delegate void ComputeInto3(ReadOnlySpan<double> a, ReadOnlySpan<double> b, ReadOnlySpan<double> c, Span<double> output);
+
+    /// <summary>4 个具名输入的零分配签名,规则同 <see cref="ComputeInto2"/>。</summary>
+    public delegate void ComputeInto4(ReadOnlySpan<double> a, ReadOnlySpan<double> b, ReadOnlySpan<double> c, ReadOnlySpan<double> d, Span<double> output);
+
+    /// <summary>
+    /// 蓝图层"计算节点":输入 → 委托 → 输出。委托可以是 Python(经 PythonHandlerRegistry 注册)、
+    /// C# 方法(<c>[BlueprintHandler]</c>)或业务直接代码注入。
+    ///
+    /// <para>
+    /// <b>单输入(主流形态)</b>:<see cref="InputPort"/>(<see cref="ReadOnlyMemory{Double}"/>) →
+    /// <see cref="OutputPort"/>(<see cref="ReadOnlyMemory{Double}"/>),Compute 是
+    /// <c>Func&lt;ROM&lt;double&gt;, ROM&lt;double&gt;&gt;</c>。
+    /// </para>
+    ///
+    /// <para>
+    /// <b>多输入(§D2.X)</b>:<see cref="Inputs"/> 字典里 N 根 ROM&lt;double&gt; 端口
+    /// (典型 ATR 的 high/low/close),<see cref="InputOrder"/> 声明形参顺序,Compute 是
+    /// <c>Func&lt;ROM, ROM, ROM, ROM&gt;</c>(N 参 + 1 返回)。蓝图协议:
+    /// </para>
+    /// <code>
+    /// {
+    ///   "TypeName": "ComputeFeature",
+    ///   "Properties": {
+    ///     "Compute": "atr_14",
+    ///     "InputOrder": ["high","low","close"]    // ← 跟 Python signature 形参顺序对齐
+    ///   },
+    ///   "InputBindings": {
+    ///     "Inputs.high":  "RealTime_High",        // ← nested key,DefineFeatures 反射拆 ParentField + ChildKey
+    ///     "Inputs.low":   "RealTime_Low",
+    ///     "Inputs.close": "RealTime_Close"
+    ///   },
+    ///   "OutputBindings": {
+    ///     "OutputPort":   "Indicator_ATR"
+    ///   }
+    /// }
+    /// </code>
+    ///
+    /// <para>
+    /// <b>类型组合</b>:本节点固定 <c>ROM&lt;double&gt;</c> 输入 / 输出(指标主流)。其他
+    /// 类型组合(int 系列 / 标量信号 / OHLCV record 等)派子类替换字段类型即可。
+    /// </para>
+    ///
+    /// <para>
+    /// <b>异常处理</b>:Compute 委托抛异常时记日志后 silent skip 当帧,不毒化主数据流。
+    /// Python handler 的 traceback 已由 PythonNet 端 Translate 进 <see cref="Exception.Message"/>。
+    /// </para>
+    /// </summary>
+    public sealed class ComputeFeature : ComputeFeatureBase
+    {
+        // 输出缓冲池:Python handler 的结果拷进这里租来的缓冲,不再每次 new(2 万根一块 160 KB 进 LOH)。见 ResultBufferPool
+        private ResultBufferPool _outBuffers = new();
+
+        /// <summary>
+        /// 单输入端口 —— 数据源 / 上游 Compute 推过来的 ROM&lt;double&gt;。
+        /// 跟 <see cref="Inputs"/> 互斥:Inputs.Count > 0 时走多输入路径,InputPort 被忽略。
+        /// </summary>
+        public DataPort<ReadOnlyMemory<double>> InputPort { get; init; } = null!;
+
+        /// <summary>
+        /// §D2.X 多输入端口字典 —— 蓝图侧 <c>"Inputs.high" / "Inputs.low" / ...</c> nested key
+        /// 焊接到这里。<see cref="InputOrder"/> 决定调 Compute 委托时的形参顺序。
+        /// 字典空 → 走 <see cref="InputPort"/> 单输入路径(向后兼容)。
+        /// </summary>
+        public Dictionary<string, DataPort<ReadOnlyMemory<double>>> Inputs { get; init; } = new();
+
+        /// <summary>
+        /// §D2.X Compute 委托的形参顺序,例 <c>["high","low","close"]</c>,跟 Python
+        /// <c>@register(inputs=['high','low','close'])</c> 的 inputs 参数对齐。
+        /// 多输入路径必填。空数组 = 走单输入兼容路径。
+        /// </summary>
+        public string[] InputOrder { get; init; } = Array.Empty<string>();
+
+        /// <summary>
+        /// 单输出端口 —— 跟 <see cref="Outputs"/> 互斥:Outputs.Count > 0 时走多输出路径,本字段被忽略。
+        /// </summary>
+        [PortDirection(PortDirection.Output)]
+        public DataPort<ReadOnlyMemory<double>> OutputPort { get; init; } = null!;
+
+        /// <summary>
+        /// 多输出端口字典 —— 蓝图 <c>"Outputs.time" / "Outputs.close" / ...</c> nested key 焊接到这里。
+        /// Compute 委托返 <c>IDictionary&lt;string, object?&gt;</c>(value 是 ROM&lt;double&gt; 或 double[]),
+        /// 按 Outputs 字典里的 key 一一对应写到对应端口。空字典 → 走 <see cref="OutputPort"/> 单输出路径。
+        /// <para>
+        /// 典型场景:K 线列拆分(<c>Func&lt;ROM&lt;Block&gt;, dict&gt;</c> 输出 Time/Open/High/Low/Close 5 根 ROM&lt;double&gt;)。
+        /// </para>
+        /// </summary>
+        public Dictionary<string, DataPort<ReadOnlyMemory<double>>> Outputs { get; init; } = new();
+
+        /// <summary>
+        /// 计算委托。蓝图 JSON 写 string handler 名,加载阶段被
+        /// <c>DynamicChartSchema.ResolveHandlerReferences</c> 翻成实际委托。
+        /// <list type="bullet">
+        ///   <item>单输入 + 单输出:<c>Func&lt;ROM, ROM&gt;</c></item>
+        ///   <item>多输入 + 单输出:<c>Func&lt;ROM, ROM, ..., ROM&gt;</c>(N 参 + 1 返回)</item>
+        ///   <item>单/多输入 + 多输出:返回 <c>IDictionary&lt;string, object?&gt;</c>,key 对齐 <see cref="Outputs"/> 字典</item>
+        ///   <item>零分配(单输出):<see cref="ComputeInto"/> / <see cref="ComputeIntoMulti"/>,往框架给的 Span 里写,
+        ///         输出缓冲由调用点池复用(2 万根时每次省一块 160 KB 的 LOH 数组);上面的 Func 签名照常可用。</item>
+        /// </list>
+        /// 业务侧也可以直接代码注入(测试 / mock 用)。
+        /// </summary>
+        public Delegate? Compute { get; init; }
+
+        protected override void OnComputeCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+        {
+            if (Compute == null)
+            {
+                // 蓝图作者接了端口但 Compute 委托没解析上来 —— 配置错误,fail fast。
+                // 没接端口的纯空 Compute 实例不算配置错,继续走 return(等价于无操作的占位 feature)。
+                bool wired = InputPort != null || Inputs.Count > 0 || OutputPort != null || Outputs.Count > 0;
+                if (wired)
+                {
+                    throw new InvalidOperationException(
+                        "ComputeFeature.Compute 委托未解析(端口已接但 handler 是 null),Output 永远不会更新。" +
+                        "看上游 DynamicChartSchema.ResolveHandlerReferences 是否报过 'handler 未注册' / 类型不兼容警告 —— " +
+                        "确认 BlueprintHandlerRegistry 里 RegisterDelegate / RegisterPythonFunction 是否成功。");
+                }
+                return;
+            }
+            bool multiOutput = Outputs.Count > 0;
+            if (!multiOutput && OutputPort == null) return;
+
+            // §D2.X 多输入路径:Inputs 非空时,InputOrder 必填。按声明顺序拉值,DynamicInvoke。
+            if (Inputs.Count > 0)
+            {
+                // 配置错:Inputs 字典非空但 InputOrder 漏声明,handler 不知道按啥顺序拿参 —— throw fail fast。
+                if (InputOrder == null || InputOrder.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"ComputeFeature.Inputs 非空(声明了 {Inputs.Count} 个输入)但 InputOrder 未声明,装配无法继续。" +
+                        "InputOrder 决定 handler DynamicInvoke 的参数顺序,蓝图必填。" +
+                        $"已声明 Inputs keys: [{string.Join(", ", Inputs.Keys)}]。");
+                }
+                var orderedPorts = new DataPort<ReadOnlyMemory<double>>[InputOrder.Length];
+                for (int i = 0; i < InputOrder.Length; i++)
+                {
+                    if (!Inputs.TryGetValue(InputOrder[i], out var p) || p == null)
+                    {
+                        // 配置错:InputOrder 引用了 Inputs 字典里不存在的 key,蓝图作者拼错或漏接。
+                        throw new InvalidOperationException(
+                            $"ComputeFeature.InputOrder[{i}]='{InputOrder[i]}' 未在 Inputs 字典中焊接(端口缺 / null)。" +
+                            $"Inputs 实际 keys: [{string.Join(", ", Inputs.Keys)}]。蓝图侧检查端口连线是否完整。");
+                    }
+                    orderedPorts[i] = p;
+                }
+                var watchKeys = new object[orderedPorts.Length];
+                for (int i = 0; i < orderedPorts.Length; i++) watchKeys[i] = orderedPorts[i];
+
+                // 协议规范 §B:Compute handler 属于"耗时指标计算",必须走 WatchAsync 后台线程池 +
+                // Compute-then-Commit 三段式锁(瞬间读锁捞 → 锁外算 → 瞬间写锁提交)。
+                // argsBuf 从 lambda 外共享改 lambda 内 local —— WatchAsync 后台多 task 可能并发,共享会撞写。
+                flow.WatchAsync(watchKeys, board =>
+                {
+                    var buffers = _outBuffers;
+                    using var call = buffers.BeginCall();
+                    try { RunMulti(board, call); }
+                    finally { if (buffers.IsAbandoned) _outBuffers = new(); }
+                });
+
+                void RunMulti(DataBlackboard board, ResultBufferPool.CallScope call)
+                {
+                    // ① 瞬间读锁捞 inputs
+                    var argsBuf = new object?[orderedPorts.Length];
+                    using (board.ReadScope())
+                    {
+                        for (int i = 0; i < orderedPorts.Length; i++)
+                        {
+                            var v = board.Read(orderedPorts[i]);
+                            if (v.Length == 0) return;          // 任一输入未就绪 → 整体跳过
+                            argsBuf[i] = v;
+                        }
+                    }
+
+                    // ② 锁外裸奔算指标(handler 在后台线程跑,不阻塞 UI / 其他 reader)
+                    object? raw;
+                    try
+                    {
+                        if (IsComputeIntoFamily(Compute))
+                        {
+                            if (multiOutput) { WarnSpanMultiOutput(); return; }
+                            raw = InvokeComputeInto(Compute, argsBuf, call);
+                        }
+                        else raw = Compute.DynamicInvoke(argsBuf);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Trace.TraceWarning(
+                            $"[ComputeFeature] handler 调用异常: {(ex.InnerException ?? ex).Message}");
+                        return;
+                    }
+
+                    // ③ WriteOutput 内部自己 WriteScope,μs 级提交
+                    WriteOutput(board, raw, multiOutput, call);
+                }
+                return;
+            }
+
+            // 单输入兼容路径
+            if (InputPort == null) return;
+            flow.WatchAsync(new object[] { InputPort }, board =>
+            {
+                var buffers = _outBuffers;
+                using var call = buffers.BeginCall();
+                try { RunSingle(board, call); }
+                finally { if (buffers.IsAbandoned) _outBuffers = new(); }
+            });
+
+            void RunSingle(DataBlackboard board, ResultBufferPool.CallScope call)
+            {
+                // ① 瞬间读锁捞 input
+                ReadOnlyMemory<double> input;
+                using (board.ReadScope())
+                {
+                    input = board.Read(InputPort);
+                    if (input.Length == 0) return;
+                }
+
+                // ② 锁外算
+                object? raw;
+                try
+                {
+                    if (Compute is ComputeInto cc)
+                    {
+                        if (multiOutput) { WarnSpanMultiOutput(); return; }
+                        var arr = call.Rent(input.Length);
+                        cc(input.Span, arr.AsSpan(0, input.Length));
+                        raw = new ReadOnlyMemory<double>(arr, 0, input.Length);
+                    }
+                    else if (!multiOutput && Compute is Func<ReadOnlyMemory<double>, ReadOnlyMemory<double>> typed)
+                        raw = (object)typed(input);
+                    else
+                        raw = Compute.DynamicInvoke(input);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ComputeFeature] handler 调用异常: {(ex.InnerException ?? ex).Message}");
+                    return;
+                }
+
+                // ③ 写锁提交
+                WriteOutput(board, raw, multiOutput, call);
+            }
+        }
+
+#if DEBUG
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<System.Reflection.MethodInfo, bool> s_allocHinted = new();
+
+        // 旧写法(返回新数组)的迁移提示只在"真的重"时出,每个方法一次。
+        private readonly HeavyCallMeter _allocMeter = new();
+
+        private void MaybeHintAllocating(object raw)
+        {
+            int len = raw switch { ReadOnlyMemory<double> m => m.Length, double[] a => a.Length, _ => 0 };
+            if (len == 0 || Compute == null || !AllocatesResultEachCall(Compute)) return;
+            if (!_allocMeter.Record(len, System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency)) return;
+            if (!s_allocHinted.TryAdd(Compute.Method, true)) return;
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ComputeFeature] C# 指标 {Compute.Method.DeclaringType?.Name}.{Compute.Method.Name} 每次返回新数组,当前结果 {len} 个元素" +
+                $"(≥ {HeavyCallMeter.HeavyLength},每块进 LOH)且 1 秒内算了 ≥ {HeavyCallMeter.HeavyCallsPerSecond} 次。" +
+                "改用 ComputeInto(input, output) / ComputeIntoMulti 往框架给的缓冲里写,可零分配。");
+        }
+#endif
+
+        /// <summary>
+        /// 判断"返回新数组"的旧写法是否重到值得提示:结果 ≥ <see cref="HeavyLength"/> 个 double(85000 字节,正好进 LOH)
+        /// 且 1 秒窗口内算了 ≥ <see cref="HeavyCallsPerSecond"/> 次。小数据量 / 低频指标不提示,旧写法完全够用。
+        /// </summary>
+        internal sealed class HeavyCallMeter
+        {
+            public const int HeavyLength = 85_000 / sizeof(double);   // 10625
+            public const int HeavyCallsPerSecond = 5;
+            private long _windowStart;
+            private int _calls;
+
+            /// <summary>记一次调用;返回 true 表示已达到"重"的标准(调用方自己保证只提示一次)。</summary>
+            public bool Record(int resultLength, long now, long ticksPerSecond)
+            {
+                if (resultLength < HeavyLength) return false;
+                if (_calls == 0 || now - _windowStart >= ticksPerSecond) { _windowStart = now; _calls = 0; }
+                return ++_calls >= HeavyCallsPerSecond;
+            }
+        }
+
+        /// <summary>
+        /// 是不是"每次自己 new 结果数组"的 C# 指标(DEBUG 下提示迁移到 <see cref="ComputeInto"/>)。
+        /// Python handler 不算:PythonInvokerShim 用表达式树编译(Method.DeclaringType 为空),结果由框架拷进调用点池。
+        /// 返回字典的多输出 handler 也不算(零分配签名只支持单输出)。
+        /// </summary>
+        internal static bool AllocatesResultEachCall(Delegate compute)
+        {
+            if (compute is ComputeInto || IsComputeIntoFamily(compute)) return false;
+            if (compute.Method.DeclaringType == null) return false;
+            var ret = compute.Method.ReturnType;
+            return ret == typeof(ReadOnlyMemory<double>) || ret == typeof(double[]);
+        }
+
+        /// <summary>多输入的零分配签名(ComputeIntoMulti / ComputeInto2 / 3 / 4)。</summary>
+        internal static bool IsComputeIntoFamily(Delegate d)
+            => d is ComputeIntoMulti || d is ComputeInto2 || d is ComputeInto3 || d is ComputeInto4;
+
+        // 多输入零分配签名:output 长度 = 各输入长度最小值,缓冲从调用点池租
+        internal static ReadOnlyMemory<double> InvokeComputeInto(Delegate compute, object?[] args, ResultBufferPool.CallScope call)
+        {
+            var roms = new ReadOnlyMemory<double>[args.Length];
+            int n = int.MaxValue;
+            for (int i = 0; i < roms.Length; i++) { roms[i] = (ReadOnlyMemory<double>)args[i]!; n = Math.Min(n, roms[i].Length); }
+            if (n == int.MaxValue || n == 0) return ReadOnlyMemory<double>.Empty;
+            var arr = call.Rent(n);
+            var output = arr.AsSpan(0, n);
+            switch (compute)
+            {
+                case ComputeIntoMulti m: m(roms, output); break;
+                case ComputeInto2 c2 when roms.Length == 2: c2(roms[0].Span.Slice(0, n), roms[1].Span.Slice(0, n), output); break;
+                case ComputeInto3 c3 when roms.Length == 3: c3(roms[0].Span.Slice(0, n), roms[1].Span.Slice(0, n), roms[2].Span.Slice(0, n), output); break;
+                case ComputeInto4 c4 when roms.Length == 4: c4(roms[0].Span.Slice(0, n), roms[1].Span.Slice(0, n), roms[2].Span.Slice(0, n), roms[3].Span.Slice(0, n), output); break;
+                default:
+                    throw new InvalidOperationException($"{compute.GetType().Name} 需要 {compute.Method.GetParameters().Length - 1} 个输入,InputOrder 给了 {roms.Length} 个。");
+            }
+            return new ReadOnlyMemory<double>(arr, 0, n);
+        }
+
+        private static void WarnSpanMultiOutput() =>
+            System.Diagnostics.Trace.TraceWarning("[ComputeFeature] ComputeInto / ComputeIntoMulti 只支持单输出(OutputPort),多输出请用返回字典的 Func 签名。");
+
+        // 把 handler 返回值按 Outputs 字典(多输出)或 OutputPort(单输出)路由到 board。
+        private void WriteOutput(DataBlackboard board, object? raw, bool multiOutput, ResultBufferPool.CallScope call)
+        {
+            if (raw == null) return;
+#if DEBUG
+            if (!multiOutput) MaybeHintAllocating(raw);
+#endif
+
+            if (multiOutput)
+            {
+                if (raw is not IDictionary<string, object?> dict)
+                {
+                    Console.WriteLine($"[ComputeFeature] 多输出模式 handler 应返 IDictionary<string,object?>,实际 {raw.GetType().Name},跳过。");
+                    return;
+                }
+                using (board.WriteScope())
+                {
+                    foreach (var kv in Outputs)
+                    {
+                        if (!dict.TryGetValue(kv.Key, out var v) || v == null) continue;
+                        ReadOnlyMemory<double> rom = v switch
+                        {
+                            ReadOnlyMemory<double> m => m,
+                            double[] a              => a,
+                            _                       => ReadOnlyMemory<double>.Empty,
+                        };
+                        if (rom.Length > 0) { board.Write(kv.Value, rom); call.Written(kv.Value, rom); }
+                    }
+                }
+                return;
+            }
+
+            // 单输出
+            if (raw is not ReadOnlyMemory<double> rom1)
+            {
+                if (raw is double[] arr) rom1 = arr;
+                else
+                {
+                    Console.WriteLine($"[ComputeFeature] handler 返回类型 {raw.GetType().Name} 不是 ROM<double>,跳过。");
+                    return;
+                }
+            }
+            using (board.WriteScope())
+            {
+                board.Write(OutputPort, rom1);
+                call.Written(OutputPort, rom1);
+            }
+        }
+
+        protected override void OnComputeProject(FeatureContext ctx)
+        {
+            // 数据流由 OnComputeCompose 里的 flow.Watch 驱动 —— OnProject 帧路径不需做事。
+        }
+    }
+}

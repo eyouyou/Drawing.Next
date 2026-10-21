@@ -69,7 +69,7 @@ namespace Hevo.Charting.Tests
         {
             public DataPort<double> Input { get; init; } = null!;
             public DataPort<double> Output { get; init; } = null!;
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
                 => flow.Watch(new object[] { Input }, b => { using (b.WriteScope()) b.Write(Output, b.Read(Input) * 2); });
             protected override void OnProject(FeatureContext ctx) { }
         }

@@ -16,6 +16,7 @@ using Hevo.Charting.LowCode.Designer.Converters;
 using Hevo.Charting.LowCode.Designer.GraphViewer;
 using Hevo.Charting.LowCode.Designer.GraphViewer.Wrappers;
 using Hevo.Charting.PythonNet;
+using Hevo.Charting.Samples;
 
 namespace Hevo.Drawing.LowCodeDemo
 {
@@ -142,6 +143,7 @@ namespace Hevo.Drawing.LowCodeDemo
             // 画布每次切回都被重置成 sample,Click handler 也会重复订阅(单击 N 次开 N 个预览窗口)。
             GraphViewerBootstrap.Initialize();
             BuiltinRegistration.RegisterAssemblyOf<SinWaveDataSource>();
+            BuiltinRegistration.RegisterAssemblyOf<LowCodeDemoView>();
             // §D2.5.E2E ComputeFeature / HandlerFeature 进 ComponentRegistry + 类别表 ——
             // GraphViewer picker 能选到,蓝图 JSON 里 "TypeName": "ComputeFeature" 能 Resolve。
             // 仅注册 type,Python 解释器懒启 (Run Blueprint 点击时才 EnsureInitialized)。
@@ -690,18 +692,18 @@ namespace Hevo.Drawing.LowCodeDemo
                 position: at);
 
             decor.Properties[nameof(PlotAreaDecorFeature.BackgroundBrush)] =
-                (IHevoBrush)new HevoSolidBrush(Color.FromRgb(0x14, 0x16, 0x1B));
+                (IHevoBrush)new HevoSolidBrush(HevoColor.FromRgb(0x14, 0x16, 0x1B));
             decor.Properties[nameof(PlotAreaDecorFeature.BorderStyle)] =
-                LineStyle.Create(Color.FromArgb(0x55, 0xB0, 0xBE, 0xC5), thickness: 1.0);
+                LineStyle.Create(HevoColor.FromArgb(0x55, 0xB0, 0xBE, 0xC5), thickness: 1.0);
 
             var yAxis = NodeFactory.CreateNode(typeof(AxisFeature), at);
             yAxis.Properties[nameof(AxisFeature.AxisStyle)] =
-                AxisStyleTrait.Create(AxisPlacement.Right, Color.FromRgb(0xB0, 0xBE, 0xC5), fontSize: 11.0);
+                AxisStyleTrait.Create(AxisPlacement.Right, HevoColor.FromRgb(0xB0, 0xBE, 0xC5), fontSize: 11.0);
 
             var lineRaw = NodeFactory.CreateNode(typeof(LineSeriesFeature), at);
             lineRaw.Properties[nameof(LineSeriesFeature.LayerName)] = "Raw";
             lineRaw.Properties[nameof(LineSeriesFeature.Style)] =
-                LineStyle.Create(Color.FromArgb(0x66, 0x4F, 0xC3, 0xF7), thickness: 1.0);
+                LineStyle.Create(HevoColor.FromArgb(0x66, 0x4F, 0xC3, 0xF7), thickness: 1.0);
 
             // §D2.5.E2E PyCompute 节点 —— 把 SinWave.Value 喂给 Python bollinger_upper,输出布林上轨给下面那条线。
             // Properties["Compute"] 是 string,蓝图加载阶段 ResolveHandlerReferences 翻译成
@@ -713,7 +715,7 @@ namespace Hevo.Drawing.LowCodeDemo
             var lineMa = NodeFactory.CreateNode(typeof(LineSeriesFeature), at);
             lineMa.Properties[nameof(LineSeriesFeature.LayerName)] = "BB Upper";
             lineMa.Properties[nameof(LineSeriesFeature.Style)] =
-                LineStyle.Create(Color.FromRgb(0xFF, 0xB7, 0x4D), thickness: 2.0);
+                LineStyle.Create(HevoColor.FromRgb(0xFF, 0xB7, 0x4D), thickness: 2.0);
 
             // §D2.6 Pine 风味:PyPlot 节点 = 一个文件 (pine_demo.py @indicator pine_macd) 自动出 line+bar 混合 series。
             // 选 pine_macd(line ×2 + bar ×1)同时验证 PlotFeature 的 LineLayer / BarLayer 双路径,

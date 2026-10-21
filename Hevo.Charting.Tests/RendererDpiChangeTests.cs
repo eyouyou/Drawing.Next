@@ -31,7 +31,7 @@ namespace Hevo.Charting.Tests
             public void Publish<T>(T snapshot) where T : class { }
         }
 
-        private static readonly HevoPen Pen = new(new HevoSolidBrush(Colors.Black), 1);
+        private static readonly HevoPen Pen = new(new HevoSolidBrush(HevoColors.Black), 1);
 
         private static int PartialPixels(WpfRenderProvider provider, double k)
         {

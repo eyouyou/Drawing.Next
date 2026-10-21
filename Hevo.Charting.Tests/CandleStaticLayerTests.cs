@@ -21,7 +21,7 @@ namespace Hevo.Charting.Tests
             public CandlePorts Ports { get; } = new();
             public DataPort<RealRange> YRange { get; } = new("T_YRange");
             public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
-            protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
 
             protected override void DefineFeatures(IFeatureContext canvas)
             {

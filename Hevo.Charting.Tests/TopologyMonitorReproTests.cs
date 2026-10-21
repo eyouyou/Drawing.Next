@@ -34,7 +34,7 @@ namespace Hevo.Charting.Tests
             public WatchRelay(DataPort<int> input, DataPort<int>? output = null, Func<int, int>? map = null)
             { _input = input; _output = output; _map = map ?? (v => v + 1); }
 
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
                 => flow.Watch(new object[] { _input }, b =>
                 {
                     Fired++;
@@ -53,7 +53,7 @@ namespace Hevo.Charting.Tests
             private readonly Feature _child;
             public ParentAddsChild(Feature child) => _child = child;
 
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
                 => AddChildFeatureDuringCompose(_child, chart, ctx, flow);
 
             protected override void OnProject(FeatureContext ctx) { }
@@ -108,7 +108,7 @@ namespace Hevo.Charting.Tests
         // ── 3. Viewport.* 端口的归属 ────────────────────────────────────────────────
         private sealed class DummyChartFeature : ChartFeature
         {
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
             protected override void OnProject(FeatureContext ctx) { }
         }
 
@@ -116,7 +116,7 @@ namespace Hevo.Charting.Tests
         {
             private readonly WorkflowTrigger<DataBlackboard> _trigger = new();
             public DummyChartFeature Dummy { get; } = new();
-            protected override void DefineDataFlow(ChartCell chart) => _trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => _trigger.BindTo(chart);
             protected override void DefineFeatures(IFeatureContext canvas)
             {
                 canvas.Add(Dummy);

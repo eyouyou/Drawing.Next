@@ -1,0 +1,406 @@
+﻿using Hevo.Charting.Abstractions;
+using System.Buffers;
+using System.Runtime.CompilerServices;
+
+namespace Hevo.Charting.Core
+{
+    public static class ChartLifecycle
+    {
+        // session 存在 cell 的引擎上(<see cref="ChartEngine.ActiveSession"/>),换掉时旧的随即 Dispose。
+        public static void SetActiveSession(IChartCell cell, IDisposable? value)
+            => cell.Engine.ActiveSession = value;
+
+        public static IDisposable? GetActiveSession(IChartCell cell)
+            => cell.Engine.ActiveSession;
+
+        // 设计决策:不自动 dispose lifeTimeSession。
+        //   原因:WPF 没有干净的"真死"事件——Unloaded 在 tab 切换/Visibility 切换都会触发,
+        //   提前 Dispose 会把 compose 期的所有订阅烧光,Resume 接不回来。
+        //   tab 切换期间由 ChartCell.OnCellUnloaded/OnCellLoaded 走 Suspend/Resume 路径暂停/恢复活动,
+        //   session 全程留着,资源不会被误烧。
+        //
+        //   业务侧要彻底回收(如 Window 关闭、动态移除 cell 不再用)时,显式调 <see cref="ChartCell.Shutdown"/>。
+        public static void BindTo(IChartCell cell, IDisposable session)
+        {
+            cell.Engine.ActiveSession = session;
+        }
+    }
+
+    /// <summary>
+    /// 该 Session 生命周期与 <see cref="ChartCell"/> 的Load和UnLoaded 绑定
+    /// </summary>
+    // 修复 §B.2.4（方案 B 最小合并）：ChartSession 实现 IDisposableHost，
+    // 让 `.OwnedBy(session)` 与 `.OwnedBy(feature)` 走同一契约。
+    // Feature / Schema 的 IDisposableHost 实现保留独立，scope 分离不变——
+    // Feature 级订阅仍随 Decompose 释放，不会被升级到 chart 级泄漏（参见 §B.2.5）。
+    public sealed class ChartSession : IDisposable, IDisposableHost
+    {
+        private readonly List<Action> _cleanups = new();
+        private readonly CancellationTokenSource _cts = new();
+
+        // 暴露给 Pipeline 使用的取消令牌
+        public CancellationToken Token => _cts.Token;
+
+        // 1. 你提议的包装：处理成对的事件或操作
+        public void Watch<T>(T element, Action<T> subscribe, Action<T> unsubscribe) where T : notnull
+        {
+            subscribe(element);
+            _cleanups.Add(() => unsubscribe(element));
+        }
+
+        // 2. 简易包装：直接处理已经写好的 Action
+        public void AddCleanup(Action cleanup) => _cleanups.Add(cleanup);
+
+        // 3. IDisposableHost 契约实现（chart 级生命周期回收）
+        public void RegisterDisposable(IDisposable disposable)
+        {
+            if (disposable != null) _cleanups.Add(disposable.Dispose);
+        }
+
+        // 4. 自动回收 IDisposable 对象（如 Timer, Brush 等）——RegisterDisposable 的语法糖，保留返回值链式
+        public T Own<T>(T disposable) where T : IDisposable
+        {
+            RegisterDisposable(disposable);
+            return disposable;
+        }
+
+        public void Dispose()
+        {
+            // 先触发取消信号，停止所有正在跑的 Pipeline
+            _cts.Cancel();
+            _cts.Dispose();
+
+            // 倒序执行清理逻辑（符合入栈出栈顺序，更安全）
+            for (int i = _cleanups.Count - 1; i >= 0; i--)
+            {
+                try { _cleanups[i](); }
+                catch { /* 屏蔽清理过程中的异常，确保清理完 */ }
+            }
+            _cleanups.Clear();
+        }
+    }
+
+    public static class SessionExtensions
+    {
+        public static void Bind(this ChartSession session, Action subscribe, Action unsubscribe)
+        {
+            subscribe();
+            session.AddCleanup(unsubscribe);
+        }
+    }
+
+
+
+    // 定义一个轻量级的任务包
+    public readonly struct RenderTask
+    {
+        public readonly IChartLayer Layer;
+        public readonly IVisualData DataSnapshot; // 快照数据
+
+        public RenderTask(IChartLayer layer, IVisualData data)
+        {
+            Layer = layer;
+            DataSnapshot = data;
+        }
+    }
+
+    public partial class RenderContext : IDisposable
+    {
+        // ==========================================
+        // 1. 事务草稿箱 (隔离层)
+        // ==========================================
+
+        // 局部草稿：Layer -> 该图层本次的变更集
+        private readonly Dictionary<IChartLayer, VisualDataBag> _transactionMap = new();
+
+        // 全局草稿：本次流程中对全局属性的变更集
+        private readonly VisualDataBag _globalDraft = new();
+
+        // ==========================================
+        // 2. 真实数据引用 (存储层)
+        // ==========================================
+
+        private readonly VisualDataBag _liveGlobalData;
+        private readonly ConditionalWeakTable<IChartLayer, VisualDataBag> _liveLocalMap;
+
+        /// <summary>
+        /// 挂载在当前上下文中的生命周期 Session
+        /// </summary>
+        public ChartSession? Session { get; }
+
+        public RenderContext(
+            VisualDataBag globalData,
+            ConditionalWeakTable<IChartLayer, VisualDataBag> localDataMap,
+            ChartSession? session = null)
+        {
+            _liveGlobalData = globalData;
+            _liveLocalMap = localDataMap;
+            Session = session;
+        }
+
+        // ==========================================
+        // 3. 核心流式 API (获取遥控器)
+        // ==========================================
+
+        /// <summary>
+        /// 获取特定图层的操作代理。
+        /// 所有的修改都会先进入私有的草稿箱。
+        /// </summary>
+        public VisualProxy<TLayer> For<TLayer>(TLayer layer) where TLayer : IChartLayer
+        {
+            // 1. 获取或创建该图层的"草稿袋"
+            if (!_transactionMap.TryGetValue(layer, out var draftBag))
+            {
+                draftBag = new VisualDataBag();
+                _transactionMap[layer] = draftBag;
+            }
+
+            // 2. 获取该图层的"实时袋" (作为读取基准)
+            var liveLocal = _liveLocalMap.GetValue(layer, _ => new VisualDataBag());
+
+            // 3. 返回代理：读 Live，写 Draft
+            return new VisualProxy<TLayer>(layer, liveLocal, draftBag);
+        }
+
+        /// <summary>
+        /// 把帧外攒下的本层 Trait 并进本帧该图层的草稿,跟 Feature 在 OnProject 里 For(layer).PublishData 等价
+        /// (SubmitSync 合并草稿时照常唤醒 / 判脏)。给 <see cref="LayerFeed"/> 用。
+        /// </summary>
+        internal void PublishLocalDraft(IChartLayer layer, VisualDataBag pending)
+        {
+            if (!_transactionMap.TryGetValue(layer, out var draftBag))
+            {
+                draftBag = new VisualDataBag();
+                _transactionMap[layer] = draftBag;
+            }
+            draftBag.PublishAllFrom(pending);
+        }
+
+        /// <summary>
+        /// 获取全局共享属性的操作代理。
+        /// 修改全局配置（如主题、坐标系）会存入全局草稿箱。
+        /// </summary>
+        public VisualProxy<IVisualData> Shared()
+        {
+            // 基准使用实时的全局袋子，写入使用全局草稿袋
+            return new VisualProxy<IVisualData>(_liveGlobalData, _liveGlobalData, _globalDraft);
+        }
+
+        // ==========================================
+        // 4. 事务提交 API (UI 线程执行)
+        // ==========================================
+
+        /// <summary>
+        /// 【核心】提交事务并同步更新图层。
+        /// 将所有草稿合并到真实存储，并根据变更情况标脏图层，最后触发 Layer.Update。
+        /// </summary>
+        // 参数走 IReadOnlyList 而非 IEnumerable:
+        //   foreach 在接口上会装箱出 IEnumerator<T> 引用类型,每帧 1 次堆分配。
+        //   ActiveLayers 本来就是 IReadOnlyList,for + 索引 0 分配。
+        public void SubmitSync(IReadOnlyList<IChartLayer> layers)
+        {
+            // 1. 合并全局变更
+            bool globalChanged = !_globalDraft.IsEmpty;
+            if (globalChanged) _liveGlobalData.CommitFrom(_globalDraft);
+
+            // 2. 极速判脏循环
+            for (int i = 0; i < layers.Count; i++)
+            {
+                if (layers[i] is not ChartLayer cl) continue;
+
+                var liveLocalBag = _liveLocalMap.GetValue(cl, _ => new VisualDataBag());
+                bool hasLocalDraft = _transactionMap.TryGetValue(cl, out var draftBag) && !draftBag.IsEmpty;
+
+                // 如果有局部数据提交，合并到它的 Live 库
+                if (hasLocalDraft) liveLocalBag.CommitFrom(draftBag);
+
+#if DEBUG
+                // 只记帧数 / 写日志,不影响下面的判脏
+                cl.TickSilentDiagnosis(liveLocalBag, _liveGlobalData);
+#endif
+
+                // 如果已经脏了，就不用继续查了
+                if (cl.IsDirty) continue;
+
+                // ==========================================
+                // 💥 策略 A：针对【深度睡眠】图层 (局部驱动唤醒)
+                // ==========================================
+                if (!cl.IsDiscovered)
+                {
+                    // 第一帧哪怕尺寸变了它都不管。只有专属于它的局部数据到了，它才会被“点醒”。
+                    // 有意如此:第一次 Update 要过 [RequiredTrait] 的 fail-fast 校验,等本层数据到齐再录,
+                    // 不会因为提前唤醒抛错或画出半成品。代价是只读共享 Trait 的图层永远不醒 ——
+                    // Debug 构建下 TickSilentDiagnosis 会把这种图层报出来。
+                    if (hasLocalDraft) cl.MarkDirty();
+                    continue;
+                }
+
+                // ==========================================
+                // 💥 Bag 级"无变化"短路:本帧 global 没动 + 此 layer 的 local 没动
+                // ⇒ 它跟踪的任何 trait ref 都不可能变 ⇒ 跳过 CheckIfDirty 的 foreach。
+                // hover / idle 帧通常只有 1 个 layer 的 local 被写,其余全部命中此短路。
+                // ==========================================
+                // 测量对照组:关掉图层侧判脏(短路 + 引用比对),已发现的图层每帧重录(默认关,见 DevTools/IncrementalRenderProbe)
+                if (DevTools.IncrementalRenderProbe.ForceLayerRedraw) { cl.MarkDirty(); continue; }
+
+                bool bagUnchanged = !globalChanged && !hasLocalDraft;
+                if (bagUnchanged && !DevTools.IncrementalRenderProbe.BypassBagShortCircuit) continue;
+
+                // ==========================================
+                // 💥 策略 B：针对【工作状态】图层 (O(1) 引用指纹碰撞)
+                // ==========================================
+                if (cl.DependencyTracker.CheckIfDirty(liveLocalBag, _liveGlobalData))
+                {
+                    // 只在对照组里可能进入:短路会跳过但引用比对判脏,记下是哪个图层、哪个 Trait
+                    if (bagUnchanged) DevTools.IncrementalRenderProbe.RecordShortCircuitMiss(cl, liveLocalBag, _liveGlobalData);
+                    cl.MarkDirty();
+                }
+            }
+
+            ClearTransactions();
+        }
+
+        private void ClearTransactions()
+        {
+            // 调用之前写好的 0 GC 清理方法
+            foreach (var draft in _transactionMap.Values)
+            {
+                draft.Clear();
+            }
+            _globalDraft.Clear();
+        }
+
+        /// <summary>
+        /// 为多线程渲染准备任务快照。
+        /// 返回的 RenderTask 包含不可变的级联透镜。
+        /// </summary>
+        public FrameSnapshot PrepareTasks(IReadOnlyList<IChartLayer> layers)
+        {
+            int count = layers.Count;
+
+            // 1. 借出全局快照
+            var globalSnap = _liveGlobalData.RentSnapshot();
+
+            // 2. 借出 Map 数组 (用于支持子图层寻址)
+            var layerMap = ArrayPool<KeyValuePair<IChartLayer, object[]>>.Shared.Rent(count);
+
+            // 3. 实例化帧上下文
+            var frame = new FrameSnapshot(globalSnap, layerMap, count);
+
+            // 4. 组装任务
+            for (int i = 0; i < count; i++)
+            {
+                var layer = layers[i];
+                var liveLocal = _liveLocalMap.GetValue(layer, _ => new VisualDataBag());
+
+                // 借出局部快照
+                var localSnap = liveLocal.RentSnapshot();
+
+                // 登记到寻址地图中
+                layerMap[i] = new KeyValuePair<IChartLayer, object[]>(layer, localSnap);
+
+                // 生成带有寻址能力的级联透镜
+                var view = new CascadingVisualData(localSnap, globalSnap, frame);
+                frame.Tasks.Add(new RenderTask(layer, view));
+            }
+
+            return frame;
+        }
+
+        public void Dispose()
+        {
+            ClearTransactions();
+            GC.SuppressFinalize(this);
+        }
+    }
+
+
+    /// <summary>
+    /// 轻量级 0 GC 代理遥控器。
+    /// 负责生成新快照、替换旧指针，并自动触发脏重绘。
+    /// </summary>
+    /// <summary>
+    /// 轻量级数据操作代理。
+    /// 实现了“基于基准读，写入草稿箱”的逻辑。
+    /// </summary>
+    public readonly struct VisualProxy<TTarget>
+    {
+        public TTarget Target { get; }
+
+        private readonly IVisualData _baseData;  // 读基准 (Live Data)
+        private readonly IVisualData _draftData; // 写目标 (Transaction Draft)
+
+        // 只有经 FeatureContext.For / Shared 拿到的代理才带:Use<T> 要把"上次读到的"记在当前 Feature 身上。
+        // 放进本 struct 而不是另起一个类型,是为了让生成器产出的强类型 PublishData 扩展(this VisualProxy<TLayer>)
+        // 和跨程序集调用方(PythonNet)照旧命中。
+        private readonly FeatureContext? _feature;
+
+        internal VisualProxy(TTarget target, IVisualData baseData, IVisualData draftData, FeatureContext? feature = null)
+        {
+            Target = target;
+            _baseData = baseData;
+            _draftData = draftData;
+            _feature = feature;
+        }
+
+        internal VisualProxy<TTarget> WithFeature(FeatureContext feature)
+            => new VisualProxy<TTarget>(Target, _baseData, _draftData, feature);
+
+        /// <summary>
+        /// 【新增】读取当前视角的最新数据。
+        /// 规则：优先读取当前事务的草稿(_draftData)，如果没有，再回退读取历史真实数据(_baseData)
+        /// </summary>
+        public TData? Read<TData>() where TData : class
+        {
+            return _draftData.Get<TData>() ?? _baseData.Get<TData>();
+        }
+
+        /// <summary>
+        /// 读 + 跟本 Feature 上一帧读到时比,变没变(按引用比,Trait 是不可变 record,换了才算变)。
+        /// 只在 OnProject 里调;只报告,不唤醒:Trait 变了不会让没被叫起的 Feature 重跑,见 01 号文档「Use 体系」。
+        /// 状态按 (作用域, Trait 类型) 存,不按代码行,所以放进循环 / helper 都行;同一帧读两次,只有第一次能看到变化。
+        /// </summary>
+        public (TData? Value, bool IsChanged) Use<TData>() where TData : class
+        {
+            if (_feature is null)
+                throw new InvalidOperationException(
+                    $"Use<{typeof(TData).Name}> 只能用 OnProject 里 ctx.For(layer) / ctx.Shared() 拿到的代理调用;" +
+                    "RenderContext 直接给的代理不知道是哪个 Feature 在读,改用 Read<T>()。");
+            return _feature.UseTrait(Target!, Read<TData>());
+        }
+
+        /// <summary>
+        /// 基于老快照修改，生成新快照原子替换。
+        /// </summary>
+        /// <param name="modifier">
+        /// 修改器函数。
+        /// 入参：旧数据（可能是 null，表示之前未配置）。
+        /// 返回：新数据（必须非 null）。
+        /// </param>
+        internal VisualProxy<TTarget> UpdateData<TData>(Func<TData?, TData> modifier)
+            where TData : class
+        {
+            // 1. 优先从草稿箱找（同一个事务内可能改了多次）
+            // 2. 其次从基准数据找（上一帧的数据）
+            // 3. 都没有就是 null
+            var oldData = _draftData.Get<TData>() ?? _baseData.Get<TData>();
+
+            // 执行修改器。调用者负责处理 null 的情况 (通常使用 ?? 操作符)
+            var newData = modifier(oldData);
+
+            // 写入草稿
+            _draftData.Publish(newData);
+            return this;
+        }
+
+        /// <summary>
+        /// 全量覆盖新数据快照。
+        /// </summary>
+        internal VisualProxy<TTarget> PublishData<TData>(TData snapshot) where TData : class
+        {
+            _draftData.Publish(snapshot);
+            return this;
+        }
+    }
+
+}
