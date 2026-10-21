@@ -106,7 +106,7 @@ namespace Hevo.Charting.Tests
         public void AttachAndPublish<TLayer, T>(TLayer layer, T trait) where TLayer : IChartLayer where T : class
             => AttachLayer(layer).PublishData(trait);
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             => OnComposeAction?.Invoke(this);
 
         protected override void OnProject(FeatureContext ctx)
@@ -189,7 +189,7 @@ namespace Hevo.Charting.Tests
 
         public ProbeSchema(params Feature[] features) => _features = features;
 
-        protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+        protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
 
         protected override void DefineFeatures(IFeatureContext canvas)
         {

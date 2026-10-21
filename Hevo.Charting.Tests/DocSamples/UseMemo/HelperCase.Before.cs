@@ -11,7 +11,7 @@ namespace Hevo.Charting.DocSamples.UseMemo.Before
         public DataPort<ReadOnlyMemory<double>> Highs { get; init; } = null!;
         public DataPort<ReadOnlyMemory<double>> Lows { get; init; } = null!;
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
 
         protected override void OnProject(FeatureContext ctx)
         {

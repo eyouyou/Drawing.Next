@@ -24,9 +24,9 @@ namespace Hevo.Charting.Tests
         private readonly ITestOutputHelper _out;
         public FillDrawingTests(ITestOutputHelper output) => _out = output;
 
-        private static readonly HevoSolidBrush GreenBrush = new(Color.FromRgb(0, 160, 0));
-        private static readonly HevoSolidBrush RedBrush = new(Colors.Red);
-        private static readonly HevoPen NavyPen = new(new HevoSolidBrush(Colors.Navy), 1);
+        private static readonly HevoSolidBrush GreenBrush = new(HevoColor.FromRgb(0, 160, 0));
+        private static readonly HevoSolidBrush RedBrush = new(HevoColors.Red);
+        private static readonly HevoPen NavyPen = new(new HevoSolidBrush(HevoColors.Navy), 1);
 
         // ====================================================================
         // ① 录制
@@ -171,8 +171,7 @@ namespace Hevo.Charting.Tests
         {
             var cell = new ChartCell
             {
-                Template = new ChartTemplate { VisualTree = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter)) },
-            };
+            }.WithShell();
             cell.Measure(new Size(W, H));
             cell.Arrange(new Rect(0, 0, W, H));
             cell.UpdateLayout();
@@ -203,7 +202,7 @@ namespace Hevo.Charting.Tests
             var wpf = Capture(cell);
             layer.Mode = RenderMode.Bitmap;
             cell.Invalidate();
-            Assert.True(layer.BitmapSurface is { IsMounted: true });
+            Assert.True(layer.Wpf().BitmapSurface is { IsMounted: true });
             return (wpf, Capture(cell));
         }
 
@@ -331,7 +330,7 @@ namespace Hevo.Charting.Tests
             var px = RenderAt(d =>
             {
                 AxisAlignedFillScene(d);
-                d.DrawPolygon(null, new HevoPen(new HevoSolidBrush(Colors.Blue), 2), RectPolygon);
+                d.DrawPolygon(null, new HevoPen(new HevoSolidBrush(HevoColors.Blue), 2), RectPolygon);
             }, k);
             int solid = 0;
             foreach (var p in px) if (p >> 24 == 0xFF) solid++;

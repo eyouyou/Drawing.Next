@@ -150,7 +150,7 @@ namespace Hevo.Charting.Tests
     /// <summary>拿到 ProbeTraitA 才画一个矩形,否则什么都不录。</summary>
     internal sealed class DrawsWhenATestLayer : ChartLayer
     {
-        private static readonly HevoSolidBrush s_fill = new(System.Windows.Media.Color.FromRgb(255, 0, 0));
+        private static readonly HevoSolidBrush s_fill = new(HevoColor.FromRgb(255, 0, 0));
 
         protected override void OnUpdate(IVisualData data, IDrawingSink drawSink, WidgetBuffer widgetSink)
         {

@@ -226,7 +226,7 @@ namespace Hevo.Charting.Tests
         {
             private readonly IWorkflow<DataBlackboard> _inner;
             public BareRenderFlow(IWorkflow<DataBlackboard> inner) => _inner = inner;
-            public ChartCell Chart => null!;
+            public IChartCell Chart => null!;
             public IDisposable Subscribe(Action<DataBlackboard> onNext, Action<Exception>? onError = null) => _inner.Subscribe(onNext, onError);
             public IRenderFlow<TOut> Wrap<TOut>(IWorkflow<TOut> next) => (IRenderFlow<TOut>)(object)new BareRenderFlow((IWorkflow<DataBlackboard>)(object)next);
         }

@@ -14,6 +14,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Hevo.Charting.Core\Hevo.Charting.Core.csproj" />
 		<ProjectReference Include="..\Hevo.Charting.CodeAnalysis\Hevo.Charting.CodeAnalysis.csproj">
 			<ReferenceOutputAssembly>false</ReferenceOutputAssembly>
 			<OutputItemType>Analyzer</OutputItemType>

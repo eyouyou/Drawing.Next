@@ -37,7 +37,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
         /// <summary>上下轨距中轨几个标准差。</summary>
         public double Width { get; init; } = 2.0;
 
-        protected override void OnComputeCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+        protected override void OnComputeCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             flow.WatchAsync(new object[] { InputPort }, board =>
             {

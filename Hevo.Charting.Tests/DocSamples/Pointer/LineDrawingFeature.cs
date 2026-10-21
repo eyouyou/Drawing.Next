@@ -22,8 +22,8 @@ namespace Hevo.Charting.DocSamples.Pointer
 
     public partial class DrawingLayer : ChartLayer
     {
-        private static readonly HevoPen LinePen = new HevoPen(new HevoSolidBrush(Color.FromRgb(0x40, 0x90, 0xF0)), 1.5);
-        private static readonly HevoPen RubberPen = new HevoPen(new HevoSolidBrush(Color.FromRgb(0x40, 0x90, 0xF0)), 1.0, new double[] { 4, 3 });
+        private static readonly HevoPen LinePen = new HevoPen(new HevoSolidBrush(HevoColor.FromRgb(0x40, 0x90, 0xF0)), 1.5);
+        private static readonly HevoPen RubberPen = new HevoPen(new HevoSolidBrush(HevoColor.FromRgb(0x40, 0x90, 0xF0)), 1.0, new double[] { 4, 3 });
 
         public DrawingLayer()
         {
@@ -73,7 +73,7 @@ namespace Hevo.Charting.DocSamples.Pointer
             Cursor = PointerCursor.Cross,
         };
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             AttachLayer(_layer);
             flow.WatchPointer(this, OnGesture);

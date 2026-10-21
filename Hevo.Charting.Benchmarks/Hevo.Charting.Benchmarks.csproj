@@ -19,8 +19,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Hevo.Charting\Hevo.Charting.csproj" />
-    <ProjectReference Include="..\Hevo.Charting.Skia\Hevo.Charting.Skia.csproj" />
+    <ProjectReference Include="..\Hevo.Charting.Skia.Wpf\Hevo.Charting.Skia.Wpf.csproj" />
     <ProjectReference Include="..\Hevo.Charting.PythonNet\Hevo.Charting.PythonNet.csproj" />
+    <!-- 蓝图端到端用 demo 的 MockKLineDataSource(示例共享数据源) -->
+    <ProjectReference Include="..\Hevo.Charting.Samples\Hevo.Charting.Samples.csproj" />
   </ItemGroup>
 
 </Project>

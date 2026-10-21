@@ -47,12 +47,11 @@ namespace Hevo.Charting.Tests
             }
         }
 
-        private static ChartCell NewCell() => new()
+        private static ChartCell NewCell() => new ChartCell()
         {
-            Template = new ChartTemplate { VisualTree = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter)) },
             Width = 200,
             Height = 100,
-        };
+        }.WithShell();
 
         private static List<ProbeLayer> Add(ChartCell cell, int count, bool uiOnly)
         {

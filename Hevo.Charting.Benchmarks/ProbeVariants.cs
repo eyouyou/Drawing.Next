@@ -43,7 +43,7 @@ namespace Hevo.Charting.Benchmarks
         public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
         public ViewportPorts Viewport { get; private set; } = null!;
 
-        protected override void DefineDataFlow(ChartCell chart)
+        protected override void DefineDataFlow(IChartCell chart)
         {
             Viewport = ViewportPorts.RequireAttached(Chart);
             Trigger.BindTo(chart);
@@ -53,8 +53,8 @@ namespace Hevo.Charting.Benchmarks
         {
             canvas.Seed<ScaleStrategyTrait>(ScaleStrategyTrait.CandleMode);
             var hitPort = HitPort;
-            var volumeMeta = FieldMeta.Literal("成交量", Color.FromRgb(0x4F, 0xC3, 0xF7), "F0");
-            var timeMeta = FieldMeta.Literal("时间", Colors.White, "HH:mm");
+            var volumeMeta = FieldMeta.Literal("成交量", HevoColor.FromRgb(0x4F, 0xC3, 0xF7), "F0");
+            var timeMeta = FieldMeta.Literal("时间", HevoColors.White, "HH:mm");
 
             canvas
                 .Environment(env => env

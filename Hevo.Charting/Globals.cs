@@ -12,3 +12,4 @@ global using System.Threading.Tasks;
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Tests")]
 // Skia 后端直接读 DrawingBuffer 指令与像素对齐工具(与 WPF / 位图后端同口径),不经公开 API 拷贝
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Skia")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Skia.Wpf")]

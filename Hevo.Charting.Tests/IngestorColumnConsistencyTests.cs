@@ -88,7 +88,7 @@ namespace Hevo.Charting.Tests
             private readonly DataPort<ReadOnlyMemory<double>> _port;
             private readonly ScanLayer _layer;
             public ScanFeature(DataPort<ReadOnlyMemory<double>> port, ScanStats stats) { _port = port; _layer = new ScanLayer(stats); }
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => AttachLayer(_layer);
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => AttachLayer(_layer);
             protected override void OnProject(FeatureContext ctx)
             {
                 var (col, changed) = ctx.UsePort(_port);
@@ -104,7 +104,7 @@ namespace Hevo.Charting.Tests
             private readonly Feature[] _features;
             public RaceSchema(Func<RaceSchema, Feature[]> features) => _features = features(this);
 
-            protected override void DefineDataFlow(ChartCell chart)
+            protected override void DefineDataFlow(IChartCell chart)
             {
                 Source.Pipe()
                     .LinkStream(cfg => cfg

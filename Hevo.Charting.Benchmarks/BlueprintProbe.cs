@@ -12,14 +12,16 @@ using Hevo.Charting.DevTools;
 using Hevo.Charting.LowCode.Designer;
 using Hevo.Charting.LowCode.Designer.Converters;
 using Hevo.Charting.LowCode.Designer.GraphViewer;
+using Hevo.Charting.Samples;
 
 namespace Hevo.Charting.Benchmarks
 {
     /// <summary>
     /// 蓝图端到端:LowCodeDemo 的 default_kline_dashboard.json(主图 + 成交量 + 策略三张联动图)
     /// → DashboardLauncher.LaunchEx(DryRun + 实例化数据源 / Feature + 装配 LinkedChartDashboard)→ 放进窗口
-    /// → 等每张图都在数据到达后出过一帧。数据源用 <see cref="ProbeFeedSource"/> 以别名 MockKLineDataSource 顶替
-    /// (Benchmarks 不引用 LowCodeDemo)。进程内第 1 次是冷启动(含 JIT),之后热启动。
+    /// → 等每张图都在数据到达后出过一帧。数据源就是 demo 用的 MockKLineDataSource(Hevo.Charting.Samples),
+    /// 只套一层 <see cref="TimedMockKLineSource"/> 记下拉取完成时刻;首批 <see cref="ProbeOptions.FeedBars"/> 根、不推送。
+    /// 进程内第 1 次是冷启动(含 JIT),之后热启动。
     /// </summary>
     internal static class BlueprintProbe
     {
@@ -28,7 +30,8 @@ namespace Hevo.Charting.Benchmarks
         public static SuiteResult RunBlueprint(ProbeOptions opt)
         {
             GraphViewerBootstrap.Initialize();
-            ComponentRegistry.Register(typeof(ProbeFeedSource), "MockKLineDataSource");
+            ComponentRegistry.Register(typeof(TimedMockKLineSource), nameof(MockKLineDataSource));
+            MockKLineDataSource.SeedBars = opt.FeedBars;
             var json = File.ReadAllText(Path.Combine(RepoRoot(), "Hevo.Drawing.LowCodeDemo", "Assets", "default_kline_dashboard.json"));
 
             // strategy 图的 PlotFeature 引用 Python handler(bb_breakout):跟 LowCodeDemo 一样把 PyIndicators/*.py 注册进
@@ -79,11 +82,13 @@ namespace Hevo.Charting.Benchmarks
         {
             var dashboard = JsonSerializer.Deserialize<Dashboard>(json, BlueprintJsonOptions.Default)!;
             var options = new DashboardLaunchOptions { Handlers = dashboard.Cells.ToDictionary(c => c.Id, _ => handlers) };
-            var sources = new List<ProbeFeedSource>();
-            void OnCreated(ProbeFeedSource s) { lock (sources) sources.Add(s); }
-            ProbeFeedSource.Created += OnCreated;
+            var sources = new List<TimedMockKLineSource>();
+            void OnCreated(TimedMockKLineSource s) { lock (sources) sources.Add(s); }
+            TimedMockKLineSource.Created += OnCreated;
+            // 每次从空时间线开始:首批 K 线在第一次拉取时生成,各次启动的工作量一样
+            MockKLineDataSource.Reset();
 
-            var rendered = new Dictionary<ChartCell, List<long>>();
+            var rendered = new Dictionary<IChartCell, List<long>>();
             IncrementalRenderProbe.FrameRendered = cell =>
             {
                 if (!rendered.TryGetValue(cell, out var list)) rendered[cell] = list = new List<long>();
@@ -153,7 +158,7 @@ namespace Hevo.Charting.Benchmarks
             finally
             {
                 IncrementalRenderProbe.FrameRendered = null;
-                ProbeFeedSource.Created -= OnCreated;
+                TimedMockKLineSource.Created -= OnCreated;
                 window?.Close();
                 RenderProbe.Pump(50);
             }
@@ -166,6 +171,27 @@ namespace Hevo.Charting.Benchmarks
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
             while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Hevo.Drawing.slnx"))) dir = dir.Parent;
             return dir?.FullName ?? throw new InvalidOperationException("找不到仓库根(Hevo.Drawing.slnx)");
+        }
+    }
+
+    /// <summary>
+    /// demo 的 MockKLineDataSource 原样,只多记两件测量要的事:实例创建(蓝图里数据源由 DashboardLauncher 实例化,靠它拿到引用)
+    /// 和拉取完成时刻(判断首帧是否已带数据)。
+    /// </summary>
+    public sealed class TimedMockKLineSource : MockKLineDataSource
+    {
+        public static event Action<TimedMockKLineSource>? Created;
+
+        /// <summary>最近一次拉取完成的时刻(Stopwatch ticks);0 = 还没拉到。</summary>
+        public long FetchedAt;
+
+        public TimedMockKLineSource() => Created?.Invoke(this);
+
+        protected override async Task<int> OnFetchAsync(string? context, CancellationToken token)
+        {
+            int n = await base.OnFetchAsync(context, token).ConfigureAwait(false);
+            FetchedAt = Stopwatch.GetTimestamp();
+            return n;
         }
     }
 }

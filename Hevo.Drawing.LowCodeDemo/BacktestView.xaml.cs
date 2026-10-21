@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Hevo.Drawing.LowCodeDemo.Backtest;
+using Hevo.Charting.Samples;
 
 namespace Hevo.Drawing.LowCodeDemo
 {

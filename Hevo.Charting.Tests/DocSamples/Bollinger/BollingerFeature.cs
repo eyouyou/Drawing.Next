@@ -1,5 +1,4 @@
 using System;
-using System.Windows.Media;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
 using Hevo.Charting.Features;
@@ -42,12 +41,12 @@ namespace Hevo.Charting.DocSamples.Bollinger
         public DataPort<ReadOnlyMemory<double>> LowerPort { get; init; } = null!;
         public DataPort<RealRange> YRangePort { get; init; } = null!;
 
-        public Color Color { get; init; } = Colors.Orange;
+        public HevoColor Color { get; init; } = HevoColors.Orange;
 
         // 图层由 Feature 私有,Schema 不直接接触
         private readonly BollingerLayer _layer = new BollingerLayer();
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
             // 装配期:注册图层,发布不随数据变化的样式
             AttachLayer(_layer).PublishData(BollingerStyle.Create(Color));
@@ -81,7 +80,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
             this SeriesBuilder builder,
             BollingerPorts bands,
             DataPort<RealRange> yRangePort,
-            Color? color = null)
+            HevoColor? color = null)
         {
             builder.Canvas.Add(new BollingerFeature
             {
@@ -89,7 +88,7 @@ namespace Hevo.Charting.DocSamples.Bollinger
                 MiddlePort = bands.Middle,
                 LowerPort = bands.Lower,
                 YRangePort = yRangePort,
-                Color = color ?? Colors.Orange,
+                Color = color ?? HevoColors.Orange,
             });
             return builder;
         }

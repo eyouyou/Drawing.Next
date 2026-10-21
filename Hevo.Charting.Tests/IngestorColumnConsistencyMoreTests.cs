@@ -75,10 +75,10 @@ namespace Hevo.Charting.Tests
 
         private sealed class RaceSchema2 : ChartReactiveSchema
         {
-            private readonly Action<ChartCell> _flow;
+            private readonly Action<IChartCell> _flow;
             private readonly Feature[] _features;
-            public RaceSchema2(Action<ChartCell> flow, Feature[] features) { _flow = flow; _features = features; }
-            protected override void DefineDataFlow(ChartCell chart) => _flow(chart);
+            public RaceSchema2(Action<IChartCell> flow, Feature[] features) { _flow = flow; _features = features; }
+            protected override void DefineDataFlow(IChartCell chart) => _flow(chart);
             protected override void DefineFeatures(IFeatureContext canvas) { foreach (var f in _features) canvas.Add(f); }
         }
 
@@ -100,7 +100,7 @@ namespace Hevo.Charting.Tests
             private readonly int _skip;
             private readonly ScanLayer _layer;
             public SkipScanFeature(DataPort<ReadOnlyMemory<double>> port, ScanStats stats, int skip) { _port = port; _skip = skip; _layer = new ScanLayer(stats); }
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => AttachLayer(_layer);
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => AttachLayer(_layer);
             protected override void OnProject(FeatureContext ctx)
             {
                 var (col, changed) = ctx.UsePort(_port);
@@ -113,7 +113,7 @@ namespace Hevo.Charting.Tests
             private readonly DataPort<ReadOnlyMemory<DateTime>> _port;
             private readonly TimeLayer _layer;
             public TimeScanFeature(DataPort<ReadOnlyMemory<DateTime>> port, TimeColumnTrait stats) { _port = port; _layer = new TimeLayer(stats); }
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => AttachLayer(_layer);
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) => AttachLayer(_layer);
             protected override void OnProject(FeatureContext ctx)
             {
                 var (col, changed) = ctx.UsePort(_port);

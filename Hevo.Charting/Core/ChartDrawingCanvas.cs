@@ -35,7 +35,7 @@ namespace Hevo.Charting
             v.YSnappingGuidelines = s_originGuideline;
         }
 
-        public void InsertVisual(int physicalIndex, ChartLayer visual)
+        public void InsertVisual(int physicalIndex, DrawingVisual visual)
         {
             SnapOrigin(visual);
             if (physicalIndex >= _visuals.Count)
@@ -44,7 +44,7 @@ namespace Hevo.Charting
                 _visuals.Insert(physicalIndex, visual);
         }
 
-        internal void RemoveVisual(ChartLayer visual) => _visuals.Remove(visual);
+        internal void RemoveVisual(Visual visual) => _visuals.Remove(visual);
         public DrawingVisual CreateVisual()
         {
             var v = new DrawingVisual();

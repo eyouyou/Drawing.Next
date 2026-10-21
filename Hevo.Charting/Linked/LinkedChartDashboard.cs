@@ -31,7 +31,7 @@ namespace Hevo.Charting.Linked
     /// 宿主要记住用户布局就在 <see cref="PaneRatiosChanged"/> 里存 <see cref="GetPaneRatios"/>,下次装配完调 <see cref="TrySetPaneRatios"/>。
     /// </para>
     /// </summary>
-    public class LinkedChartDashboard : UserControl
+    public class LinkedChartDashboard : UserControl, LowCode.Designer.GraphViewer.ILinkedChartDashboard
     {
         public LinkedChartContext Context { get; }
 
@@ -171,6 +171,19 @@ namespace Hevo.Charting.Linked
         /// <summary>加 raw schema(<b>不联动</b>,纯堆叠)。该 cell 自己的 viewport / hit / tooltip 完全独立。</summary>
         public LinkedChartDashboard AddRaw(ReactiveSchema schema, double heightRatio = 1)
             => AppendSlot(schema, heightRatio, attached: null);
+
+        // 蓝图装配器(DashboardAssembler)按角色加 cell
+        void LowCode.Designer.GraphViewer.ILinkedChartDashboard.AddCell(LowCode.Designer.DashboardCellRole role, ReactiveSchema schema, double heightRatio)
+        {
+            switch (role)
+            {
+                case LowCode.Designer.DashboardCellRole.Master: AddMaster(schema, heightRatio); break;
+                case LowCode.Designer.DashboardCellRole.Pane: AddPane(schema, heightRatio); break;
+                case LowCode.Designer.DashboardCellRole.Raw: AddRaw(schema, heightRatio); break;
+            }
+        }
+
+        IReadOnlyList<IChartCell> LowCode.Designer.GraphViewer.ILinkedChartDashboard.CellList => Cells;
 
         // ─── 运行期 API ────────────────────────────────────────────────────
 

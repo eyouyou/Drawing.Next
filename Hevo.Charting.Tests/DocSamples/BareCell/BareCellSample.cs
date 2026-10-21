@@ -41,7 +41,7 @@ namespace Hevo.Charting.DocSamples.BareCell
         public static VisualProxy<LevelLineLayer> AddLevelLine(ChartCell cell, LevelLineLayer layer, double y)
         {
             var feed = cell.AddUnmanagedLayer(layer);
-            feed.PublishData(new LevelLineTrait(y, 200, new HevoPen(new HevoSolidBrush(Colors.OrangeRed), 1)));
+            feed.PublishData(new LevelLineTrait(y, 200, new HevoPen(new HevoSolidBrush(HevoColors.OrangeRed), 1)));
             return feed;
         }
     }

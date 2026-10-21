@@ -783,7 +783,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 null               => BrushKind.None,
                 _                  => BrushKind.None, // 不识别的子类按 None 处理 (清空)
             };
-            Color initialColor = initial is HevoSolidBrush s ? s.Color : Colors.Gray;
+            Color initialColor = initial is HevoSolidBrush s ? s.Color.ToWpf() : Colors.Gray;
             string initialKey  = initial is HevoResourceBrush r ? r.ResourceKey : "";
 
             var box = new StackPanel();
@@ -827,7 +827,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
                 {
                     case BrushKind.Solid:
                         var v = colorReader();
-                        return v is Color c ? new HevoSolidBrush(c) : (object?)null;
+                        return v is Color c ? new HevoSolidBrush(c.ToHevo()) : (object?)null;
                     case BrushKind.Resource:
                         var key = keyTb.Text?.Trim() ?? "";
                         return key.Length == 0 ? null : new HevoResourceBrush(key);

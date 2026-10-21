@@ -110,7 +110,7 @@ namespace Hevo.Charting.Tests
         public void DryRun_PlotKindUnknown_ProducesError()
         {
             var bp = MakePlotBlueprint(
-                new PlotSeriesSpec(Name: "demo", Kind: "scatterz", Color: Colors.White, Width: 0));
+                new PlotSeriesSpec(Name: "demo", Kind: "scatterz", Color: HevoColors.White, Width: 0));
             var r = BlueprintLauncher.DryRun(bp);
             Assert.Contains(r.Diagnostics, d =>
                 d.Severity == BlueprintDiagnosticSeverity.Error &&
@@ -126,7 +126,7 @@ namespace Hevo.Charting.Tests
                 new PlotSeriesSpec(
                     Name: "demo",
                     Kind: "arrow_markers",
-                    Color: Colors.LimeGreen,
+                    Color: HevoColors.LimeGreen,
                     Width: 0,
                     XDomain: new RealRange(0, 1),
                     YDomain: new RealRange(0, 1)));
@@ -143,7 +143,7 @@ namespace Hevo.Charting.Tests
                 new PlotSeriesSpec(
                     Name: "demo",
                     Kind: "scatter",
-                    Color: Colors.White,
+                    Color: HevoColors.White,
                     Width: 0,
                     XDomain: new RealRange(-1, 1),
                     YDomain: new RealRange(0, 10)));
@@ -177,10 +177,10 @@ namespace Hevo.Charting.Tests
         public void DryRun_MixedSeriesKinds_OnlyInvalidFlagged()
         {
             var bp = MakePlotBlueprint(
-                new PlotSeriesSpec(Name: "close",  Kind: "line",          Color: Colors.SteelBlue, Width: 1),
-                new PlotSeriesSpec(Name: "buys",   Kind: "arrow_markers", Color: Colors.LimeGreen, Width: 0),
-                new PlotSeriesSpec(Name: "scatter1", Kind: "scatter",     Color: Colors.White,    Width: 0),
-                new PlotSeriesSpec(Name: "garbage", Kind: "weirdo",       Color: Colors.Black,    Width: 0));
+                new PlotSeriesSpec(Name: "close",  Kind: "line",          Color: HevoColors.SteelBlue, Width: 1),
+                new PlotSeriesSpec(Name: "buys",   Kind: "arrow_markers", Color: HevoColors.LimeGreen, Width: 0),
+                new PlotSeriesSpec(Name: "scatter1", Kind: "scatter",     Color: HevoColors.White,    Width: 0),
+                new PlotSeriesSpec(Name: "garbage", Kind: "weirdo",       Color: HevoColors.Black,    Width: 0));
             var r = BlueprintLauncher.DryRun(bp);
             Assert.Contains(r.Diagnostics, d =>
                 d.Code == "BP_PLOT_KIND_UNKNOWN" &&

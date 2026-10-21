@@ -54,7 +54,7 @@ namespace Hevo.Charting.DocSamples.UseMemo
         /// <summary>统计实际算了几次(测试用)。</summary>
         public int ComputeCount { get; private set; }
 
-        protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
+        protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow) { }
 
         protected override void OnProject(FeatureContext ctx)
         {

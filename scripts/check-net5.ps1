@@ -4,6 +4,7 @@
 param(
     # 要重编的入口工程:核心库 + 业务示例(连带其引用的 PythonNet / Trade.*)+ 文档示例(业务写法,锁 LangVersion 9)
     [string[]]$Projects = @(
+        'Hevo.Charting.Core/Hevo.Charting.Core.csproj',
         'Hevo.Charting/Hevo.Charting.csproj',
         'Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj',
         'Hevo.Charting.Tests/DocSamples/Hevo.Charting.DocSamples.csproj'
@@ -15,10 +16,12 @@ Set-Location $root
 
 # 入口工程及其引用链上需要切 TFM 的工程(CodeAnalysis 是 netstandard2.0,不用切)
 $retarget = @(
+    'Hevo.Charting.Core/Hevo.Charting.Core.csproj',
     'Hevo.Charting/Hevo.Charting.csproj',
     'Hevo.Charting.PythonNet/Hevo.Charting.PythonNet.csproj',
     'Hevo.Trade.Abstractions/Hevo.Trade.Abstractions.csproj',
     'Hevo.Trade.Mock/Hevo.Trade.Mock.csproj',
+    'Hevo.Charting.Samples/Hevo.Charting.Samples.csproj',
     'Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj',
     'Hevo.Charting.Tests/DocSamples/Hevo.Charting.DocSamples.csproj'
 )

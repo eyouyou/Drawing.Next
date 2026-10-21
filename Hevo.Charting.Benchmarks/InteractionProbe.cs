@@ -277,7 +277,7 @@ namespace Hevo.Charting.Benchmarks
             /// <summary>true = 旧式业务处理器把冒泡的 MouseDown 标 Handled(场景 15)。</summary>
             public bool LegacyHandledEnabled;
 
-            protected override void DefineDataFlow(ChartCell chart)
+            protected override void DefineDataFlow(IChartCell chart)
             {
                 Viewport = ViewportPorts.RequireAttached(Chart);
                 Trigger.BindTo(chart);
@@ -286,9 +286,9 @@ namespace Hevo.Charting.Benchmarks
             protected override void DefineFeatures(IFeatureContext canvas)
             {
                 canvas.Seed<ScaleStrategyTrait>(ScaleStrategyTrait.CandleMode);
-                var timeMeta = FieldMeta.Literal("时间", Colors.White, "yyyy-MM-dd HH:mm");
-                var priceMeta = FieldMeta.Literal("价", Colors.LightGray, "F2");
-                var smaMeta = FieldMeta.Literal("SMA20", Color.FromRgb(0xFF, 0xB7, 0x4D), "F2");
+                var timeMeta = FieldMeta.Literal("时间", HevoColors.White, "yyyy-MM-dd HH:mm");
+                var priceMeta = FieldMeta.Literal("价", HevoColors.LightGray, "F2");
+                var smaMeta = FieldMeta.Literal("SMA20", HevoColor.FromRgb(0xFF, 0xB7, 0x4D), "F2");
 
                 canvas
                     .Environment(env => env
@@ -326,7 +326,7 @@ namespace Hevo.Charting.Benchmarks
             private readonly InteractionProbeSchema _owner;
             public GestureSpyFeature(InteractionProbeSchema owner) => _owner = owner;
 
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             {
                 var port = Pointer.GesturePort;
                 flow.Watch(new object[] { port }, board =>
@@ -342,7 +342,7 @@ namespace Hevo.Charting.Benchmarks
         }
 
         /// <summary>
-        /// 场景 15:业务用已废弃的 OnMouse 订冒泡 MouseDown 并标 Handled(老代码"挡住图表平移"的写法)。
+        /// 场景 15:业务直接在 cell 上挂冒泡 MouseDown 并标 Handled(老代码"挡住图表平移"的写法)。
         /// 按决策 D3 它不再挡平移,探针只记录现象。
         /// </summary>
         private sealed class LegacyHandledFeature : ChartFeature
@@ -351,11 +351,12 @@ namespace Hevo.Charting.Benchmarks
             public LegacyHandledFeature(InteractionProbeSchema owner) => _owner = owner;
             public override FeaturePhase Phase => FeaturePhase.PreLayout;
 
-            protected override void OnCompose(ChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
+            protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
             {
-#pragma warning disable CS0618
-                this.OnMouse(UIElement.MouseDownEvent).Subscribe(e => { if (_owner.LegacyHandledEnabled) e.Handled = true; }).OwnedBy(this);
-#pragma warning restore CS0618
+                var cell = (ChartCell)chart;
+                MouseButtonEventHandler handler = (_, e) => { if (_owner.LegacyHandledEnabled) e.Handled = true; };
+                cell.AddHandler(UIElement.MouseDownEvent, handler);
+                RegisterDisposable(new DisposableAction(() => cell.RemoveHandler(UIElement.MouseDownEvent, handler)));
             }
 
             protected override void OnProject(FeatureContext ctx) { }

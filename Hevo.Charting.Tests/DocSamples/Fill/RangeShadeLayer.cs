@@ -20,8 +20,8 @@ namespace Hevo.Charting.DocSamples.Fill
         // 半透明:填色压在 K 线 / 折线下面也不挡
         public static RangeShadeStyle Create(Color fill, Color? crossed = null, byte alpha = 0x40)
             => new RangeShadeStyle(
-                new HevoSolidBrush(Color.FromArgb(alpha, fill.R, fill.G, fill.B)),
-                crossed is Color c ? new HevoSolidBrush(Color.FromArgb(alpha, c.R, c.G, c.B)) : null);
+                new HevoSolidBrush(HevoColor.FromArgb(alpha, fill.R, fill.G, fill.B)),
+                crossed is Color c ? new HevoSolidBrush(HevoColor.FromArgb(alpha, c.R, c.G, c.B)) : null);
     }
 
     /// <summary>

@@ -23,7 +23,7 @@ namespace Hevo.Charting.Tests
             public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
             public DataPort<PointerHitState?> Hit => HitPort;
 
-            protected override void DefineDataFlow(ChartCell chart) => Trigger.BindTo(chart);
+            protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
 
             protected override void DefineFeatures(IFeatureContext canvas)
             {

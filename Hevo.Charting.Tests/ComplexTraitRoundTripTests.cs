@@ -28,7 +28,7 @@ namespace Hevo.Charting.Tests
         public void HevoPen_Solid_RoundTrip()
         {
             var orig = new HevoPen(
-                new HevoSolidBrush(Color.FromRgb(0xB0, 0xBE, 0xC5)),
+                new HevoSolidBrush(HevoColor.FromRgb(0xB0, 0xBE, 0xC5)),
                 Thickness: 1.5,
                 DashArray: new[] { 2.0, 2.0 },
                 LineCap: 1,
@@ -67,7 +67,7 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void LineStyle_RoundTrip()
         {
-            var orig = LineStyle.Create(Color.FromArgb(0x55, 0xB0, 0xBE, 0xC5), thickness: 1.0);
+            var orig = LineStyle.Create(HevoColor.FromArgb(0x55, 0xB0, 0xBE, 0xC5), thickness: 1.0);
             var json = JsonSerializer.Serialize(orig, Opts);
             var back = JsonSerializer.Deserialize<LineStyle>(json, Opts);
 
@@ -99,8 +99,8 @@ namespace Hevo.Charting.Tests
         {
             var orig = AxisStyleTrait.Create(
                 placement: AxisPlacement.Right,
-                textColor: Color.FromRgb(0xB0, 0xBE, 0xC5),
-                baseLineStyle: LineStyle.Create(Color.FromArgb(0x55, 0xB0, 0xBE, 0xC5), 1.0),
+                textColor: HevoColor.FromRgb(0xB0, 0xBE, 0xC5),
+                baseLineStyle: LineStyle.Create(HevoColor.FromArgb(0x55, 0xB0, 0xBE, 0xC5), 1.0),
                 fontSize: 11.0);
 
             var json = JsonSerializer.Serialize(orig, Opts);
@@ -130,7 +130,7 @@ namespace Hevo.Charting.Tests
         {
             var raw = new Dictionary<string, object?>
             {
-                ["BorderStyle"] = LineStyle.Create(Color.FromArgb(0x55, 0xB0, 0xBE, 0xC5), 1.0),
+                ["BorderStyle"] = LineStyle.Create(HevoColor.FromArgb(0x55, 0xB0, 0xBE, 0xC5), 1.0),
             };
             var json = JsonSerializer.Serialize(raw, Opts);
             var revived = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, Opts);
@@ -150,7 +150,7 @@ namespace Hevo.Charting.Tests
             {
                 ["AxisStyle"] = AxisStyleTrait.Create(
                     AxisPlacement.Right,
-                    Color.FromRgb(0xB0, 0xBE, 0xC5),
+                    HevoColor.FromRgb(0xB0, 0xBE, 0xC5),
                     fontSize: 11.0),
             };
             var json = JsonSerializer.Serialize(raw, Opts);

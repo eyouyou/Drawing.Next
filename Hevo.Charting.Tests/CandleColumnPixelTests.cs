@@ -38,7 +38,7 @@ namespace Hevo.Charting.Tests
             => plotWidth * Math.Abs(ScaleStrategyTrait.CandleMode.DomainScale.Normalize(1, XView) - ScaleStrategyTrait.CandleMode.DomainScale.Normalize(0, XView));
 
         internal static CandleStyle Style(double wick)
-            => CandleStyle.CreateSolid(Color.FromRgb(234, 71, 109), Color.FromRgb(38, 166, 154), Color.FromRgb(128, 128, 128), wickWidth: wick);
+            => CandleStyle.CreateSolid(HevoColor.FromRgb(234, 71, 109), HevoColor.FromRgb(38, 166, 154), HevoColor.FromRgb(128, 128, 128), wickWidth: wick);
 
         [Theory]
         [InlineData(1.0, 3, 1.0)] [InlineData(1.0, 8, 1.0)] [InlineData(1.0, 20, 1.0)]
@@ -178,7 +178,7 @@ namespace Hevo.Charting.Tests
             var v = Enumerable.Repeat(1.0, Count).ToArray();
             var layer = new BarLayer { PixelsPerDip = k };
             return Render(layer, w, VolumeH, k, new RealRange(0, 1.25), raster, ctx =>
-                ctx.For(layer).PublishData(new BarDataTrait(v, new HevoSolidBrush(Color.FromRgb(70, 110, 200)), BarRatio)), out pw, out ph, scale);
+                ctx.For(layer).PublishData(new BarDataTrait(v, new HevoSolidBrush(HevoColor.FromRgb(70, 110, 200)), BarRatio)), out pw, out ph, scale);
         }
 
         private static uint[] Render(ChartLayer layer, float w, float h, double k, RealRange yView, bool raster, Action<RenderContext> publish, out int pw, out int ph, ScaleStrategyTrait? scale = null)

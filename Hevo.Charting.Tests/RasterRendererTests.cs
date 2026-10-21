@@ -177,8 +177,7 @@ namespace Hevo.Charting.Tests
             // 不挂模板的话画布没有布局尺寸,位图路径会按"还没布局"回退矢量。这里给一个只放 ContentPresenter 的空模板。
             var cell = new ChartCell
             {
-                Template = new ChartTemplate { VisualTree = new FrameworkElementFactory(typeof(System.Windows.Controls.ContentPresenter)) },
-            };
+            }.WithShell();
             cell.Measure(new Size(W, H));
             cell.Arrange(new Rect(0, 0, W, H));
             cell.UpdateLayout();
@@ -215,16 +214,16 @@ namespace Hevo.Charting.Tests
 
             layer.Mode = RenderMode.Bitmap;
             cell.Invalidate(); // 不脏,只因策略变了重新上屏
-            Assert.True(layer.BitmapSurface is { IsMounted: true });
+            Assert.True(layer.Wpf().BitmapSurface is { IsMounted: true });
             var bmp = Capture(cell);
             return (wpf, bmp);
         }
 
-        private static readonly HevoSolidBrush RedBrush = new(Colors.Red);
-        private static readonly HevoSolidBrush GreenBrush = new(Color.FromRgb(0, 160, 0));
-        private static readonly HevoPen GridPen = new(new HevoSolidBrush(Color.FromRgb(90, 90, 90)), 1);
-        private static readonly HevoPen Pen2 = new(new HevoSolidBrush(Colors.Navy), 2);
-        private static readonly HevoPen WickPen = new(new HevoSolidBrush(Colors.Black), 1);
+        private static readonly HevoSolidBrush RedBrush = new(HevoColors.Red);
+        private static readonly HevoSolidBrush GreenBrush = new(HevoColor.FromRgb(0, 160, 0));
+        private static readonly HevoPen GridPen = new(new HevoSolidBrush(HevoColor.FromRgb(90, 90, 90)), 1);
+        private static readonly HevoPen Pen2 = new(new HevoSolidBrush(HevoColors.Navy), 2);
+        private static readonly HevoPen WickPen = new(new HevoSolidBrush(HevoColors.Black), 1);
 
         private static void AxisAlignedScene(IDrawingSink d)
         {
@@ -311,9 +310,9 @@ namespace Hevo.Charting.Tests
         {
             var line = new List<HevoPoint>();
             for (int i = 0; i < 200; i++) line.Add(new HevoPoint(10 + i * 1.1f, 80 + 50 * MathF.Sin(i / 15f)));
-            var linePen = new HevoPen(new HevoSolidBrush(Colors.DarkOrange), 1.5);
+            var linePen = new HevoPen(new HevoSolidBrush(HevoColors.DarkOrange), 1.5);
             // 虚线不用灰色:灰色 R = G = B,通道顺序写错也看不出来
-            var dashPen = new HevoPen(new HevoSolidBrush(Colors.SteelBlue), 1, new double[] { 4, 4 });
+            var dashPen = new HevoPen(new HevoSolidBrush(HevoColors.SteelBlue), 1, new double[] { 4, 4 });
             var (wpf, bmp) = RenderBoth(d =>
             {
                 d.DrawPolyline(linePen, line);
@@ -335,8 +334,8 @@ namespace Hevo.Charting.Tests
         public void Text_LandsInSameBoxAsWpf() => IncrementalTestKit.RunOnSta(() =>
         {
             var tf = new HevoTypeface("Arial");
-            var black = new HevoSolidBrush(Colors.Black);
-            var bg = new HevoSolidBrush(Color.FromRgb(230, 230, 250));
+            var black = new HevoSolidBrush(HevoColors.Black);
+            var bg = new HevoSolidBrush(HevoColor.FromRgb(230, 230, 250));
             var (wpf, bmp) = RenderBoth(d =>
             {
                 d.DrawText("12345.67", tf, black, 12, new HevoPoint(120, 40), TextAlignX.Center, TextAlignY.Center, bg, GridPen, 4, 2);
@@ -394,21 +393,21 @@ namespace Hevo.Charting.Tests
             cell.AddUnmanagedLayer(layer);
             Record(cell, layer);
             Assert.Equal(1, updates);
-            Assert.IsNotType<ImageDrawing>(FirstLeaf(layer.Drawing));
+            Assert.IsNotType<ImageDrawing>(FirstLeaf(layer.Wpf().Drawing));
 
             layer.Mode = RenderMode.Bitmap;
             cell.Invalidate();
             Assert.Equal(1, updates);                              // 只重新上屏,不重录
-            Assert.IsType<ImageDrawing>(FirstLeaf(layer.Drawing)); // Visual 里只剩一张位图
+            Assert.IsType<ImageDrawing>(FirstLeaf(layer.Wpf().Drawing)); // Visual 里只剩一张位图
 
             layer.Mode = RenderMode.Software;
             cell.Invalidate();
-            Assert.Null(layer.BitmapSurface);                      // 切回矢量释放位图
-            Assert.IsNotType<ImageDrawing>(FirstLeaf(layer.Drawing));
+            Assert.Null(layer.Wpf().BitmapSurface);                      // 切回矢量释放位图
+            Assert.IsNotType<ImageDrawing>(FirstLeaf(layer.Wpf().Drawing));
 
             cell.RenderModeOverride = RenderMode.Bitmap;           // 整张图统一切
             cell.Invalidate();
-            Assert.IsType<ImageDrawing>(FirstLeaf(layer.Drawing));
+            Assert.IsType<ImageDrawing>(FirstLeaf(layer.Wpf().Drawing));
             Assert.Equal(1, updates);
         });
 

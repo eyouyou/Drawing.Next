@@ -24,6 +24,8 @@
     </ProjectReference>
     <Analyzer Include="..\Hevo.Charting.CodeAnalysis\bin\$(Configuration)\netstandard2.0\Hevo.Charting.CodeAnalysis.dll" />
     <ProjectReference Include="..\Hevo.Charting\Hevo.Charting.csproj" />
+    <!-- 示例共用的模拟数据源(MockKLineDataSource / SinWaveDataSource),Avalonia 示例也用同一份 -->
+    <ProjectReference Include="..\Hevo.Charting.Samples\Hevo.Charting.Samples.csproj" />
     <!-- §D2.5.E2E: 引 Python 集成 + Mock 交易 backend,demo 面板用 -->
     <ProjectReference Include="..\Hevo.Charting.PythonNet\Hevo.Charting.PythonNet.csproj" />
     <ProjectReference Include="..\Hevo.Trade.Abstractions\Hevo.Trade.Abstractions.csproj" />

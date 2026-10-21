@@ -1,6 +1,8 @@
 using Hevo.Charting.Features;
 using Hevo.Charting.LowCode.Designer;
 using Hevo.Charting.LowCode.Designer.Converters;
+using Hevo.Charting.LowCode.Designer.GraphViewer;
+using Hevo.Charting.Samples;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -26,9 +28,8 @@ namespace Hevo.Charting.Tests
     ///   </item>
     /// </list>
     /// <para>
-    /// 测试不跑 <c>DashboardLauncher.DryRun</c> —— 那条路径要求 MockKLineDataSource
-    /// 已注册,而该类住在 Drawing.LowCodeDemo(WPF + Python.NET 重依赖),
-    /// 拖进测试项目得不偿失。这里只做 JSON 结构层回归,精准覆盖两条修复。
+    /// 另跑一次 <c>DashboardLauncher.DryRun</c>:数据源 MockKLineDataSource 在 Hevo.Charting.Samples(不引 UI 框架),
+    /// 测试直接登记真的那份,整张看板按 demo 实际装配校验。
     /// </para>
     /// </summary>
     public sealed class DashboardDemoAssetTests
@@ -128,6 +129,16 @@ namespace Hevo.Charting.Tests
             Assert.True(nameElem.TryGetProperty("text", out var textElem));
             Assert.False(string.IsNullOrWhiteSpace(textElem.GetString()),
                 "Meta.Name.text 不能空 —— 否则 header 行 title 空白。");
+        }
+
+        [Fact]
+        public void DemoDashboard_DryRun_HasNoErrors()
+        {
+            ComponentRegistry.Register<MockKLineDataSource>();
+            var r = DashboardLauncher.DryRun(LoadDashboard());
+            Assert.True(r.Error == null, r.Error);
+            var errors = r.Diagnostics.Where(x => x.Severity == BlueprintDiagnosticSeverity.Error).ToList();
+            Assert.True(errors.Count == 0, string.Join(Environment.NewLine, errors));
         }
 
         [Fact]

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- 平台无关核心:不引 WPF,WPF / Avalonia 宿主共用。.NET 5 兼容红线同 Hevo.Charting(见 Hevo.Charting/README.md §2) -->
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<LangVersion>preview</LangVersion>
+		<RootNamespace>Hevo.Charting</RootNamespace>
+
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+		<CompilerGeneratedFilesOutputPath>obj\Generated</CompilerGeneratedFilesOutputPath>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Hevo.Charting.CodeAnalysis\Hevo.Charting.CodeAnalysis.csproj">
+			<ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+			<OutputItemType>Analyzer</OutputItemType>
+			<PrivateAssets>none</PrivateAssets>
+		</ProjectReference>
+	</ItemGroup>
+</Project>

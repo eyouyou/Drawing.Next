@@ -8,7 +8,7 @@
 
 核心能力：
 
-- **三明治物理模型**：底层位图回放(`RenderMode.Bitmap`,框架光栅化进 `WriteableBitmap`)+ 中层 `DrawingVisual` 矢量 + 顶层 WPF Widget 交互，按场景显式分层，避免 XAML 过度嵌套。核心库零第三方渲染依赖;可选的 Skia 上屏后端在可选程序集 `Hevo.Charting.Skia` 里,按需引用。
+- **三明治物理模型**：底层位图回放(`RenderMode.Bitmap`,框架光栅化进 `WriteableBitmap`)+ 中层 `DrawingVisual` 矢量 + 顶层 WPF Widget 交互，按场景显式分层，避免 XAML 过度嵌套。核心库零第三方渲染依赖;可选的 Skia 上屏后端在可选程序集 `Hevo.Charting.Skia`(翻译层)/ `Hevo.Charting.Skia.Wpf`(WPF 合成面)里,按需引用。
 - **0-GC 渲染管线**：列式内存布局（SoA）、`ArrayPool` 复用、原位更新；Project 帧严禁分配闭包，昂贵计算用 `ctx.UseMemo` 按依赖缓存。
 - **自研响应式流（`IWorkflow<T>`）**：弃用 `System.Reactive`，搭配 `DataBlackboard` + `ReaderWriterLockSlim` 实现多引脚的"时空一致性"。
 - **强类型引脚 `DataPort<T>`**：贯穿数据源 → 计算 → 渲染的物理线缆，杜绝魔术字符串与隐式耦合。
@@ -37,7 +37,8 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 
 | 项目 | 角色 | 说明 |
 |------|------|------|
-| [Charting](./Hevo.Charting) | 引擎核心 | 抽象层、Feature 库、Layer / Renderer、低代码蓝图、Designer。 |
+| [Charting.Core](./Hevo.Charting.Core) | 引擎核心(平台无关) | 抽象层、Feature 库、Layer、帧管线(`ChartEngine`)、黑板、指针路由、低代码蓝图运行时。不引任何 UI 框架,WPF / Avalonia 等宿主共用。 |
+| [Charting](./Hevo.Charting) | WPF 宿主 | `ChartCell` 控件、WPF 渲染器 / 位图后端、控件类图层(Tooltip)、指针适配器、联动看板、低代码 Designer。业务工程引用它(连带引用 Core)。 |
 | [Charting.CodeAnalysis](./Hevo.Charting.CodeAnalysis) | 编译期 | Roslyn 分析器与源生成器：`UseMemo` 位置校验、跨帧缓存检测、Trait Consumer / Required 校验、Port Generator。 |
 | [Drawing.LowCodeDemo](./Hevo.Drawing.LowCodeDemo) | 示例宿主 | 低代码蓝图运行时 + Node Editor + Python 编辑器 + Mock 撮合的 WPF 演示工程。 |
 | [Charting.PythonNet](./Hevo.Charting.PythonNet) | 集成层 | Python 集成：`IPythonRuntime` + `PythonHandlerRegistry` + 蓝图层 `PyFeature` 节点。详见 [PYTHON_HANDLER_GUIDE](./Hevo.Charting.PythonNet/PYTHON_HANDLER_GUIDE.md)。 |
@@ -112,6 +113,7 @@ dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 按项目单独编译（推荐）：
 
 ```bash
+dotnet build "Hevo.Charting.Core/Hevo.Charting.Core.csproj" -nologo
 dotnet build "Hevo.Charting/Hevo.Charting.csproj" -nologo
 dotnet build "Hevo.Charting.CodeAnalysis/Hevo.Charting.CodeAnalysis.csproj" -nologo
 dotnet build "Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj" -nologo

@@ -8,6 +8,7 @@ using Hevo.Charting.LowCode.Designer;
 using Hevo.Charting.LowCode.Designer.Converters;
 using Hevo.Charting.LowCode.Designer.GraphViewer;
 using Hevo.Charting.PythonNet;
+using Hevo.Charting.Samples;
 
 namespace Hevo.Drawing.LowCodeDemo
 {
@@ -22,7 +23,8 @@ namespace Hevo.Drawing.LowCodeDemo
             // Bootstrap must happen before any LowCodeDemoView / DashboardWorkspace is constructed.
             // LowCodeDemoView also calls Initialize() — it's idempotent, so double-calling is fine.
             GraphViewerBootstrap.Initialize();
-            BuiltinRegistration.RegisterAssemblyOf<SinWaveDataSource>();   // demo 程序集:SinWave + MockKLineDataSource
+            BuiltinRegistration.RegisterAssemblyOf<SinWaveDataSource>();   // 示例数据源程序集:SinWave + MockKLineDataSource
+            BuiltinRegistration.RegisterAssemblyOf<DemoWindow>();          // demo 程序集
 
             // §D3.7 注册 ComputeFeature / HandlerFeature 蓝图节点(画布 picker / Resolve 用)。
             // 即使本进程没启 PythonNetRuntime,蓝图节点元数据也得在(蓝图导入时 ComponentRegistry.Resolve 才不报错)。

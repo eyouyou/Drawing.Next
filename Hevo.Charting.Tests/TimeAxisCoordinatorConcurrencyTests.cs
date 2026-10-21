@@ -30,9 +30,9 @@ namespace Hevo.Charting.Tests
 
         private sealed class CoordSchema : ChartReactiveSchema
         {
-            private readonly Action<ChartCell> _flow;
-            public CoordSchema(Action<ChartCell> flow) { _flow = flow; }
-            protected override void DefineDataFlow(ChartCell chart) => _flow(chart);
+            private readonly Action<IChartCell> _flow;
+            public CoordSchema(Action<IChartCell> flow) { _flow = flow; }
+            protected override void DefineDataFlow(IChartCell chart) => _flow(chart);
             protected override void DefineFeatures(IFeatureContext canvas) { }
         }
 

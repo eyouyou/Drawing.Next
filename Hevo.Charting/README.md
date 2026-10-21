@@ -9,11 +9,13 @@
 
 | 工程 | 说明 | 受 .NET 5 兼容约束 |
 |------|------|------|
-| `Hevo.Charting` | 引擎核心:workflow、schema、feature、黑板、渲染管线、低代码蓝图 | 是 |
+| `Hevo.Charting.Core` | 引擎核心(平台无关):workflow、schema、feature、黑板、帧管线(`ChartEngine`)、指针路由、低代码蓝图运行时。不引任何 UI 框架 | 是 |
+| `Hevo.Charting` | WPF 宿主:`ChartCell` 控件、WPF 渲染器 / 位图后端、Tooltip 等控件类图层、指针适配器、联动看板、Designer | 是 |
 | `Hevo.Charting.CodeAnalysis` | Roslyn 生成器 / 分析器(PortGenerator、IConsumes 生成、Hook 校验) | 是 |
 | `Hevo.Drawing.LowCodeDemo` | 示例宿主(业务侧写法的参照),`LangVersion 9` | 是 |
 | `Hevo.Charting.Tests/DocSamples` | 文档引用的示例代码,按业务侧约束编译,`LangVersion 9` | 是 |
 | `Hevo.Charting.PythonNet` / `Hevo.Trade.*` | Python 集成 / 交易抽象与 Mock | 见各自 csproj |
+| `Hevo.Charting.Skia` / `Hevo.Charting.Skia.Wpf` | 实验性 Skia 后端:DrawCmd → SKCanvas 翻译层(不引 UI 框架)/ WPF 合成面 | 否 |
 | `Hevo.Charting.Tests` / `Hevo.Charting.Benchmarks` / `Hevo.Charting.Mcp` | 测试 / 基准 / MCP 服务 | 否(net10 only) |
 
 ---

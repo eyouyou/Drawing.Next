@@ -15,6 +15,7 @@ using Hevo.Charting.LowCode.Designer;
 using Hevo.Charting.LowCode.Designer.Converters;
 using Hevo.Charting.LowCode.Designer.GraphViewer;
 using Hevo.Charting.Renderers;
+using Hevo.Charting.Samples;
 using Xunit;
 
 namespace Hevo.Charting.Tests
@@ -159,7 +160,7 @@ namespace Hevo.Charting.Tests
                 var layer = new BollingerLayer();
                 var data = new TraitBag()
                     .With(new BollingerDataTrait(u, m, l))
-                    .With(BollingerStyle.Create(System.Windows.Media.Colors.Orange))
+                    .With(BollingerStyle.Create(HevoColors.Orange))
                     .With(ScaleStrategyTrait.LineMode)
                     .With(new PlotAreaTrait(new HevoRect(0, 0, 400, 200)))
                     .With(new XAxisTrait(new RealRange(0, n - 1)))
@@ -263,35 +264,6 @@ namespace Hevo.Charting.Tests
 
         // ── 15 分钟上手 L1 / L2:蓝图 JSON 片段 ──────────────────────────────
 
-        /// <summary>跟 Demo 的 MockKLineDataSource 同样字段的测试数据源(Demo 工程拖不进测试)。</summary>
-        public sealed class QsBar
-        {
-            [Port] public DateTime Time { get; init; }
-            [Port] public double Open { get; init; }
-            [Port] public double High { get; init; }
-            [Port] public double Low { get; init; }
-            [Port] public double Close { get; init; }
-            [Port] public double Volume { get; init; }
-        }
-
-        public sealed class QsKLineSource : BufferedDataSource<QsKLineSource, QsBar>
-        {
-            public void Load(double[] closes)
-            {
-                lock (_lock)
-                {
-                    _buffer.Clear();
-                    var t0 = new DateTime(2026, 1, 1);
-                    for (int i = 0; i < closes.Length; i++)
-                    {
-                        double c = closes[i];
-                        _buffer.Add(new QsBar { Time = t0.AddMinutes(i), Open = c, High = c + 1, Low = c - 1, Close = c, Volume = 1000 });
-                    }
-                    Publish();
-                }
-            }
-        }
-
         private static List<FeatureModel> LoadSnippet(string file)
         {
             var json = File.ReadAllText(RepoFile("Hevo.Charting.Tests", "DocSamples", "QuickStart", file));
@@ -301,15 +273,12 @@ namespace Hevo.Charting.Tests
             return nodes!;
         }
 
-        /// <summary>Demo 默认 dashboard,数据源换成同字段的测试数据源,主图追加文档里的片段 —— 即新人粘贴后的样子。</summary>
+        /// <summary>Demo 默认 dashboard(数据源就是 Demo 用的 MockKLineDataSource),主图追加文档里的片段 —— 即新人粘贴后的样子。</summary>
         private static Dashboard DemoDashboardWith(List<FeatureModel> snippet)
         {
-            ComponentRegistry.Register<QsKLineSource>();
+            ComponentRegistry.Register<MockKLineDataSource>();
             var json = File.ReadAllText(RepoFile("Hevo.Drawing.LowCodeDemo", "Assets", "default_kline_dashboard.json"));
             var dashboard = JsonSerializer.Deserialize<Dashboard>(json, BlueprintJsonOptions.Default)!;
-            foreach (var cell in dashboard.Cells)
-                foreach (var ds in cell.Blueprint.DataSources)
-                    if (ds.TypeName == "MockKLineDataSource") ds.TypeName = nameof(QsKLineSource);
             dashboard.Cells.Single(c => c.Id == "main").Blueprint.Features.AddRange(snippet);
             return dashboard;
         }
@@ -346,7 +315,7 @@ namespace Hevo.Charting.Tests
 
             var bp = DemoDashboardWith(LoadSnippet("l2_csharp_indicators.json")).Cells.Single(c => c.Id == "main").Blueprint;
             var handlers = new BlueprintHandlerRegistry().AutoDiscoverStatic(typeof(QuickStartIndicators));
-            var ds = new QsKLineSource();
+            var ds = new MockKLineDataSource();
 
             double[]? sma = null, upper = null;
             IncrementalTestKit.RunOnSta(() =>

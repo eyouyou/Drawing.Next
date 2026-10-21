@@ -11,6 +11,7 @@ using Hevo.Charting.Features;
 using Hevo.Charting.LowCode.Designer;
 using Hevo.Charting.LowCode.Designer.Converters;
 using Hevo.Charting.LowCode.Designer.GraphViewer;
+using Hevo.Charting.Samples;
 using Xunit;
 
 namespace Hevo.Charting.Tests
@@ -137,8 +138,8 @@ namespace Hevo.Charting.Tests
                             ["IndicatorName"] = "golden",
                             ["Series"] = new[]
                             {
-                                new PlotSeriesSpec(Name: "a", Kind: "scatterz", Color: Colors.White, Width: 0),
-                                new PlotSeriesSpec(Name: "b", Kind: "arrow_markers", Color: Colors.White, Width: 0,
+                                new PlotSeriesSpec(Name: "a", Kind: "scatterz", Color: HevoColors.White, Width: 0),
+                                new PlotSeriesSpec(Name: "b", Kind: "arrow_markers", Color: HevoColors.White, Width: 0,
                                                    XDomain: new RealRange(0, 1), YDomain: new RealRange(0, 1)),
                             },
                         },
@@ -166,13 +167,12 @@ namespace Hevo.Charting.Tests
                 all.Features.Add(new FeatureModel { TypeName = t.Name, InputBindings = new Dictionary<string, object?>() });
             yield return ("builtin-unbound", all, null);
 
-            // 3. demo dashboard 资产里的每张图
+            // 3. demo dashboard 资产里的每张图(数据源就是 demo 用的 MockKLineDataSource)
+            ComponentRegistry.Register<MockKLineDataSource>();
             var json = File.ReadAllText(Path.Combine(RepoRoot(), "Hevo.Drawing.LowCodeDemo", "Assets", "default_kline_dashboard.json"));
             var dashboard = JsonSerializer.Deserialize<Dashboard>(json, BlueprintJsonOptions.Default)!;
             foreach (var cell in dashboard.Cells)
             {
-                // demo 的 MockKLineDataSource 只在 LowCodeDemo 里登记,换成测试 DS,让 Feature 校验跑完整
-                foreach (var ds in cell.Blueprint.DataSources) ds.TypeName = nameof(TestDataSource);
                 yield return ($"dashboard:{cell.Id}", cell.Blueprint, null);
             }
         }

@@ -34,7 +34,7 @@ namespace Hevo.Charting.Tests
         [InlineData("Features/ElementPlotFeatureBase.cs")]
         public void Source_NoWpfInput(string file)
         {
-            var text = File.ReadAllText(Path.Combine(RepoRoot(), "Hevo.Charting", file));
+            var text = File.ReadAllText(Path.Combine(RepoRoot(), "Hevo.Charting.Core", file));
             Assert.DoesNotContain("System.Windows.Input", text);
             Assert.DoesNotContain("CompositionTarget.Rendering +=", text);
             Assert.DoesNotContain("this.OnMouse(", text);
@@ -45,25 +45,33 @@ namespace Hevo.Charting.Tests
         [Fact]
         public void Source_WpfInputOnlyInAdapter()
         {
-            var dir = Path.Combine(RepoRoot(), "Hevo.Charting", "Interaction");
-            var offenders = Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories)
+            var offenders = new[] { "Hevo.Charting", "Hevo.Charting.Core" }
+                .Select(p => Path.Combine(RepoRoot(), p, "Interaction"))
+                .Where(Directory.Exists)
+                .SelectMany(d => Directory.GetFiles(d, "*.cs", SearchOption.AllDirectories))
                 .Where(f => Path.GetFileName(f) != "WpfPointerAdapter.cs" && File.ReadAllText(f).Contains("System.Windows.Input"))
                 .ToArray();
             Assert.Empty(offenders);
         }
 
-        // ================= 旧配置 / 新开关 =================
-
+        /// <summary>
+        /// 核心程序集不碰任何 UI 框架:源码里不出现 System.Windows(工程本身不引 WPF,
+        /// 这条兜住 BCL 里同名命名空间 System.Windows.Input / Markup 这类能编过的漏网写法)。
+        /// </summary>
         [Fact]
-        public void BoxZoom_ObsoleteActivationModifier_StillMapsToActivation()
+        public void Source_CoreHasNoWpf()
         {
-#pragma warning disable CS0618
-            var o = new BoxZoomOptions { ActivationModifier = ModifierKeys.Control | ModifierKeys.Shift };
-            Assert.Equal(PointerModifiers.Control | PointerModifiers.Shift, o.Activation);
-            Assert.Equal(ModifierKeys.Shift, new BoxZoomOptions().ActivationModifier);
-#pragma warning restore CS0618
-            Assert.Equal(PointerModifiers.Shift, new BoxZoomOptions().Activation);
+            var dir = Path.Combine(RepoRoot(), "Hevo.Charting.Core");
+            var offenders = Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories)
+                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
+                            && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
+                .Where(f => File.ReadAllLines(f).Any(l => !l.TrimStart().StartsWith("//") && l.Contains("System.Windows")))
+                .Select(f => Path.GetRelativePath(dir, f))
+                .ToArray();
+            Assert.Empty(offenders);
         }
+
+        // ================= 旧配置 / 新开关 =================
 
         [Fact]
         public void BoxZoom_DefaultShift_ModifierComesFromPointerInput() => IncrementalTestKit.RunOnSta(() =>
@@ -120,7 +128,7 @@ namespace Hevo.Charting.Tests
         {
             // 唯一来源:InteractionOptions.DragThreshold
             var rig = new Rig(extra: (i, s) => i.Remove<ChartInteractionFeature>().EnableStandard(s.Ports.Time,
-                FieldMeta.Literal("T", System.Windows.Media.Colors.Gray), new InteractionOptions<DateTime> { DragThreshold = 30, HitPort = s.Hit }));
+                FieldMeta.Literal("T", HevoColors.Gray), new InteractionOptions<DateTime> { DragThreshold = 30, HitPort = s.Hit }));
             var p = rig.Add(new Probe());
             p.Set(rig, new PointerRegion { Shape = PointerShape.HLine(150, 0, 1000), Accepts = PointerAccepts.Click | PointerAccepts.Drag });
             rig.Drag(100, 150, 120, 150, steps: 2);   // 20 DIP < 30:点击
