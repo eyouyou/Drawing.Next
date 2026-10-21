@@ -62,7 +62,7 @@ jobs:
 
       # 整个解决方案都编(含 LowCodeDemo / Mcp / Skia),不只是测试和基准用到的那几个
       - name: 构建
-        run: dotnet build Hevo.Drawing.slnx -c Release
+        run: dotnet build Drawing.Next.slnx -c Release
 
       - name: 单元测试
         run: dotnet test Hevo.Charting.Tests -c Release --no-build --logger "trx;LogFileName=tests.trx" --results-directory artifacts/tests

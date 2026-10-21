@@ -50,7 +50,7 @@ namespace Hevo.Charting.Tests
         private static string RepoFile(params string[] parts)
         {
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Hevo.Drawing.slnx"))) dir = dir.Parent;
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Drawing.Next.slnx"))) dir = dir.Parent;
             Assert.NotNull(dir);
             var path = Path.Combine(new[] { dir!.FullName }.Concat(parts).ToArray());
             Assert.True(File.Exists(path), $"找不到 {path}");

@@ -37,13 +37,13 @@ namespace Hevo.Charting.Tests
         private static readonly JsonSerializerOptions _json = BlueprintJsonOptions.Default;
 
         /// <summary>
-        /// 从测试 bin 目录向上找到 repo 根(<c>Hevo.Drawing.slnx</c> 作为锚点),
+        /// 从测试 bin 目录向上找到 repo 根(<c>Drawing.Next.slnx</c> 作为锚点),
         /// 再拼出 demo dashboard JSON 的路径。CI 跟本地都得对。
         /// </summary>
         private static string LocateDashboardJson()
         {
             var dir = new DirectoryInfo(System.AppContext.BaseDirectory);
-            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Hevo.Drawing.slnx")))
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Drawing.Next.slnx")))
                 dir = dir.Parent;
             Assert.NotNull(dir);
             var path = Path.Combine(dir!.FullName,
