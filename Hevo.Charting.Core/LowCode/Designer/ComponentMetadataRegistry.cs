@@ -21,11 +21,28 @@ namespace Hevo.Charting.LowCode.Designer
             _policies[typeof(TDataSource)] = policy;
         }
 
-        /// <summary>查询 DataSource 类型是否登记了策略;未命中返回 null,DynamicChartSchema 走通用反射路径。</summary>
+        /// <summary>
+        /// 同上,类型用 <see cref="Type"/> 给:可以登记基类(含开放泛型定义,如 <c>typeof(KLineSourceBase&lt;,&gt;)</c>),
+        /// 一次覆盖它的所有子类,不用每个具体数据源各登记一遍。
+        /// </summary>
+        public static void Register(Type dataSourceType, IPipelinePolicy policy)
+        {
+            if (dataSourceType == null) throw new ArgumentNullException(nameof(dataSourceType));
+            _policies[dataSourceType] = policy ?? throw new ArgumentNullException(nameof(policy));
+        }
+
+        /// <summary>
+        /// 查询 DataSource 类型的策略:先查精确类型;没有再沿基类链往上找,每一级先查封闭类型、再查它的开放泛型定义。
+        /// 都没有返回 null,DynamicChartSchema 走通用反射路径。精确登记永远优先于基类登记。
+        /// </summary>
         public static IPipelinePolicy? GetPipelinePolicy(Type dataSourceType)
         {
-            // 命中精确类型;若未来需要兼容父类,可补一段 base type 链 fallback。
-            return _policies.TryGetValue(dataSourceType, out var policy) ? policy : null;
+            for (var t = dataSourceType; t != null && t != typeof(object); t = t.BaseType)
+            {
+                if (_policies.TryGetValue(t, out var policy)) return policy;
+                if (t.IsGenericType && !t.IsGenericTypeDefinition && _policies.TryGetValue(t.GetGenericTypeDefinition(), out policy)) return policy;
+            }
+            return null;
         }
 
         /// <summary>清空注册(单元测试用)。</summary>

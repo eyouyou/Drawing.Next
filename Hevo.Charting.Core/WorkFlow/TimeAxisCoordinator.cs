@@ -89,6 +89,38 @@ namespace Hevo.Charting.WorkFlow
             where TItem : ITimePoint
             => AddSource(src, cfg => cfg.Map(outPort, selector));
 
+        /// <summary>
+        /// 帧式数据源登记:快照里一个元素是一整块列(K 线 / 分时的列式帧),点在帧里面,不是"一个元素一个点"。
+        /// 用三个取法告诉合并算子怎么读帧:<paramref name="count"/> 点数、<paramref name="time"/> 第 i 个点的时间、
+        /// <paramref name="value"/> 第 i 个点的值(写到 <paramref name="outPort"/>)。时间须升序,合并语义和逐点源完全相同,两种源可以混着登记。
+        /// 每次发布取快照里最后一个元素作为当前帧。
+        /// </summary>
+        public TimeAxisCoordinator AddSource<TSource, TFrame>(
+            BufferedDataSource<TSource, TFrame> src,
+            Func<TFrame, int> count,
+            Func<TFrame, int, DateTime> time,
+            Func<TFrame, int, double> value,
+            DataPort<ReadOnlyMemory<double>> outPort)
+            where TSource : BufferedDataSource<TSource, TFrame>
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            var entry = new FrameSourceEntry<TFrame>(
+                count ?? throw new ArgumentNullException(nameof(count)),
+                time ?? throw new ArgumentNullException(nameof(time)),
+                value ?? throw new ArgumentNullException(nameof(value)),
+                outPort ?? throw new ArgumentNullException(nameof(outPort)));
+
+            lock (_lock) _sources.Add(entry);
+
+            // 同逐点源:回调在源的 Publish 锁内,只把帧引用记进条目,Merge 不回头拿源的锁
+            entry.Subscription = src.Stream.StartWith(src.GetSnapshot()).Subscribe(snap =>
+            {
+                entry.Capture(snap);
+                TriggerPulse();
+            });
+            return this;
+        }
+
         /// <summary>运行期移除一路数据源，自动解订阅并触发一次 Merge。</summary>
         public void RemoveSource<TSource, TItem>(BufferedDataSource<TSource, TItem> src)
             where TSource : BufferedDataSource<TSource, TItem>
@@ -357,6 +389,69 @@ namespace Hevo.Charting.WorkFlow
                     board.ForceWrite(_emitters[k].Port, new ReadOnlyMemory<double>(_emitters[k].Buffer, 0, length));
                     _emitters[k].Ring.Published(_emitters[k].Buffer);
                 }
+            }
+        }
+
+        // 帧式源:快照最后一个元素是一整块列。帧的历史段不可变(列式数据源的发布约定),只记引用不拷贝;
+        // 最后一根可能被实时 tick 原地改,合并读到的是改前或改后的值,和逐点源读到上一次快照同口径。
+        private sealed class FrameSourceEntry<TFrame> : SourceEntryBase
+        {
+            private readonly Func<TFrame, int> _count;
+            private readonly Func<TFrame, int, DateTime> _time;
+            private readonly Func<TFrame, int, double> _value;
+            private readonly DataPort<ReadOnlyMemory<double>> _port;
+            private readonly ColumnBufferPool<double> _ring = new();
+            private double[] _buffer = Array.Empty<double>();
+            private TFrame _frame = default!;
+            private TFrame _pending = default!;
+            private bool _hasPending;
+            private bool _pendingDirty;
+            private readonly object _gate = new();
+
+            public FrameSourceEntry(Func<TFrame, int> count, Func<TFrame, int, DateTime> time, Func<TFrame, int, double> value,
+                DataPort<ReadOnlyMemory<double>> port)
+            {
+                _count = count;
+                _time = time;
+                _value = value;
+                _port = port;
+            }
+
+            public void Capture(DataSnapshot<TFrame> snapshot)
+            {
+                lock (_gate)
+                {
+                    _hasPending = snapshot.Count > 0;
+                    _pending = _hasPending ? snapshot.Items[snapshot.Count - 1] : default!;
+                    _pendingDirty = true;
+                }
+            }
+
+            public override int TakeSnapshot()
+            {
+                lock (_gate)
+                {
+                    if (_pendingDirty)
+                    {
+                        _frame = _pending;
+                        Count = _hasPending ? _count(_frame) : 0;
+                        _pendingDirty = false;
+                    }
+                }
+                return Count;
+            }
+
+            public override DateTime TimeAt(int i) => _time(_frame, i);
+
+            public override void EnsureBuffers(int capacity) => _buffer = _ring.Rent(capacity);
+
+            public override void EmitAt(int merged, int snapIndex, bool missing)
+                => _buffer[merged] = missing ? double.NaN : _value(_frame, snapIndex);
+
+            public override void WriteOutputs(DataBlackboard board, int length)
+            {
+                board.ForceWrite(_port, new ReadOnlyMemory<double>(_buffer, 0, length));
+                _ring.Published(_buffer);
             }
         }
 
