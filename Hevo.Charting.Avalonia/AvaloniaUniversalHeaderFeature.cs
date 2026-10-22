@@ -47,6 +47,13 @@ namespace Hevo.Charting.Avalonia
             }
         }
 
+        /// <summary>测试用:第 <paramref name="index"/> 个字段名和值的前景画刷。</summary>
+        internal (IBrush? Label, IBrush? Value) ForegroundsOf(int index)
+        {
+            var panel = (StackPanel)_headerContainer.Children[index];
+            return (((TextBlock)panel.Children[1]).Foreground, ((TextBlock)panel.Children[3]).Foreground);
+        }
+
         protected override void UpdateField(int index, string text, IHevoBrush? dotBrush)
         {
             var (value, dot) = _items[index];
@@ -90,6 +97,12 @@ namespace Hevo.Charting.Avalonia
                     VerticalAlignment = VerticalAlignment.Center,
                     Margin = new Thickness(2, 0, 0, 0),
                 };
+                if (LabelBrush != null)
+                {
+                    AvaloniaBrushes.Bind(title, TextBlock.ForegroundProperty, LabelBrush);
+                    AvaloniaBrushes.Bind(colon, TextBlock.ForegroundProperty, LabelBrush);
+                }
+                if (ValueBrush != null) AvaloniaBrushes.Bind(value, TextBlock.ForegroundProperty, ValueBrush);
 
                 panel.Children.Add(dot);
                 panel.Children.Add(title);

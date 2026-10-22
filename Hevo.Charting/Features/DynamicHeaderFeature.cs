@@ -115,6 +115,12 @@ namespace Hevo.Charting.Features
                     VerticalAlignment = VerticalAlignment.Center,
                     Margin = new Thickness(2, 0, 0, 0)
                 };
+                if (LabelBrush != null)
+                {
+                    title.BindHevo(TextBlock.ForegroundProperty, LabelBrush);
+                    colon.BindHevo(TextBlock.ForegroundProperty, LabelBrush);
+                }
+                if (ValueBrush != null) val.BindHevo(TextBlock.ForegroundProperty, ValueBrush);
 
                 panel.Children.Add(dot);
                 panel.Children.Add(title);

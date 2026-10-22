@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Hevo.Charting.Abstractions;
 using Hevo.Charting.Core;
@@ -27,6 +28,8 @@ namespace Hevo.Charting.Avalonia.Tests
             public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
             public DataPort<PointerHitState?> Hit => HitPort;
             public bool WithHeader { get; init; }
+            public IHevoBrush? HeaderLabel { get; init; }
+            public IHevoBrush? HeaderValue { get; init; }
 
             protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
 
@@ -39,7 +42,7 @@ namespace Hevo.Charting.Avalonia.Tests
                     {
                         env.SetupViewport(minVisibleCount: 5, alignment: ViewportAlignment.RightEdge,
                             defaultVisibleCount: 30, overscrollMin: OverscrollPolicy.Hard, overscrollMax: OverscrollPolicy.Hard);
-                        if (WithHeader) env.SetupUniversalHeader(HitPort);
+                        if (WithHeader) env.SetupUniversalHeader(HitPort, HeaderLabel, HeaderValue);
                     })
                     .Series(s => s.AddCandle(YRange, Ports, metas: new CandleMetas(close, close, close, close)))
                     .Interactions(i => i.EnableStandardPointer(HitPort, ChartInteractionMode.All));
@@ -51,13 +54,14 @@ namespace Hevo.Charting.Avalonia.Tests
             private const int Length = 100;
             public readonly LinkedChartContext Context = new();
             public readonly AvaloniaLinkedChartDashboard Dashboard;
-            public readonly LinkedSchema[] Schemas = { new() { WithHeader = true }, new(), new() };
+            public readonly LinkedSchema[] Schemas;
             public readonly DataBlackboard[] Boards = { new(), new(), new() };
             public readonly Window Window;
             public readonly RealRange Initial;
 
-            public Dash(bool resizable = false)
+            public Dash(bool resizable = false, IHevoBrush? headerLabel = null, IHevoBrush? headerValue = null)
             {
+                Schemas = new[] { new LinkedSchema { WithHeader = true, HeaderLabel = headerLabel, HeaderValue = headerValue }, new LinkedSchema(), new LinkedSchema() };
                 Dashboard = new AvaloniaLinkedChartDashboard(Context) { Width = 400, Height = 600, IsPaneResizeEnabled = resizable }
                     .AddMaster(Schemas[0], heightRatio: 1).AddPane(Schemas[1]).AddPane(Schemas[2]);
                 // 窗口直接给定尺寸并先把布局跑完:SizeToContent 是 Show 之后才收缩,取坐标时布局还是默认窗口大小
@@ -167,6 +171,35 @@ namespace Hevo.Charting.Avalonia.Tests
             Assert.Equal(hit!.Value.Hit.LogicalIndex, d.Hit(1)!.Value.Hit.LogicalIndex);
             Assert.Equal(hit.Value.Hit.LogicalIndex, d.Hit(2)!.Value.Hit.LogicalIndex);
             d.Window.Close();
+        }
+
+        [AvaloniaFact]
+        public void Header_Brushes_DefaultAndResource()
+        {
+            var d = new Dash();
+            var (label, value) = d.Header.ForegroundsOf(0);
+            Assert.Equal(Color.FromRgb(160, 160, 160), ((ISolidColorBrush)label!).Color);
+            Assert.Equal(Colors.White, ((ISolidColorBrush)value!).Color);
+            d.Window.Close();
+
+            // 宿主传资源画刷:按应用资源取色,资源换值跟着变(换主题)
+            var app = Application.Current!;
+            app.Resources["Test.Header.Value"] = new SolidColorBrush(Color.FromRgb(1, 2, 3));
+            try
+            {
+                d = new Dash(headerLabel: new HevoSolidBrush(HevoColor.FromRgb(4, 5, 6)), headerValue: new HevoResourceBrush("Test.Header.Value"));
+                (label, value) = d.Header.ForegroundsOf(0);
+                Assert.Equal(Color.FromRgb(4, 5, 6), ((ISolidColorBrush)label!).Color);
+                Assert.Equal(Color.FromRgb(1, 2, 3), ((ISolidColorBrush)value!).Color);
+                app.Resources["Test.Header.Value"] = new SolidColorBrush(Color.FromRgb(7, 8, 9));
+                Dispatcher.UIThread.RunJobs();
+                Assert.Equal(Color.FromRgb(7, 8, 9), ((ISolidColorBrush)d.Header.ForegroundsOf(0).Value!).Color);
+                d.Window.Close();
+            }
+            finally
+            {
+                app.Resources.Remove("Test.Header.Value");
+            }
         }
 
         [AvaloniaFact]

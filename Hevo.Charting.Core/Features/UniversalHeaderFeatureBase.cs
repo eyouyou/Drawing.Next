@@ -15,12 +15,18 @@ namespace Hevo.Charting.Features
         /// 头部是宿主的外壳 UI(WPF:UniversalHeaderFeature;Avalonia:AvaloniaUniversalHeaderFeature),由宿主注册;
         /// 同一个 schema 挂到哪个宿主就出哪个宿主的头部。
         /// </summary>
-        public static EnvironmentBuilder SetupUniversalHeader(this EnvironmentBuilder builder, DataPort<PointerHitState?> hitPort)
+        /// <param name="labelBrush">字段名(含冒号)的画刷;null = 宿主默认灰。传资源画刷跟主题走。</param>
+        /// <param name="valueBrush">字段值的画刷;null = 宿主默认白。</param>
+        public static EnvironmentBuilder SetupUniversalHeader(this EnvironmentBuilder builder, DataPort<PointerHitState?> hitPort,
+            IHevoBrush? labelBrush = null, IHevoBrush? valueBrush = null)
         {
             var host = ChartHostServices.ResolveForCompose(builder.Canvas);
             var create = host.CreateUniversalHeader
                 ?? throw new InvalidOperationException($"宿主 {host.Name} 没有注册联动头(ChartHostServices.CreateUniversalHeader)。");
-            builder.Canvas.Add(create(hitPort));
+            var header = create(hitPort);
+            header.LabelBrush = labelBrush;
+            header.ValueBrush = valueBrush;
+            builder.Canvas.Add(header);
             return builder;
         }
     }
@@ -61,6 +67,12 @@ namespace Hevo.Charting.Features
         /// init-only 满足 HEVO007 引脚不可变约束;运行期 fallback 走下面的 _effectiveLengthPort 内部字段。
         /// </summary>
         public DataPort<int>? LogicalLengthPort { get; init; }
+
+        /// <summary>字段名(含冒号)的画刷;null = 宿主默认灰。装配前设,宿主重建控件时用。</summary>
+        public IHevoBrush? LabelBrush { get; set; }
+
+        /// <summary>字段值的画刷;null = 宿主默认白。装配前设,宿主重建控件时用。</summary>
+        public IHevoBrush? ValueBrush { get; set; }
 
         // OnCompose 期决定实际订阅的 length port —— 业务显式喂的优先,否则 fallback Viewport.LogicalLength。
         // 不能直接写 LogicalLengthPort(init 限制),也不该用 set 让蓝图反射误覆写(HEVO007)。
