@@ -32,6 +32,8 @@ namespace Hevo.Charting.Tests
     /// 测试直接登记真的那份,整张看板按 demo 实际装配校验。
     /// </para>
     /// </summary>
+    // DryRun 要 GraphViewerBootstrap 登记过组件;不进这个集合时只靠别的测试先跑过,排在最前就 BP_UNREGISTERED_TYPE
+    [Collection(nameof(BlueprintCollection))]
     public sealed class DashboardDemoAssetTests
     {
         private static readonly JsonSerializerOptions _json = BlueprintJsonOptions.Default;
