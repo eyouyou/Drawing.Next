@@ -36,7 +36,7 @@ try {
         $bytes = [IO.File]::ReadAllBytes($full)
         $backup[$full] = $bytes
         $text = [Text.Encoding]::UTF8.GetString($bytes)
-        $text = $text -replace '<TargetFramework>net10\.0', '<TargetFramework>net5.0'
+        $text = $text -replace '<TargetFramework>net8\.0','<TargetFramework>net5.0'
         [IO.File]::WriteAllText($full, $text, (New-Object Text.UTF8Encoding($false)))
     }
     '{"sdk":{"version":"5.0.408","rollForward":"disable"}}' | Set-Content -Encoding ascii $globalJson

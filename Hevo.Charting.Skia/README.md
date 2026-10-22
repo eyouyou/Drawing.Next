@@ -119,6 +119,6 @@ dotnet run -c Release --project Hevo.Charting.Benchmarks -- --latency-probe --re
 
 ## 已知限制
 
-- .NET 5：本程序集目标是 net10（`net10.0-windows10.0.19041.0`），不在 [README §2](../Hevo.Charting/README.md) 必编清单里；GPU 依赖（SkiaSharp.Views.WPF / OpenTK.GLWpfControl）在 .NET 5 下不可用。核心库 `Hevo.Charting` 里与后端相关的代码仍保持 .NET 5 可编译。
+- .NET 5：本程序集目标是 net8（`net8.0-windows10.0.19041.0`），不在 [README §2](../Hevo.Charting/README.md) 必编清单里；GPU 依赖（SkiaSharp.Views.WPF / OpenTK.GLWpfControl）在 .NET 5 下不可用。核心库 `Hevo.Charting` 里与后端相关的代码仍保持 .NET 5 可编译。
 - 只支持 WPF：合成面是 WPF 元素，不能用于其它 UI 框架。
 - 控件层（Tooltip 等 Widget）仍是 WPF 控件，不经过 Skia。

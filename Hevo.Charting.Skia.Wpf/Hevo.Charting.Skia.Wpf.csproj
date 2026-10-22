@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<!-- Skia 上屏后端的 WPF 合成面(WriteableBitmap / SKGLElement),翻译层在 Hevo.Charting.Skia -->
-		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+		<TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<UseWPF>true</UseWPF>
 		<LangVersion>preview</LangVersion>

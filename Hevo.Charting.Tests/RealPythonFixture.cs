@@ -60,6 +60,9 @@ namespace Hevo.Charting.Tests
 
         public void Dispose()
         {
+            // 超时用例的孤儿线程最多比超时阈值(5s)多睡 1.5s(time.sleep 5.5 / 6.5);先等它们退出再 Shutdown,
+            // 不然孤儿醒来时解释器已拆掉,访问已释放的解释器会让整个测试进程 AccessViolation(.NET 8 下稳定复现)
+            System.Threading.Thread.Sleep(2000);
             try { Registry?.Shutdown(); } catch { /* shutdown best-effort */ }
             try
             {

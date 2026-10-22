@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<!-- DrawCmd → SKCanvas 翻译层,不引 UI 框架:WPF 合成面在 Hevo.Charting.Skia.Wpf,Avalonia 宿主直接用本程序集 -->
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
 		<!-- 实验性后端:代码留在仓库随测试编译,不进任何打包产物;业务工程不引用 -->

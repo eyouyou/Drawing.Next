@@ -8,7 +8,7 @@
 | `Hevo.Charting.Avalonia.Demo` | 三页:① 手写 schema 的联动看板(K 线 + SMA20 + 成交量,顶部信息栏、十字线联动、悬浮窗、平移 / 滚轮 / 触屏缩放、分隔条调高度);② 同样内容的蓝图 JSON 起的看板;③ 打开这份 JSON 的蓝图编辑器。schema、数据源、蓝图跟 WPF 示例是同一份(`Hevo.Charting.Samples`) |
 | `Hevo.Charting.Avalonia.Tests` | Avalonia.Headless + 真 Skia 的无窗口测试 |
 
-版本跟接入方 FuturesPC 一致:net10.0,Avalonia **12.0.4**,SkiaSharp 不直接引用、用 Avalonia.Skia 带进来的 **3.119.4**
+版本跟接入方 FuturesPC 一致:net8.0,Avalonia **12.0.4**,SkiaSharp 不直接引用、用 Avalonia.Skia 带进来的 **3.119.4**
 (`Hevo.Charting.Skia` 钉同一版本:一个进程里只能有一份 Avalonia / SkiaSharp)。
 本工程不受 .NET 5 红线约束,不进 `scripts/check-net5.ps1`。
 
@@ -129,5 +129,5 @@ dotnet test Hevo.Charting.Avalonia.Tests
 
 **为什么不并进 `Hevo.Charting.Tests`**:宿主槽位已经按宿主分开,两种宿主能同进程共存(`Hevo.Charting.Tests/HostCoexistenceTests` 就把 Avalonia 宿主加载进 WPF 测试进程验证这点),
 不再是并不了的原因。仍然分开是测试基础设施不兼容:Avalonia.Headless 要整个测试程序集一个 Avalonia 应用(`[assembly: AvaloniaTestApplication]`)、
-用例跑在它的专用 UI 线程上(`[AvaloniaFact]`),这个运行器编在 xunit v3 上;WPF 测试是 xunit v2 + 每个用例自起 STA 线程 + net10.0-windows。
+用例跑在它的专用 UI 线程上(`[AvaloniaFact]`),这个运行器编在 xunit v3 上;WPF 测试是 xunit v2 + 每个用例自起 STA 线程 + net8.0-windows。
 硬并要么把 1200 多个 WPF 用例迁到 xunit v3,要么两套 UI 线程模型在一个进程里抢 Application 单例,得不偿失。

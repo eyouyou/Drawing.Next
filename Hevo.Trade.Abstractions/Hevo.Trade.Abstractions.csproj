@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
 		<!-- .NET 5 SDK 不认 ImplicitUsings:改用 GlobalUsings.cs 显式列出(同核心库 Globals.cs) -->

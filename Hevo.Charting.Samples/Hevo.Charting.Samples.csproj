@@ -4,7 +4,7 @@
 		<!-- 示例共用的模拟数据源(K 线、正弦波),不引任何 UI 框架:WPF / Avalonia 示例都引用它。
 		     WPF 业务示例(Hevo.Drawing.LowCodeDemo)引用它,所以按业务工程的红线编译:
 		     .NET 5 SDK 5.0.408 能重编(scripts/check-net5.ps1)、LangVersion 9、不开 ImplicitUsings -->
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>9.0</LangVersion>
 		<IsPackable>false</IsPackable>

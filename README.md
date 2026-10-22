@@ -25,11 +25,10 @@
 跑起来看看 WPF 示例（K 线 + 指标 + Python handler + Mock 交易面板）：
 
 ```bash
-dotnet build "Drawing.Next.slnx" -nologo
 dotnet run --project Hevo.Drawing.LowCodeDemo -c Debug
 ```
 
-> 要求：Windows + 支持 WPF 的 .NET 10 SDK（当前 TFM 为 `net10.0-windows10.0.19041.0`）。首次启动会同步嵌入式 Python 312 运行时与 demo 指标。
+> 要求：Windows + 支持 WPF 的 .NET 8 SDK（当前 TFM 为 `net8.0-windows10.0.19041.0`）。首次启动会同步嵌入式 Python 312 运行时与 demo 指标。
 
 Avalonia 示例(手写看板 / 蓝图 JSON 看板 / 蓝图编辑器三页,Windows / macOS 都能跑):
 
@@ -136,6 +135,8 @@ dotnet build "Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj" -nologo
 dotnet build "Drawing.Next.slnx" -nologo
 ```
 
+> `.slnx` 要 .NET SDK 9.0.200+ 或 Visual Studio 2022 17.13+ 才认;只装了 .NET 8 SDK 时按工程逐个 `dotnet build`(CI 的做法见 `.github/workflows/perf-regression.yml`)。
+
 测试 / 基准：
 
 ```bash
@@ -151,4 +152,4 @@ dotnet publish "Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj" -c Rel
 
 > 实测首张图冷启动(装配 + 首帧)JIT 约 242ms → R2R 约 194ms,热启动不变;数据见 [Benchmarks README](./Hevo.Charting.Benchmarks/README.md)。
 
-> 目标平台：Any CPU / x64。需要支持 WPF 的 .NET 10 SDK；MCP / Tests / Benchmarks 子项目同样锁 `net10.0-windows10.0.19041.0`（因 ProjectReference 透传 WPF 依赖）。
+> 目标平台：Any CPU / x64。需要支持 WPF 的 .NET 8 SDK；MCP / Tests / Benchmarks 子项目同样锁 `net8.0-windows10.0.19041.0`（因 ProjectReference 透传 WPF 依赖）。

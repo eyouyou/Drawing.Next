@@ -4,7 +4,7 @@
        LangVersion 9、不开 ImplicitUsings、Roslyn 生成器 / 分析器照常生效。
        示例能编译 = 文档里的写法在真实业务工程里能编译。由 Charting.Tests 引用并测试。 -->
   <PropertyGroup>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>9.0</LangVersion>
     <UseWPF>true</UseWPF>

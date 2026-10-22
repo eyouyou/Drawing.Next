@@ -16,13 +16,13 @@
 | `Hevo.Charting.Tests/DocSamples` | 文档引用的示例代码,按业务侧约束编译,`LangVersion 9` | 是 |
 | `Hevo.Charting.PythonNet` / `Hevo.Trade.*` | Python 集成 / 交易抽象与 Mock | 见各自 csproj |
 | `Hevo.Charting.Skia` / `Hevo.Charting.Skia.Wpf` | 实验性 Skia 后端:DrawCmd → SKCanvas 翻译层(不引 UI 框架)/ WPF 合成面 | 否 |
-| `Hevo.Charting.Tests` / `Hevo.Charting.Benchmarks` / `Hevo.Charting.Mcp` | 测试 / 基准 / MCP 服务 | 否(net10 only) |
+| `Hevo.Charting.Tests` / `Hevo.Charting.Benchmarks` / `Hevo.Charting.Mcp` | 测试 / 基准 / MCP 服务 | 否(net8 only) |
 
 ---
 
 ## 2. ⚠️ 维持 .NET 5 兼容(硬性约束)
 
-虽然项目当前编译目标是 **.NET 10**,但全部新增/修改代码 **必须保持可在 .NET 5 (SDK 5.0.408 + Roslyn 3.x) 下重新编译通过**。这是项目级硬约束,不是可选偏好。任何引入 .NET 6+/Roslyn 4+ 独占特性的提交都视为破坏约束,需要回退或提供等价兼容方案。
+虽然项目当前编译目标是 **.NET 8**,但全部新增/修改代码 **必须保持可在 .NET 5 (SDK 5.0.408 + Roslyn 3.x) 下重新编译通过**。这是项目级硬约束,不是可选偏好。任何引入 .NET 6+/Roslyn 4+ 独占特性的提交都视为破坏约束,需要回退或提供等价兼容方案。
 
 ### 核心红线
 
@@ -35,7 +35,7 @@
    - `Task.WaitAsync(CancellationToken)` → 手写 `CancellationTokenRegistration` + TCS 等价模式
    - `DateOnly` / `TimeOnly` / `PriorityQueue` / `Random.Shared` / `TimeProvider` / `SearchValues` / `FrozenDictionary` 等
 4. **Roslyn 红线 — Generator 不得使用 `IIncrementalGenerator`**。所有 generator 必须实现 `ISourceGenerator + ISyntaxContextReceiver`(失去增量缓存的代价)。`Hevo.Charting.CodeAnalysis` 的 NuGet 引用 **钉死 Microsoft.CodeAnalysis.CSharp 3.11.0**。
-5. **WPF 编译 quirk** — 业务工程(如 `Hevo.Drawing.LowCodeDemo.csproj`)用 `<Analyzer Include="...dll" />` 直接注册 generator,而 `<ProjectReference>` 不带 `OutputItemType=Analyzer`。**这是为了绕过 .NET 5 SDK 的 `_wpftmp` 编译不继承 Analyzer 类型 ProjectReference 的 bug**。net10 已修但保留此写法以维持双向可切。
+5. **WPF 编译 quirk** — 业务工程(如 `Hevo.Drawing.LowCodeDemo.csproj`)用 `<Analyzer Include="...dll" />` 直接注册 generator,而 `<ProjectReference>` 不带 `OutputItemType=Analyzer`。**这是为了绕过 .NET 5 SDK 的 `_wpftmp` 编译不继承 Analyzer 类型 ProjectReference 的 bug**。net8 已修但保留此写法以维持双向可切。
 6. **包版本** — 例如 `System.Text.Encoding.CodePages` 钉 5.0.0;若升级请同步评估 net5 是否仍能解析。
 7. **类型选型** — `IVisualTrait`(进 blackboard)用 `record class`;value payload(`HevoPoint` / `FieldMeta` / `PointerHitState` 等)用 `record struct` 或 `record class`(具体见 `00.架构协议与开发规范`)。**`record struct` 的 `with` 表达式是 C# 10 特性**,若调用方在 `LangVersion=9` 下,必须提供 `WithXxx(...)` helper 替代。
 
@@ -71,6 +71,8 @@ dotnet build "Hevo.Drawing.LowCodeDemo/Hevo.Drawing.LowCodeDemo.csproj" -nologo
 ```bash
 dotnet build "Drawing.Next.slnx" -nologo
 ```
+
+`.slnx` 要 .NET SDK 9.0.200+ 或 Visual Studio 2022 17.13+ 才认;只装了 .NET 8 SDK 时按工程逐个 `dotnet build`。
 
 测试(xUnit,400 多个用例;文档示例的回归在 `DocSampleTests`):
 

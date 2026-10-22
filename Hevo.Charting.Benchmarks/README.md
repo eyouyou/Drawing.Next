@@ -18,9 +18,9 @@ dotnet run -c Release -- --filter "*" --warmupCount 3 --iterationCount 5
 ```
 
 > ⚠️ **必须 Release 配置**。Debug 数据没意义。
-> ⚠️ 不要传 `--runtimes net10.0`。项目 TFM 是 `net10.0-windows10.0.19041.0`;BDN 0.14 不认识 .NET 10,
-> 按宿主 runtime 生成的 boilerplate 是 `net10.0`,引用本项目会 NU1201。`Program.BenchConfig` 已把默认 job 的工具链
-> 钉到 `net10.0-windows10.0.19041.0`(`--job dry/short/medium/long` 也在那里映射),不要再手动覆盖。
+> ⚠️ 不要传 `--runtimes net8.0`。项目 TFM 是 `net8.0-windows10.0.19041.0`;
+> BDN 按宿主 runtime 生成的 boilerplate 是 `net8.0`(不带 -windows),引用本项目会 NU1201。`Program.BenchConfig` 已把默认 job 的工具链
+> 钉到 `net8.0-windows10.0.19041.0`(`--job dry/short/medium/long` 也在那里映射),不要再手动覆盖。
 
 ## A/B 全量对比:origin/main → 本分支(2026-10-09)
 

@@ -4,7 +4,7 @@
 		<!-- Avalonia 宿主的无窗口测试(Avalonia.Headless + 真 Skia 渲染)。跟 Hevo.Charting.Tests 分开的原因见
 		     Hevo.Charting.Avalonia/README.md「测试」:Headless 平台要整个测试程序集一个 Avalonia 应用 + 专用 xunit v3 运行器,
 		     跟 WPF 测试的 STA / Application 夹具放一起互相干扰。两种宿主同进程共存另由 Hevo.Charting.Tests 的 HostCoexistenceTests 覆盖 -->
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
 		<ImplicitUsings>enable</ImplicitUsings>

@@ -51,7 +51,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '8.0.x'
 
       # 嵌入式 Python(PythonNet 测试和沙箱探针要用),首次 build 由 scripts/setup-python.ps1 下载
       - name: 缓存嵌入式 Python
@@ -60,9 +60,16 @@ jobs:
           path: Python312
           key: python312-${{ runner.os }}-${{ hashFiles('scripts/setup-python.ps1') }}
 
-      # 整个解决方案都编(含 LowCodeDemo / Mcp / Skia),不只是测试和基准用到的那几个
+      # 整个解决方案都编(含 LowCodeDemo / Mcp / Skia),不只是测试和基准用到的那几个。
+      # .NET 8 SDK 不认 .slnx,按 slnx 里列的工程逐个编
       - name: 构建
-        run: dotnet build Drawing.Next.slnx -c Release
+        shell: pwsh
+        run: |
+          $projects = Select-Xml -Path Drawing.Next.slnx -XPath '//Project' | ForEach-Object { $_.Node.Path }
+          foreach ($p in $projects) {
+            dotnet build $p -c Release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: 单元测试
         run: dotnet test Hevo.Charting.Tests -c Release --no-build --logger "trx;LogFileName=tests.trx" --results-directory artifacts/tests

@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<!-- Avalonia 宿主示例:一张 K 线 + SMA,十字线 / 平移 / 滚轮缩放 -->
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
 		<ImplicitUsings>enable</ImplicitUsings>
