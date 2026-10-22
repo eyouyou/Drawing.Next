@@ -7,7 +7,7 @@
 - 核心库 `Hevo.Charting` 仍零第三方依赖,默认上屏路径是 WPF `DrawingContext`。
 - 核心库新增了 [`IChartRenderBackend`](Renderers/IChartRenderBackend.cs) 扩展点(`ChartCell.RenderBackend`):挂上后整个 cell 的矢量画布改由该后端上屏,控件层仍走 WPF。
 - 本文下面介绍的按图层混合思路(`IRendererProvider` + 新 `RenderMode` 路由,见 §5 思路 A)是另一条路线;两条路线目前并存。
-- Skia 实现(`SkiaRenderBackend`,走 `IChartRenderBackend`)在可选程序集 `Hevo.Charting.Skia` 里,SkiaSharp 依赖只在该程序集;该程序集是实验性的,不随产品打包,业务工程不引用。
+- WPF 下的 Skia 实现(`SkiaRenderBackend`)已删除:SkiaSharp.Views.WPF 没有 net8 资产,Skia 只留给 Avalonia 宿主(`Hevo.Charting.Skia` 翻译层)。`IChartRenderBackend` 扩展点保留,目前没有实现。
 
 ---
 

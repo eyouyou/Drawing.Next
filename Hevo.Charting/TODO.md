@@ -4,21 +4,9 @@
 
 ---
 
-## Skia 后端宿主的原点对齐(重新启用 Skia 时做)
-
-**触发条件**:`Hevo.Charting.Skia` 的 `SkiaRenderBackend` 要随产品打包,或业务开始用 `ChartCell.RenderBackend`。
-
-**问题**:Skia 后端把整张图画成一张位图,宿主元素挂在 `_rootContainer` 里。祖先摆在小数位置(`Grid *`、GridSplitter、125% DPI 下的整数 DIP)时,这张位图跟位图模式图层一样会被重采样发糊、整体错开不到一个设备像素。WPF 路径已处理(06 号文档 §14.9:矢量图层靠 `ChartDrawingCanvas.InsertVisual` 给图层设的 snapping guideline,静态画布和位图图层靠 `ChartCell.SnapCanvasOrigin` 维护的原点平移),Skia 宿主没有覆盖。下面"Skia 引用移除"一节记的"±1 列错位"可能同源,重新启用时先用小数偏移复现确认。
-
-**方案**:跟位图图层一样处理 —— `ChartCell.SnapCanvasOrigin` 算出的平移(跟静态画布 `RenderTransform` 同一个偏移)交给后端,作为宿主元素的 `RenderTransform`,或由后端在 `DrawImage` 外面套上。只改渲染,不改宿主的布局位置;鼠标坐标走 `GetPosition(DrawingCanvas)`,已经含这份平移,宿主套上同一平移后口径一致。
-
-**验证**:`StaticCacheAliasingTests` 的祖先小数偏移用例加一组 `RenderBackend = new SkiaRenderBackend()`(测试工程已引用 Skia 程序集),开 / 关缓存半透明像素为 0;真实屏幕用小数偏移截图对照。
-
----
-
 ## ✅ 已完成:Skia 引用移除（commit 8350acf）
 
-> 现状补充:本节记录的是从**核心库**移除旧 `SkiaRenderer` 一事,核心库 `Hevo.Charting` 至今仍零第三方依赖。此后核心库新增了 `IChartRenderBackend` 整 cell 替换扩展点(`ChartCell.RenderBackend`),它与 [Renderer.md](Renderer.md) 介绍的按图层混合思路(`IRendererProvider`)是两条并存的路线;Skia 实现(`SkiaRenderBackend`)在可选程序集 `Hevo.Charting.Skia` 里(实验性,不随产品打包,业务工程不引用)。
+> 现状补充:本节记录的是从**核心库**移除旧 `SkiaRenderer` 一事,核心库 `Hevo.Charting` 至今仍零第三方依赖。此后核心库新增了 `IChartRenderBackend` 整 cell 替换扩展点(`ChartCell.RenderBackend`),它与 [Renderer.md](Renderer.md) 介绍的按图层混合思路(`IRendererProvider`)是两条并存的路线;WPF 下的 Skia 实现(`SkiaRenderBackend`)后来也删了,Skia 只给 Avalonia 宿主用(`Hevo.Charting.Skia`)。
 
 **触发原因**:Skia 路径在全屏 + 特定 canvas size 下出现 ±1 列错位 bug（SkiaSharp.Views.WPF 多个图层栅格化路径都没法绕开）。已经全员切到 WPF Software 并且通过 `_drawingCanvas.CacheMode = BitmapCache` 拿回了 perf,Skia 引用整体可拔。
 

@@ -8,7 +8,7 @@
 
 核心能力：
 
-- **三明治物理模型**：底层位图回放(`RenderMode.Bitmap`,框架光栅化进 `WriteableBitmap`)+ 中层 `DrawingVisual` 矢量 + 顶层 WPF Widget 交互，按场景显式分层，避免 XAML 过度嵌套。核心库零第三方渲染依赖;可选的 Skia 上屏后端在可选程序集 `Hevo.Charting.Skia`(翻译层)/ `Hevo.Charting.Skia.Wpf`(WPF 合成面)里,按需引用。
+- **三明治物理模型**：底层位图回放(`RenderMode.Bitmap`,框架光栅化进 `WriteableBitmap`)+ 中层 `DrawingVisual` 矢量 + 顶层 WPF Widget 交互，按场景显式分层，避免 XAML 过度嵌套。核心库零第三方渲染依赖;Skia 只给 Avalonia 宿主用(翻译层 `Hevo.Charting.Skia`),WPF 宿主不走 Skia。
 - **0-GC 渲染管线**：列式内存布局（SoA）、`ArrayPool` 复用、原位更新；Project 帧严禁分配闭包，昂贵计算用 `ctx.UseMemo` 按依赖缓存。
 - **自研响应式流（`IWorkflow<T>`）**：弃用 `System.Reactive`，搭配 `DataBlackboard` + `ReaderWriterLockSlim` 实现多引脚的"时空一致性"。
 - **强类型引脚 `DataPort<T>`**：贯穿数据源 → 计算 → 渲染的物理线缆，杜绝魔术字符串与隐式耦合。
@@ -45,7 +45,7 @@ dotnet run --project Hevo.Charting.Avalonia.Demo
 | [Charting.Core](./Hevo.Charting.Core) | 引擎核心(平台无关) | 抽象层、Feature 库、Layer、帧管线(`ChartEngine`)、黑板、指针路由、低代码蓝图运行时。不引任何 UI 框架,WPF / Avalonia 等宿主共用。 |
 | [Charting](./Hevo.Charting) | WPF 宿主 | `ChartCell` 控件、WPF 渲染器 / 位图后端、控件类图层(Tooltip)、指针适配器、联动看板、低代码 Designer。业务工程引用它(连带引用 Core)。 |
 | [Charting.Avalonia](./Hevo.Charting.Avalonia) | Avalonia 宿主 | `AvaloniaChartCell`、联动看板、头部、触屏、蓝图 / dashboard 启动器、蓝图编辑器、调试菜单;渲染只走 Skia。示例 `.Demo`、无窗口测试 `.Tests`。详见 [README](./Hevo.Charting.Avalonia/README.md)。 |
-| [Charting.Skia](./Hevo.Charting.Skia) / [Skia.Wpf](./Hevo.Charting.Skia.Wpf) | 渲染后端 | DrawCmd → SKCanvas 翻译层(Avalonia 宿主用它上屏);WPF 下的可选 Skia 合成面。 |
+| [Charting.Skia](./Hevo.Charting.Skia) | 渲染后端 | DrawCmd → SKCanvas 翻译层,只给 Avalonia 宿主上屏用;SkiaSharp 经 Avalonia.Skia 带进来,版本跟 Avalonia 走。 |
 | [Charting.Samples](./Hevo.Charting.Samples) | 示例共用 | 模拟数据源、手写 K 线 schema、示例看板蓝图 JSON,WPF / Avalonia 示例共用。 |
 | [Charting.CodeAnalysis](./Hevo.Charting.CodeAnalysis) | 编译期 | Roslyn 分析器与源生成器：`UseMemo` 位置校验、跨帧缓存检测、Trait Consumer / Required 校验、Port Generator。 |
 | [Drawing.LowCodeDemo](./Hevo.Drawing.LowCodeDemo) | 示例宿主 | 低代码蓝图运行时 + Node Editor + Python 编辑器 + Mock 撮合的 WPF 演示工程。 |

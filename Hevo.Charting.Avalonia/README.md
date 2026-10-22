@@ -9,7 +9,7 @@
 | `Hevo.Charting.Avalonia.Tests` | Avalonia.Headless + 真 Skia 的无窗口测试 |
 
 版本跟接入方 FuturesPC 一致:net8.0,Avalonia **12.0.4**,SkiaSharp 不直接引用、用 Avalonia.Skia 带进来的 **3.119.4**
-(`Hevo.Charting.Skia` 钉同一版本:一个进程里只能有一份 Avalonia / SkiaSharp)。
+(`Hevo.Charting.Skia` 也不单独钉 SkiaSharp,同样经 Avalonia.Skia 引用:一个进程里只能有一份 Avalonia / SkiaSharp)。
 本工程不受 .NET 5 红线约束,不进 `scripts/check-net5.ps1`。
 
 ## 用法

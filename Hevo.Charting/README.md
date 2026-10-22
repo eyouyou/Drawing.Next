@@ -15,7 +15,7 @@
 | `Hevo.Drawing.LowCodeDemo` | 示例宿主(业务侧写法的参照),`LangVersion 9` | 是 |
 | `Hevo.Charting.Tests/DocSamples` | 文档引用的示例代码,按业务侧约束编译,`LangVersion 9` | 是 |
 | `Hevo.Charting.PythonNet` / `Hevo.Trade.*` | Python 集成 / 交易抽象与 Mock | 见各自 csproj |
-| `Hevo.Charting.Skia` / `Hevo.Charting.Skia.Wpf` | 实验性 Skia 后端:DrawCmd → SKCanvas 翻译层(不引 UI 框架)/ WPF 合成面 | 否 |
+| `Hevo.Charting.Skia` | DrawCmd → SKCanvas 翻译层,只给 Avalonia 宿主用 | 否 |
 | `Hevo.Charting.Tests` / `Hevo.Charting.Benchmarks` / `Hevo.Charting.Mcp` | 测试 / 基准 / MCP 服务 | 否(net8 only) |
 
 ---

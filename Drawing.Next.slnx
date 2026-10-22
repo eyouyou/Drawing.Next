@@ -27,9 +27,8 @@
   <Folder Name="/05-python/">
     <Project Path="Hevo.Charting.PythonNet/Hevo.Charting.PythonNet.csproj" />
   </Folder>
-  <Project Path="Hevo.Charting.Skia/Hevo.Charting.Skia.csproj" />
-  <Project Path="Hevo.Charting.Skia.Wpf/Hevo.Charting.Skia.Wpf.csproj" />
   <Folder Name="/06-avalonia/">
+    <Project Path="Hevo.Charting.Skia/Hevo.Charting.Skia.csproj" />
     <Project Path="Hevo.Charting.Avalonia/Hevo.Charting.Avalonia.csproj" />
     <Project Path="Hevo.Charting.Avalonia.Demo/Hevo.Charting.Avalonia.Demo.csproj" />
     <Project Path="Hevo.Charting.Avalonia.Tests/Hevo.Charting.Avalonia.Tests.csproj" />

@@ -11,7 +11,7 @@ using SkiaSharp;
 namespace Hevo.Charting.Skia
 {
     /// <summary>
-    /// DrawCmd → SKCanvas 回放器,不依赖任何 UI 框架(WPF 合成面在 Hevo.Charting.Skia.Wpf,Avalonia 等宿主直接拿 SKCanvas 用它)。
+    /// DrawCmd → SKCanvas 回放器,Avalonia 宿主拿 SKCanvas 用它,不碰 Avalonia 控件。
     /// 资源笔刷 / 资源字体 / 宿主图片由 <see cref="ISkiaHostResources"/> 按宿主解析。
     /// 几何口径与 WPF 的 WpfDrawingRenderer 逐分支对齐(同样的像素对齐规则、
     /// 同样的相邻 DrawLine 合批、DrawRectangles 逐个画、Pen 的线端 / 虚线端 / 斜接上限取 WPF 的值)。

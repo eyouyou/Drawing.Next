@@ -132,7 +132,7 @@ namespace Hevo.Charting.Core
         private RenderMode? _renderModeOverride;
 
         /// <summary>
-        /// 上屏后端。null(默认)= WPF DrawingVisual 回放;设成别的后端(如 Charting.Skia 的 SkiaRenderBackend)
+        /// 上屏后端。null(默认)= WPF DrawingVisual 回放;设成自定义后端
         /// 后两块 WPF 矢量画布折叠,图层指令改由后端上屏。运行时可切换,下一帧生效,不重算 Feature、不重录图层。
         /// 新建 cell 的初值取 <see cref="DefaultRenderBackendFactory"/>。
         /// <para>
@@ -184,7 +184,7 @@ namespace Hevo.Charting.Core
 
         /// <summary>
         /// 新建 ChartCell 时用来创建 <see cref="RenderBackend"/> 的全局工厂(null = WPF 默认)。
-        /// 应用启动时设一次即可让所有图表换后端,例如 <c>ChartCell.DefaultRenderBackendFactory = () => new SkiaRenderBackend();</c>。
+        /// 应用启动时设一次即可让所有图表换后端。
         /// </summary>
         public static Func<IChartRenderBackend?>? DefaultRenderBackendFactory { get; set; }
 

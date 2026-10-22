@@ -63,9 +63,6 @@ namespace Hevo.Charting.Benchmarks
             // 绘制策略对照:同一套指令改由框架光栅化进位图(ChartCell.RenderModeOverride / ChartLayer.Mode = Bitmap)
             new("bmp",        "增量+位图(全部图层)", false, false, false, PlotMode.Sync, ProbeRenderer.BitmapAll),
             new("bmp-series", "增量+位图(序列图层)", false, false, false, PlotMode.Sync, ProbeRenderer.BitmapSeries),
-            // Skia 后端(Charting.Skia):CPU 帧耗时含光栅;GPU 光栅在随后的 WPF 渲染里。光栅部分另在报告末尾 Skia 表单列
-            new("skia",       "增量+Skia",          false, false, false, PlotMode.Sync, ProbeRenderer.Skia),
-            new("skia-gpu",   "增量+Skia GPU",      false, false, false, PlotMode.Sync, ProbeRenderer.SkiaGpu),
         };
 
         /// <summary>默认跑的逐帧场景(不带 --scenarios 时)。</summary>
@@ -112,7 +109,6 @@ namespace Hevo.Charting.Benchmarks
             // --alloc-types:各轮 GCAllocationTick 采样按 (类型, LOH) 累加
             public readonly Dictionary<(string Type, bool Large), (long Ticks, long Bytes, long MaxObj)> AllocTypes = new();
             public int AllocFrames;
-            public readonly List<double> SkiaRaster = new();
             public string Key => $"bars={Bars}|charts={Charts}|{Scenario}|{Mode.Key}";
         }
 
@@ -292,9 +288,6 @@ namespace Hevo.Charting.Benchmarks
             enc.Save(fs);
         }
 
-        // Skia 策略下本段每帧的合成 + 光栅耗时(ms);其余策略为 null
-        private static List<double>? s_rasterSink;
-
         private static void RunSegment(ProbeRig rig, Combo c, int steps, bool record)
         {
             var step = ScenarioStep(rig, c.Scenario);
@@ -314,13 +307,11 @@ namespace Hevo.Charting.Benchmarks
                 IncrementalRenderProbe.ShortCircuitMissDetail.Clear();
 
                 var samples = new List<Sample>(steps);
-                s_rasterSink = record && c.Mode.Renderer is ProbeRenderer.Skia or ProbeRenderer.SkiaGpu ? c.SkiaRaster : null;
                 var sampler = record ? s_allocSampler : null;
                 sampler?.Begin();
                 int g0 = GC.CollectionCount(0), g1 = GC.CollectionCount(1), g2 = GC.CollectionCount(2);
                 bool checkTip = c.Scenario.Contains("Hover", StringComparison.Ordinal);
                 for (int i = 0; i < steps; i++) samples.Add(RunStep(rig, step, i, c.Mode.Plot, checkTip));
-                s_rasterSink = null;
                 if (record) SnapshotOnce(rig, c);
                 if (sampler != null)
                 {
@@ -393,7 +384,6 @@ namespace Hevo.Charting.Benchmarks
             var (layers, drawCmds) = RunFrame(rig, plot);
             long t2 = Stopwatch.GetTimestamp();
             long alloc1 = GC.GetAllocatedBytesForCurrentThread();
-            s_rasterSink?.Add(ProbeRenderers.LastRasterTicks() * 1000.0 / Stopwatch.Frequency);
 
             return new Sample(
                 PipelineMs: (t2 - t1) * 1000.0 / Stopwatch.Frequency,
@@ -677,26 +667,6 @@ namespace Hevo.Charting.Benchmarks
                         $"{e.Gen0Per1k:F1}/{e.Gen1Per1k:F1}/{e.Gen2Per1k:F1} |"));
                 }
             }
-            var skia = combos.Where(c => c.SkiaRaster.Count > 0).ToList();
-            if (skia.Count > 0)
-            {
-                md.AppendLine();
-                md.AppendLine("### Skia 后端:录制与光栅拆分(CPU:帧耗时 = Feature 投影 + 图层录制 + SKPicture 重录 + 合成面整面光栅;GPU:光栅在随后的 WPF 渲染里,另计)");
-                md.AppendLine();
-                md.AppendLine("| K 线根数 | 图数 | 场景 | 模式 | 帧耗时中位(ms) | 其中光栅中位(ms) | 光栅 P95(ms) | 端到端中位(ms)=输入+帧 |");
-                md.AppendLine("|---:|---:|---|---|---:|---:|---:|---:|");
-                foreach (var c in skia)
-                {
-                    var all = c.Rounds.SelectMany(r => r).ToList();
-                    // GPU 目标的光栅不在帧耗时里(发生在随后的 WPF 渲染),端到端要加上
-                    bool gpu = c.Mode.Renderer == ProbeRenderer.SkiaGpu;
-                    var e2e = all.Select((x, i) => x.InputMs + x.PipelineMs + (gpu && i < c.SkiaRaster.Count ? c.SkiaRaster[i] : 0));
-                    md.AppendLine(string.Create(CultureInfo.InvariantCulture,
-                        $"| {c.Bars} | {c.Charts} | {c.Scenario} | {c.Mode.Name} | {Stats.Percentile(all.Select(x => x.PipelineMs), 0.5):F3} | " +
-                        $"{Stats.Percentile(c.SkiaRaster, 0.5):F3} | {Stats.Percentile(c.SkiaRaster, 0.95):F3} | {Stats.Percentile(e2e, 0.5):F3} |"));
-                }
-            }
-
             if (entries.Any(e => !e.CountersDeterministic && e.Frames > 0))
                 md.AppendLine().AppendLine("⚠ = 计数在各轮之间不一致(脚本或引擎里有不确定因素),不能作回归门槛。");
 

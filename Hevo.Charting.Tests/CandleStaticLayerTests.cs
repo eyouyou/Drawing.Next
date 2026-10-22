@@ -115,24 +115,6 @@ namespace Hevo.Charting.Tests
         }
 
         [Fact]
-        public void EnvironmentInvalidated_RerecordsAllLayers_EvenWithoutDataChange() => IncrementalTestKit.RunOnSta(() =>
-        {
-            // 换主题:数据没变、图层不脏,环境失效时后端也要把全部图层按现有指令重录(资源画刷按新主题重新解析)
-            var backend = new Skia.SkiaRenderBackend();
-            var rig = new Rig(backend);
-            rig.Frame();
-            rig.Cell.Invalidate();
-            Assert.Equal(0, backend.LastRecordedLayers);
-
-            rig.Schema.InvalidateEnvironment();
-            rig.Frame();
-            int layers = rig.Cell.Engine.StaticLayers.Count + rig.Cell.Engine.OverlayLayers.Count;
-            Assert.True(layers > 0);
-            Assert.Equal(layers, backend.LastRecordedLayers);
-            rig.CloseWindow();
-        });
-
-        [Fact]
         public void Tick_LastBarChangedInPlace_KeepsStaticLayer() => IncrementalTestKit.RunOnSta(() =>
         {
             var rig = new Rig();

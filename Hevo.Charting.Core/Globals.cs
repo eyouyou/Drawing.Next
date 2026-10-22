@@ -14,7 +14,6 @@ global using System.Threading.Tasks;
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Tests")]
 // Skia 后端直接读 DrawingBuffer 指令与像素对齐工具(与 WPF / 位图后端同口径),不经公开 API 拷贝
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Skia")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Skia.Wpf")]
 // Avalonia 宿主同 WPF 宿主:实现 IChartCellHost、构造 ChartEngine、往 ChartLayer.HostVisual 挂上屏对象
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Avalonia")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Hevo.Charting.Avalonia.Tests")]

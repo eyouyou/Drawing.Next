@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<!-- DrawCmd → SKCanvas 翻译层,不引 UI 框架:WPF 合成面在 Hevo.Charting.Skia.Wpf,Avalonia 宿主直接用本程序集 -->
+		<!-- DrawCmd → SKCanvas 翻译层,Avalonia 宿主用它上屏;不碰 Avalonia 控件,只用 Avalonia.Skia 带来的 SkiaSharp -->
 		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
@@ -10,8 +10,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- 跟 Avalonia.Skia 12.0.4 带进来的 SkiaSharp 同版本:进程里只有一份 SkiaSharp -->
-		<PackageReference Include="SkiaSharp" Version="3.119.4" />
+		<!-- 只给 Avalonia 宿主用:SkiaSharp 不单独钉版本,经 Avalonia.Skia 带进来,版本跟 Avalonia 走 -->
+		<PackageReference Include="Avalonia.Skia" Version="12.0.4" />
 	</ItemGroup>
 
 	<ItemGroup>
