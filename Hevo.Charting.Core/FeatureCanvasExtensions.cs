@@ -184,7 +184,7 @@ namespace Hevo.Charting
             // 💥 终极修改：接收带有 RefBox 盒子的工厂，完美对齐 DomainTickProvider 的需求！
             Func<RefBox<ReadOnlyMemory<TX>>, ITickStrategy>? strategyFactory = null,
             LineStyle? gridStyle = null,
-            HevoColor? textColor = null)
+            IHevoBrush? textBrush = null)
         {
             if (!builder.Canvas.HasFeature<ViewportManagerFeature>()
                 && !builder.Canvas.HasFeature<ViewportPortsFeature>(p => p.IsExternal))
@@ -200,7 +200,7 @@ namespace Hevo.Charting
                 Mapping = ScaleMapping.Domain,
                 IsShared = true,
                 RangePort = vp.ActiveRange,
-                AxisStyle = AxisStyleTrait.Create(AxisPlacement.Bottom, textColor ?? HevoColors.Gray),
+                AxisStyle = AxisStyleTrait.Create(AxisPlacement.Bottom, HevoColors.Gray) with { TextBrush = textBrush ?? new HevoSolidBrush(HevoColors.Gray) },
                 GridStyle = GridStyleTrait.Create(GridOrientation.Vertical, gridStyle ?? LineStyle.Create(HevoColor.FromArgb(40, 255, 255, 255), 1))
             });
             return builder;
@@ -225,7 +225,7 @@ namespace Hevo.Charting
             Func<int, DateTime> indexToTime,
             Func<ITickStrategy>? strategyFactory = null,
             LineStyle? gridStyle = null,
-            HevoColor? textColor = null)
+            IHevoBrush? textBrush = null)
         {
             if (!builder.Canvas.HasFeature<ViewportManagerFeature>()
                 && !builder.Canvas.HasFeature<ViewportPortsFeature>(p => p.IsExternal))
@@ -240,7 +240,7 @@ namespace Hevo.Charting
                 Mapping = ScaleMapping.Domain,
                 IsShared = true,
                 RangePort = vp.ActiveRange,
-                AxisStyle = AxisStyleTrait.Create(AxisPlacement.Bottom, textColor ?? HevoColors.Gray),
+                AxisStyle = AxisStyleTrait.Create(AxisPlacement.Bottom, HevoColors.Gray) with { TextBrush = textBrush ?? new HevoSolidBrush(HevoColors.Gray) },
                 GridStyle = GridStyleTrait.Create(GridOrientation.Vertical, gridStyle ?? LineStyle.Create(HevoColor.FromArgb(40, 255, 255, 255), 1))
             });
             return builder;
@@ -255,7 +255,7 @@ namespace Hevo.Charting
         /// <param name="placement"></param>
         /// <param name="handle"></param>
         /// <param name="strategy"></param>
-        /// <param name="textColor">刻度文字色;宿主按自己的配色传,不传为灰。</param>
+        /// <param name="textBrush">刻度文字画刷(可以是资源画刷,跟主题走);不传为灰。</param>
         /// <param name="gridStyle">网格线;不传为 40 透明度白色实线。</param>
         /// <returns></returns>
         public static AxesBuilder AddRangeAxis(
@@ -266,7 +266,7 @@ namespace Hevo.Charting
             AxisHandle? handle = null,
             ITickStrategy? strategy = null, // 💥 核心：允许注入策略
             MirrorTickAnchor? broadcastTicksTo = null, // 💥 双轴主轴：把 tick 比例广播给同槽副轴
-            HevoColor? textColor = null,
+            IHevoBrush? textBrush = null,
             LineStyle? gridStyle = null)
         {
             builder.Canvas.Add(new AxisFeature(
@@ -276,7 +276,7 @@ namespace Hevo.Charting
                 Mapping = ScaleMapping.Value,
                 Handle = handle ?? new AxisHandle(),
                 RangePort = rangePort,
-                AxisStyle = AxisStyleTrait.Create(placement, textColor ?? HevoColors.Gray, fontSize: 11.0),
+                AxisStyle = AxisStyleTrait.Create(placement, HevoColors.Gray, fontSize: 11.0) with { TextBrush = textBrush ?? new HevoSolidBrush(HevoColors.Gray) },
                 GridStyle = GridStyleTrait.Create(GridOrientation.Horizontal, gridStyle ?? LineStyle.Create(HevoColor.FromArgb(40, 255, 255, 255), 1)),
                 BroadcastTicksTo = broadcastTicksTo
             });
@@ -285,7 +285,7 @@ namespace Hevo.Charting
 
         /// <summary>
         /// 双轴副轴：tick 比例完全镜像主轴,自身不画 grid (避免与主轴 grid 重影)。
-        /// 调用前提：先调用主轴的 <see cref="AddRangeAxis(AxesBuilder, DataPort{RealRange}, FieldMeta, AxisPlacement, AxisHandle?, ITickStrategy?, MirrorTickAnchor?, HevoColor?, LineStyle?)"/>
+        /// 调用前提：先调用主轴的 <see cref="AddRangeAxis(AxesBuilder, DataPort{RealRange}, FieldMeta, AxisPlacement, AxisHandle?, ITickStrategy?, MirrorTickAnchor?, IHevoBrush?, LineStyle?)"/>
         /// 并把同一个 <paramref name="mirrorFrom"/> 实例传给 broadcastTicksTo,确保同帧主轴先写、副轴后读。
         /// </summary>
         public static AxesBuilder AddMirroredRangeAxis(
@@ -295,7 +295,7 @@ namespace Hevo.Charting
             MirrorTickAnchor mirrorFrom,
             AxisPlacement placement = AxisPlacement.Right,
             AxisHandle? handle = null,
-            HevoColor? textColor = null)
+            IHevoBrush? textBrush = null)
         {
             if (mirrorFrom == null) throw new System.ArgumentNullException(nameof(mirrorFrom));
 
@@ -306,7 +306,7 @@ namespace Hevo.Charting
                 Mapping = ScaleMapping.Value,
                 Handle = handle ?? new AxisHandle(),
                 RangePort = rangePort,
-                AxisStyle = AxisStyleTrait.Create(placement, textColor ?? HevoColors.Gray, fontSize: 11.0),
+                AxisStyle = AxisStyleTrait.Create(placement, HevoColors.Gray, fontSize: 11.0) with { TextBrush = textBrush ?? new HevoSolidBrush(HevoColors.Gray) },
                 // GridStyle = null：副轴不画 grid,完全让位主轴。
                 MirrorTicksFrom = mirrorFrom
             });
@@ -333,7 +333,7 @@ namespace Hevo.Charting
             LineStyle? baseLineStyle = null,
             LineStyle? gridStyle = null,
             IHevoBrush? baselineTextBrush = null,
-            HevoColor? textColor = null)
+            IHevoBrush? textBrush = null)
         {
             var resolvedGrid = gridStyle ?? LineStyle.Create(HevoColor.FromArgb(40, 255, 255, 255), 1);
             // baseline pen 不再自动 +1。业务想要 anchor 处加粗强调，显式传 baseLineStyle；
@@ -350,7 +350,7 @@ namespace Hevo.Charting
                 Mapping = ScaleMapping.Value,
                 Handle = handle ?? new AxisHandle(),
                 RangePort = rangePort,
-                AxisStyle = AxisStyleTrait.Create(placement, textColor ?? HevoColors.Gray, baseLineStyle: tickMarkStyle, fontSize: 11.0),
+                AxisStyle = AxisStyleTrait.Create(placement, HevoColors.Gray, baseLineStyle: tickMarkStyle, fontSize: 11.0) with { TextBrush = textBrush ?? new HevoSolidBrush(HevoColors.Gray) },
                 GridStyle = GridStyleTrait.Create(GridOrientation.Horizontal, resolvedGrid)
             });
             return builder;
