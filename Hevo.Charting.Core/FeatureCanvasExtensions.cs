@@ -439,9 +439,10 @@ namespace Hevo.Charting
             InertiaPanOptions? inertiaPanConfig = null,
             DoubleClickResetOptions? doubleClickResetConfig = null,
             bool requireClickToActivate = false,
-            bool dismissOnEscape = false)
+            bool dismissOnEscape = false,
+            Action<long, int>? onRequireBefore = null)
         {
-            DataPort<DataAvailability>? availabilityPort = onRequireDataAsync != null
+            DataPort<DataAvailability>? availabilityPort = onRequireDataAsync != null || onRequireBefore != null
                 ? new DataPort<DataAvailability>("DataAvailability")
                 : null;
 
@@ -466,6 +467,7 @@ namespace Hevo.Charting
                 builder.Canvas.Add(new DataPagingFeature
                 {
                     OnRequireDataAsync = onRequireDataAsync,
+                    OnRequireBefore = onRequireBefore,
                     FetchConfig = fetchConfig ?? new DataFetchOptions(),
                     AvailabilityPort = availabilityPort
                 });

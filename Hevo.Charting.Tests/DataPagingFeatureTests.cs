@@ -390,6 +390,7 @@ namespace Hevo.Charting.Tests
             public DataPort<PointerHitState?> Hit { get; } = new("T_Hit");
             public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
             public Func<int, int, Task<bool>>? OnRequire { get; init; }
+            public Action<long, int>? OnRequireBefore { get; init; }
             public DataFetchOptions? Fetch { get; init; }
             public IZoomStrategy? Zoom { get; init; }
             protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
@@ -399,7 +400,7 @@ namespace Hevo.Charting.Tests
                 canvas
                     .Environment(env => env.SetupViewport(minVisibleCount: 5, alignment: ViewportAlignment.RightEdge, defaultVisibleCount: 50))
                     .Interactions(i => i.EnableStandardPointer(Hit, ChartInteractionMode.All,
-                        onRequireDataAsync: OnRequire, fetchConfig: Fetch, zoomStrategy: Zoom));
+                        onRequireDataAsync: OnRequire, fetchConfig: Fetch, zoomStrategy: Zoom, onRequireBefore: OnRequireBefore));
             }
         }
 
@@ -418,6 +419,20 @@ namespace Hevo.Charting.Tests
             Assert.Same(fetch, paging.FetchConfig);
             Assert.NotNull(interaction.AvailabilityPort);
             Assert.Same(paging.AvailabilityPort, interaction.AvailabilityPort);
+        });
+
+        [Fact]
+        public void EnableStandardPointer_WithRequireBefore_SharesAvailabilityPort() => IncrementalTestKit.RunOnSta(() =>
+        {
+            Action<long, int> cb = (_, _) => { };
+            var schema = new PointerSchema { OnRequireBefore = cb };
+            var cell = new ChartCell { Template = schema };
+            using (var ctx = cell.CreateContext()) schema.ComposeAll(cell, ctx);
+
+            var paging = Assert.Single(schema.ListFeatures().OfType<DataPagingFeature>());
+            Assert.Same(cb, paging.OnRequireBefore);
+            Assert.Null(paging.OnRequireDataAsync);
+            Assert.Same(paging.AvailabilityPort, Assert.Single(schema.ListFeatures().OfType<ChartInteractionFeature>()).AvailabilityPort);
         });
 
         [Fact]
