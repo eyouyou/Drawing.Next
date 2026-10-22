@@ -66,6 +66,16 @@ namespace Hevo.Charting.Tests
                 }
             }
 
+            /// <summary>同切合约的空帧:长度归零、Extent 回 default。</summary>
+            public void Clear()
+            {
+                using (Board.WriteScope())
+                {
+                    Board.Write(Vp.Extent, default);
+                    Board.Write(Vp.LogicalLength, 0);
+                }
+            }
+
             public long? AnchorKey { get { using (Board.ReadScope()) return Board.Read(Vp.AnchorKey); } }
             public void Pan(double min) { using (Board.WriteScope()) Board.Write(Vp.UserRange, new RealRange(min, min + Span)); }
             public RealRange Active { get { using (Board.ReadScope()) return Board.Read(Vp.ActiveRange); } }
@@ -268,6 +278,87 @@ namespace Hevo.Charting.Tests
             Assert.Equal(1080, rig.AnchorKey);
         });
 
+        // ---- 数据到之前就调 ScrollToKey(切合约 / 切周期后立刻跳日期、恢复位置) ----
+
+        [Fact]
+        public void ScrollToKey_BeforeData_LandsWhenDataArrives() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var rig = new Rig();
+            rig.SetKeys(Keys(1000, 200), new object());
+            rig.Clear();                               // 切合约
+            rig.Vpm.ScrollToKey(1060);                 // 紧接着跳日期
+            Assert.False(rig.Active.IsValid);
+
+            rig.SetKeys(Keys(1000, 200), new object());
+            Assert.Equal(60, (rig.Active.Min + rig.Active.Max) / 2, 6);
+            Assert.Equal(Span, rig.Active.Span, 6);
+        });
+
+        [Fact]
+        public void ScrollToKey_BeforeData_NotInFirstPage_PendsThenLands() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var rig = new Rig();
+            rig.Vpm.ScrollToKey(500);
+            var epoch = new object();
+            rig.SetKeys(Keys(1000, 200), epoch);       // 首屏不含目标
+
+            Assert.Equal(0, rig.Active.Min, 6);        // 先停最左
+            Assert.Equal(500, rig.AnchorKey);          // 分页模块据此补到 500
+
+            rig.SetKeys(Keys(400, 800), epoch);
+            Assert.Equal(100, (rig.Active.Min + rig.Active.Max) / 2, 6);
+        });
+
+        [Fact]
+        public void ScrollToKey_BeforeData_Exhausted_StopsAtFirst() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var rig = new Rig();
+            rig.Vpm.ScrollToKey(10);
+            rig.SetKeys(Keys(900, 300), new object(), olderExhausted: true);
+
+            Assert.Equal(0, rig.Active.Min, 6);
+            Assert.Equal(900, rig.AnchorKey);
+        });
+
+        [Fact]
+        public void ScrollToKey_BeforeData_UserDragsBeforeArrival_DragWins() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var rig = new Rig();
+            rig.Vpm.ScrollToKey(500);
+            var epoch = new object();
+            rig.SetKeys(Keys(1000, 200), epoch);
+            rig.Pan(80);                               // 补拉途中用户拖走
+            rig.SetKeys(Keys(800, 400), epoch);
+
+            Assert.Equal(280, rig.Active.Min, 6);
+            Assert.Equal(1080, rig.AnchorKey);
+        });
+
+        [Fact]
+        public void ScrollToKey_BeforeData_UntrackedSource_Ignored() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var rig = new Rig();
+            rig.Vpm.ScrollToKey(10);
+            rig.SetLength(200);                        // 不发 DataExtent 的数据源:原首屏
+            Assert.Equal(new RealRange(150, 199), rig.Active);
+
+            rig.Clear();
+            rig.SetKeys(Keys(0, 200), new object());   // 之后换成带键的,作废的目标不再生效
+            Assert.Equal(new RealRange(150, 199), rig.Active);
+        });
+
+        [Fact]
+        public void ScrollToKey_WithData_ThenSwitch_Dropped() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var rig = new Rig();
+            rig.SetKeys(Keys(1000, 200), new object());
+            rig.Vpm.ScrollToKey(500);                  // 旧合约上的跳转,还在等补齐
+            rig.Clear();                               // 切走
+            rig.SetKeys(Keys(0, 1200), new object());
+
+            Assert.Equal(new RealRange(1150, 1199), rig.Active);   // 新合约回首屏
+        });
+
         // ---- 整条链路:数据源 Publish(DataExtent) → ProjectExtent → 视口 ----
 
         private sealed class KeyedSource : BufferedDataSource<KeyedSource, long>
@@ -280,6 +371,11 @@ namespace Hevo.Charting.Tests
                     _buffer.AddRange(keys);
                     Publish(new DataExtent(epoch, keys, false));
                 }
+            }
+
+            public void Clear()
+            {
+                lock (_lock) { _buffer.Clear(); Publish(); }
             }
 
             /// <summary>切合约:空帧紧接新数据,背靠背两次发布。</summary>
@@ -298,12 +394,13 @@ namespace Hevo.Charting.Tests
         private sealed class PipeSchema : ChartReactiveSchema
         {
             public KeyedSource Source { get; } = new();
-            protected override void DefineDataFlow(IChartCell chart) =>
-                Source.Pipe().ProjectExtent(ViewportPorts.RequireAttached(chart)).BindTo(chart);
-            protected override void DefineFeatures(IFeatureContext canvas) => canvas.Add(new ViewportManagerFeature
+            public ViewportManagerFeature Vpm { get; } = new()
             {
                 Alignment = ViewportAlignment.RightEdge, DefaultVisibleCount = 50, MinVisibleCount = 5,
-            });
+            };
+            protected override void DefineDataFlow(IChartCell chart) =>
+                Source.Pipe().ProjectExtent(ViewportPorts.RequireAttached(chart)).BindTo(chart);
+            protected override void DefineFeatures(IFeatureContext canvas) => canvas.Add(Vpm);
         }
 
         private static (PipeSchema Schema, ViewportPorts Vp) BuildPipe()
@@ -344,6 +441,19 @@ namespace Hevo.Charting.Tests
 
             Assert.Equal(new[] { 0, 300 }, lengths);
             using (board.ReadScope()) Assert.Equal(new RealRange(250, 299), board.Read(vp.ActiveRange));
+        });
+
+        [Fact]
+        public void Pipe_SwitchThenScrollToKey_LandsOnFirstFrame() => IncrementalTestKit.RunOnSta(() =>
+        {
+            var (schema, vp) = BuildPipe();
+            schema.Source.Set(Keys(1000, 200), new object());
+            schema.Source.Clear();                     // 切周期:空帧同步到达
+            schema.Vpm.ScrollToKey(1060);              // 恢复位置
+            schema.Source.Set(Keys(1000, 200), new object());
+
+            var board = schema.CurrentBoard!;
+            using (board.ReadScope()) Assert.Equal(60, (board.Read(vp.ActiveRange).Min + board.Read(vp.ActiveRange).Max) / 2, 6);
         });
     }
 }

@@ -128,6 +128,9 @@ namespace Hevo.Charting.Features
         private bool _anchorPending;
         // 上次裁决时的键:用户意图(UserRange)是按上次的下标写的,要先经它换成键;它的末根判断"有没有追加"
         private ReadOnlyMemory<long> _lastKeys;
+        // 还没有数据时调的 ScrollToKey(切合约 / 切周期后立刻跳日期、恢复位置):下一个非空帧到达时转成锚点(不带键则作废)。
+        // 切换的空帧在调用前已同步到达,不会清掉它;数据到之前再切一次,长度仍是 0、Clamp 不触发,目标随到新上下文(跳日期 / 恢复位置按日期,跨合约也成立)
+        private long? _deferredKey;
 
         protected override void OnCompose(IChartCell chart, RenderContext ctx, IRenderFlow<DataBlackboard> flow)
         {
@@ -145,7 +148,11 @@ namespace Hevo.Charting.Features
         /// <para>
         /// 只在数据源发了 <see cref="DataExtent"/> 时有效。目标早于已加载的首根时,先停在最左并把目标写进
         /// <see cref="ViewportPorts.AnchorKey"/>;分页模块据此让数据源补到目标,补到后视口按键自然落位。
-        /// 期间用户一拖就以拖动为准;目标早于最早数据时(到底)停在第一根。还没有数据时调用无效。
+        /// 期间用户一拖就以拖动为准;目标早于最早数据时(到底)停在第一根。
+        /// </para>
+        /// <para>
+        /// 还没有数据时(切合约 / 切周期后立刻调)先记下,首个带 <see cref="DataExtent"/> 的帧到达时按首屏跨度把目标居中,
+        /// 没加载到的同样先停最左再等分页补齐。首帧不带键(数据源不发 DataExtent)则作废。
         /// </para>
         /// </summary>
         public void ScrollToKey(long key)
@@ -157,8 +164,14 @@ namespace Hevo.Charting.Features
                 var extent = board.Read(Viewport.Extent);
                 var active = board.Read(Viewport.ActiveRange);
                 int length = board.Read(Viewport.LogicalLength);
-                if (!extent.IsTracked || extent.Keys.Length != length || length <= 0 || !active.IsValid) return;
+                if (length <= 0 || !active.IsValid)
+                {
+                    _deferredKey = key;
+                    return;
+                }
+                if (!extent.IsTracked || extent.Keys.Length != length) return;
 
+                _deferredKey = null;
                 _anchorKey = key;
                 _anchorFrac = -active.Span / 2.0;
                 _anchorPending = true;
@@ -249,6 +262,7 @@ namespace Hevo.Charting.Features
                     _lastLogicalLength = -1;
                     _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
                     ClearAnchor();
+                    _deferredKey = null;
                     using (board.WriteScope())
                     {
                         board.Write(Viewport.ActiveRange, default);
@@ -270,6 +284,8 @@ namespace Hevo.Charting.Features
                     targetRange = InitialRange(DefaultVisibleCount, minSpan, maxIndex);
                     // 按键跟踪时 UserRange 要经上次的键换算,上一个上下文留下的值不能当成新意图
                     if (keyed) _lastProcessedUserRange = userRange;
+                    if (keyed && _deferredKey.HasValue) targetRange = LandDeferred(keys, targetRange.Span, extent.OlderExhausted);
+                    _deferredKey = null;
                 }
                 else if (keyed && _anchorKey.HasValue && _lastKeys.Length > 0 && activeRange.IsValid)
                 {
@@ -388,6 +404,22 @@ namespace Hevo.Charting.Features
             return new RealRange(i + _anchorFrac, i + _anchorFrac + basis.Span);
         }
 
+        // 数据到之前调的 ScrollToKey:按首屏跨度把目标居中,规则同 KeyedTarget 的待定落位
+        private RealRange LandDeferred(ReadOnlySpan<long> keys, double span, bool olderExhausted)
+        {
+            long anchor = _deferredKey!.Value;
+            _anchorKey = anchor;
+            _anchorFrac = -span / 2.0;
+            _anchorPending = true;
+            int i = LowerBound(keys, anchor);
+            if (keys[0] <= anchor || olderExhausted)
+            {
+                if (keys[0] > anchor) _anchorFrac = Math.Max(_anchorFrac, 0);
+                _anchorPending = false;
+            }
+            return new RealRange(i + _anchorFrac, i + _anchorFrac + span);
+        }
+
         private void RecordAnchor(ReadOnlyMemory<long> keys, double min)
         {
             if (!_anchorPending)
@@ -425,6 +457,7 @@ namespace Hevo.Charting.Features
             _lastLogicalLength = -1;
             _lastProcessedUserRange = new RealRange(double.NaN, double.NaN);
             ClearAnchor();
+            _deferredKey = null;
         }
 
         // 💥 边界判定原子操作：Hard 钳回 maxIndex/0；Overscroll 直接放行（保留越界 UserRange 给 series/axis 渲染）。
