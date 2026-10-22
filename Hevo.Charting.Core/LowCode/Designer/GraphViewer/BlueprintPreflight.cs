@@ -40,6 +40,7 @@ namespace Hevo.Charting.LowCode.Designer.GraphViewer
             portTypes["VP_LogicalLength"] = (typeof(int),       "Viewport.LogicalLength");
             portTypes["VP_UserRange"]     = (typeof(RealRange), "Viewport.UserRange");
             portTypes["VP_ActiveRange"]   = (typeof(RealRange), "Viewport.ActiveRange");
+            portTypes["VP_Extent"]        = (typeof(DataExtent), "Viewport.Extent");
 
             Type? primaryDsType = null;   // render-leaf 的 dsType,用于后面 fm.InputBindings/OutputBindings 校验
             Type? primaryItemType = null;

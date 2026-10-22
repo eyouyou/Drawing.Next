@@ -926,10 +926,13 @@ namespace Hevo.Charting.LowCode.Designer
             _portRegistry["cell:viewport.logicalLength"] = vpScope.LogicalLength;
             _portRegistry["cell:viewport.userRange"]     = vpScope.UserRange;
             _portRegistry["cell:viewport.active"]        = vpScope.ActiveRange;
+            // 每根的键 / 到底 / 纪元(数据源发 DataExtent 时;列式管线策略和长度一起写)
+            _portRegistry["cell:viewport.extent"]        = vpScope.Extent;
             // legacy alias —— 旧 JSON 直接引用 "VP_*" 字面值时走同一份 port instance。
             _portRegistry["VP_LogicalLength"] = vpScope.LogicalLength;
             _portRegistry["VP_UserRange"]     = vpScope.UserRange;
             _portRegistry["VP_ActiveRange"]   = vpScope.ActiveRange;
+            _portRegistry["VP_Extent"]        = vpScope.Extent;
 
             // 1. 播种全局初始特质 (Seed)
             //
