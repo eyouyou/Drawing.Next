@@ -207,6 +207,9 @@ namespace Hevo.Charting.Core
             if (Schema is IFeatureProjector projector)
             {
                 projector.ProjectAll(ctx);
+                // 环境失效(尺寸 / 主题 / 可见性 / Transact):宿主丢掉按资源解析的画刷 / 字体,本帧上屏时全部图层按现有指令重画。
+                // 主题变了而数据没变时图层不会变脏,只靠重录赶不上新颜色
+                if (projector.LastPassWasEnvironmentChange) _host.OnEnvironmentChanged();
             }
             // 1. 提交与标脏
             ctx.SubmitSync(ActiveLayers);

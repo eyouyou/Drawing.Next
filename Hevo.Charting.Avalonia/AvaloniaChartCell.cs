@@ -32,7 +32,6 @@ namespace Hevo.Charting.Avalonia
         // 亚像素尺寸抖动不触发重排(同 WPF ChartCell)
         private const double SubPixelResizeThreshold = 0.5;
 
-        private static readonly Action<RenderContext> s_noopUpdate = _ => { };
 
         private readonly ChartEngine _engine;
         private readonly Grid _root = new() { Background = Brushes.Transparent };
@@ -144,14 +143,6 @@ namespace Hevo.Charting.Avalonia
 
         /// <summary>所在屏的 DPI 缩放(物理像素 / DIP)。挂进可视树 / 缩放变化时更新,之前为 1。</summary>
         public double PixelsPerDip => _engine.PixelsPerDip;
-
-        /// <summary>主题切换后调用:资源笔刷 / 字体按新主题重新解析,所有图层下一帧重录。</summary>
-        public void InvalidateResources()
-        {
-            _renderer.ClearResourceCaches();
-            MarkAllPicturesStale();
-            RequestUpdate(s_noopUpdate);
-        }
 
         // 测试 / 诊断用的入口(同 WPF ChartCell)
         internal int RunFrameNow(PlotMode mode = PlotMode.Sync) => _engine.RunFrameNow(mode);
@@ -397,6 +388,12 @@ namespace Hevo.Charting.Avalonia
         {
             for (int i = 0; i < layers.Count; i++)
                 if (layers[i].HostVisual is AvaloniaLayerVisual v) v.Stale = true;
+        }
+
+        void IChartCellHost.OnEnvironmentChanged()
+        {
+            _renderer.ClearResourceCaches();
+            MarkAllPicturesStale();
         }
 
         void IChartCellHost.InsertLayerVisual(ChartLayer layer, bool overlay, int index)

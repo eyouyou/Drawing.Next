@@ -15,8 +15,14 @@ namespace Hevo.Charting.Core
         /// <summary>把所有 Feature 按 Phase 顺序 Project 一遍(读黑板 → 算 trait → 下发图层)。</summary>
         void ProjectAll(RenderContext ctx);
 
-        /// <summary>声明环境(尺寸 / 主题 / 数据上下文)已失效,下一帧所有 Feature 走 FullPass 重算。典型由 ChartCell.SizeChanged / TabResume 触发。</summary>
+        /// <summary>
+        /// 声明环境(尺寸 / 主题 / 数据上下文)已失效,下一帧所有 Feature 走 FullPass 重算,宿主丢掉按资源解析的画刷 / 字体并重画全部图层。
+        /// 典型由 ChartCell.SizeChanged / TabResume 触发;换主题由换主题的一方调用。
+        /// </summary>
         void InvalidateEnvironment();
+
+        /// <summary>最近一次 <see cref="ProjectAll"/> 是否因环境失效走了 FullPass(引擎据此通知宿主)。</summary>
+        bool LastPassWasEnvironmentChange { get; }
     }
 
     public interface IFeatureContext
@@ -614,8 +620,12 @@ namespace Hevo.Charting.Core
         /// 每帧渲染主循环:① 检测环境时钟是否同步(决定是否 FullPass);② 弹脏 Feature 集;③ 任意脏数据则在 board 读锁下按 Phase 顺序 Project 全部脏 Feature。
         /// 单帧锁定保证所有 Feature 看到的是同一时刻黑板快照,杜绝高低点倒挂等"时空撕裂"。
         /// </summary>
+        /// <inheritdoc/>
+        public bool LastPassWasEnvironmentChange { get; private set; }
+
         public void ProjectAll(RenderContext ctx)
         {
+            LastPassWasEnvironmentChange = false;
             // 防空拦截:管线尚未就绪 / 旧 board 已 Dispose(Template 热替换竞态,见 InvalidateEnvironment 同款注释)
             if (_latestBoard == null || _latestBoard.IsDisposed || Registry == null) return;
 
@@ -631,6 +641,8 @@ namespace Hevo.Charting.Core
             //    先清空缓冲，再由 PopDirtyFeatures 直接填入脏 Feature 集合。
             _dirtySetBuffer.Clear();
             bool hasDirty = Registry.PopDirtyFeatures(_dirtySetBuffer);
+
+            LastPassWasEnvironmentChange = isEnvironmentSync;
 
             // 4. 0-GC 短路：环境未变化且无脏 Feature，跳过整帧渲染
             if (!isEnvironmentSync && !hasDirty) return;

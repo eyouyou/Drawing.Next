@@ -37,6 +37,9 @@ namespace Hevo.Charting.Renderers
             if (pixelsPerDip > 0) _drawingRenderer.PixelsPerDip = pixelsPerDip;
         }
 
+        /// <summary>环境失效:见 <see cref="WpfDrawingRenderer.ClearResourceCaches"/>。</summary>
+        public void ClearResourceCaches() => _drawingRenderer.ClearResourceCaches();
+
         public void Dispose() => _drawingRenderer.Dispose();
     }
 }

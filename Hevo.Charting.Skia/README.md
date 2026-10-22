@@ -36,7 +36,7 @@ cell.Shutdown();
 
 运行时随时可切，下一帧生效，不重算 Feature、不重录图层。和 WPF 后端的效果 / 性能对比用 render-probe / latency-probe 的 `--renderer=skia|skia-gpu`（见下文）。
 
-主题切换后调用 `SkiaRenderBackend.InvalidateResources()`：资源笔刷会按新主题重新解析，所有图层在下一帧重录（方法内部会请求这一帧）。
+主题切换后让 schema 环境失效（`IFeatureProjector.InvalidateEnvironment()`，和尺寸变化同一个入口）：引擎在那一帧通知后端 `OnEnvironmentChanged()`，资源笔刷按新主题重新解析，所有图层重录。
 
 ## 挂上后端后不再生效的设置
 

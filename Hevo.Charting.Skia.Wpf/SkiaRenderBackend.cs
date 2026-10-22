@@ -65,13 +65,12 @@ namespace Hevo.Charting.Skia
         /// <summary>GPU 目标:合成面最近一次 WPF 渲染时的绘制耗时(ticks);CPU 目标为 0。</summary>
         public long LastGpuPaintTicks => (_static.Surface as SkiaGpuSurface)?.LastPaintTicks ?? 0;
 
-        /// <summary>主题切换后调用:资源笔刷按新主题重新解析,所有图层在下一帧重录(这里会请求一帧)。</summary>
-        public void InvalidateResources()
+        /// <inheritdoc/>
+        public void OnEnvironmentChanged()
         {
             _renderer.ClearResourceCaches();
             ClearPictures();
             _static.Changed = _overlay.Changed = true;
-            _cell?.RequestUpdate(s_noop);
         }
 
         private sealed class Group

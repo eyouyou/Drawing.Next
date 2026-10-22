@@ -18,7 +18,7 @@ namespace Hevo.Charting.Tests
     /// ① 增量更新(只重录脏图层、只重画有变化的合成面)与从头渲染逐像素一致;只动交互层时静态面不重画;
     /// ② 图层移除 / 隐藏后原区域被擦干净;
     /// ③ 后端切换:挂上即上屏,切回 WPF 时 DrawingVisual 全量重放(挂 Skia 期间的新内容也要带回来);
-    /// ④ 后端归 cell 所有:置空 / 替换 / Shutdown 时被释放,一个实例不能挂两个 cell;InvalidateResources 后合成面不再引用已释放的 picture;
+    /// ④ 后端归 cell 所有:置空 / 替换 / Shutdown 时被释放,一个实例不能挂两个 cell;环境失效(OnEnvironmentChanged)后合成面不再引用已释放的 picture;
     /// ⑤ 画面口径:线端 / 虚线与位图后端覆盖一致,非 100% DPI 下 1px 线只占 1 个设备像素,缺字形时字体回退。
     /// 截图走 RenderTargetBitmap(CPU 合成面是 1:1 位图,结果确定)。每个测试创建的 cell(连同挂着的后端)都在结尾 Shutdown 释放。
     /// </summary>
@@ -329,7 +329,7 @@ namespace Hevo.Charting.Tests
         });
 
         [Fact]
-        public void InvalidateResources_ThenResize_DoesNotTouchReleasedPictures() => IncrementalTestKit.RunOnSta(() =>
+        public void EnvironmentChanged_ThenResize_DoesNotTouchReleasedPictures() => IncrementalTestKit.RunOnSta(() =>
         {
             using var cells = new Cells();
             var backend = new SkiaRenderBackend();
@@ -340,7 +340,7 @@ namespace Hevo.Charting.Tests
             Assert.True(Count(Capture(cell)) > 1000);
 
             // picture 全部释放后立刻改尺寸:合成面 OnRenderSizeChanged 会重画,不能回放已释放的 picture
-            backend.InvalidateResources();
+            backend.OnEnvironmentChanged();
             cell.Measure(new Size(W + 40, H + 30));
             cell.Arrange(new Rect(0, 0, W + 40, H + 30));
             cell.UpdateLayout();
@@ -349,7 +349,7 @@ namespace Hevo.Charting.Tests
             // 下一帧全部重录,画面恢复
             cell.Invalidate();
             Assert.True(backend.LastRecordedLayers >= 1);
-            Assert.True(Count(Capture(cell)) > 1000, "InvalidateResources 之后没有重录上屏");
+            Assert.True(Count(Capture(cell)) > 1000, "环境失效之后没有重录上屏");
         });
 
         [Fact]

@@ -38,5 +38,11 @@ namespace Hevo.Charting.Renderers
 
         /// <summary>从 cell 摘下(换后端 / 切回 WPF)。宿主元素由 ChartCell 移出可视树。</summary>
         void Detach();
+
+        /// <summary>
+        /// 本帧环境失效(尺寸 / 主题等,见 IFeatureProjector.InvalidateEnvironment),在 <see cref="Present"/> 之前调:
+        /// 丢掉按资源解析的画刷 / 字体,随后的 Present 全部图层按现有指令重录。
+        /// </summary>
+        void OnEnvironmentChanged();
     }
 }

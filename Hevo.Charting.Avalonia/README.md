@@ -44,7 +44,7 @@ dotnet run --project Hevo.Charting.Avalonia.Demo
 | 输入 | `AvaloniaPointerAdapter`:隧道事件给路由器做区域认领,冒泡事件给行为链,语义同 `WpfPointerAdapter`;触屏见下 |
 | 控件类图层 | 控件缓冲(`WidgetBuffer`)里的 Avalonia 控件摆进控件层 Canvas;悬浮窗 = `AvaloniaTooltipLayer` |
 | 外壳装饰 | 切面实现 `IAvaloniaDecorator`,沿 Aspect 链从内到外包 |
-| 资源 | `AvaloniaSkiaResources`:资源笔刷 / 字体按当前主题查 Application 资源,图片认 Avalonia `Bitmap`;主题切换后调 `cell.InvalidateResources()` |
+| 资源 | `AvaloniaSkiaResources`:资源笔刷 / 字体按当前主题查 Application 资源,图片认 Avalonia `Bitmap`;主题切换后让 schema 环境失效(`IFeatureProjector.InvalidateEnvironment()`),资源笔刷 / 字体按新主题重新解析、全部图层重画 |
 
 | 平台实现登记 | `AvaloniaChartHost.Services`(本宿主的一份 `ChartHostServices`):悬浮窗图层、头部、`HevoResourceString` 解析、蓝图名 `"UniversalHeaderFeature"` 的别名、调试菜单,程序集加载时由 `[ModuleInitializer]` 登记 |
 

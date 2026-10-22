@@ -924,6 +924,19 @@ namespace Hevo.Charting.Core
 
         void IChartCellHost.OnLayerRemoved(ChartLayer layer) => _renderBackend?.OnLayerRemoved(layer);
 
+        void IChartCellHost.OnEnvironmentChanged()
+        {
+            if (_renderBackend != null)
+            {
+                _renderBackend.OnEnvironmentChanged();
+                return;
+            }
+            // 矢量层和位图层都按现有指令重放一遍(资源画刷按新主题重新解析)
+            _wpfProvider.ClearResourceCaches();
+            _rasterProvider?.ClearCaches();
+            _replayAllWpfLayers = true;
+        }
+
         IDisposable IChartCellHost.CreatePointerInput(Interaction.PointerRouter router, Interaction.PointerRegionStore store,
             Func<DataBlackboard?> board, Func<HevoRect> plotArea, Func<double> dragThreshold)
             => new Interaction.WpfPointerAdapter(this, router, store, board, plotArea, dragThreshold);

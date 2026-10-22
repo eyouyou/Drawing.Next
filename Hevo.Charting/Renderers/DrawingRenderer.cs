@@ -552,6 +552,8 @@ namespace Hevo.Charting.Renderers
             wpfBrush = WpfRenderRegistry.CreateBrush(desc);
             if (wpfBrush == null) return null;
 
+            // 资源画刷拿到的是应用资源字典里的共享实例:冻结它会把主题系统要改的对象也冻住,先复制再冻结
+            if (!wpfBrush.IsFrozen && desc is HevoResourceBrush) wpfBrush = wpfBrush.Clone();
             if (wpfBrush.CanFreeze) wpfBrush.Freeze();
             _brushCache.Set(desc, wpfBrush);
             _lastBrushDesc = desc; _lastBrushHandle = wpfBrush;
@@ -618,15 +620,21 @@ namespace Hevo.Charting.Renderers
             return tf;
         }
 
-        public void Dispose()
+        /// <summary>环境失效(换主题等):丢掉按资源解析出的画刷 / 画笔 / 字体 / 排好的文字,下次绘制按新主题重新解析。</summary>
+        public void ClearResourceCaches()
         {
             _brushCache.Clear();
             _penCache.Clear();
             _typefaceCache.Clear();
             _formattedTextCache.Clear();
-            _svgCache.Clear();
             _lastBrushDesc = null; _lastBrushHandle = null;
             _lastPenDesc = null; _lastPenHandle = null;
+        }
+
+        public void Dispose()
+        {
+            ClearResourceCaches();
+            _svgCache.Clear();
         }
 
         // ==========================================

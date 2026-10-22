@@ -36,6 +36,7 @@ namespace Hevo.Charting.Avalonia.Tests
             public DataPort<PointerHitState?> Hit { get; } = new("T_Hit");
             public WorkflowTrigger<DataBlackboard> Trigger { get; } = new();
             public ChartInteractionMode Mode { get; init; } = ChartInteractionMode.All;
+            public CandleStyle? Style { get; init; }
 
             protected override void DefineDataFlow(IChartCell chart) => Trigger.BindTo(chart);
 
@@ -45,7 +46,7 @@ namespace Hevo.Charting.Avalonia.Tests
                 canvas
                     .Environment(env => env.SetupViewport(minVisibleCount: 5, alignment: ViewportAlignment.RightEdge,
                         defaultVisibleCount: 30, overscrollMin: OverscrollPolicy.Hard, overscrollMax: OverscrollPolicy.Hard))
-                    .Series(s => s.AddCandle(YRange, Ports))
+                    .Series(s => s.AddCandle(YRange, Ports, style: Style))
                     .Interactions(i => i.EnableStandardPointer(Hit, Mode, dismissOnEscape: true));
             }
         }
@@ -59,9 +60,9 @@ namespace Hevo.Charting.Avalonia.Tests
             public readonly Window Window;
             public readonly ViewportPorts Viewport;
 
-            public Rig(ChartInteractionMode mode = ChartInteractionMode.All)
+            public Rig(ChartInteractionMode mode = ChartInteractionMode.All, CandleStyle? style = null)
             {
-                Schema = new Schema { Mode = mode };
+                Schema = new Schema { Mode = mode, Style = style };
                 Cell.Template = Schema;
                 // 窗口直接给定尺寸并先把布局跑完,鼠标坐标 = 图层画布坐标
                 Window = new Window { Content = Cell, Width = 400, Height = 300 };
@@ -133,6 +134,50 @@ namespace Hevo.Charting.Avalonia.Tests
             Assert.NotNull(frame);
             Assert.True(CountInkPixels(frame!) > 500);
             rig.Window.Close();
+        }
+
+        [AvaloniaFact]
+        public void EnvironmentInvalidated_ResolvesResourceBrushesAgain()
+        {
+            // 换主题 = 资源换值;数据没变时图层不脏,靠环境失效让宿主丢掉解析过的画刷、全部图层重画
+            var app = Application.Current!;
+            app.Resources["Test.Candle"] = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.FromRgb(255, 0, 0));
+            try
+            {
+                var brush = new HevoResourceBrush("Test.Candle");
+                var rig = new Rig(style: new CandleStyle(brush, brush, new HevoPen(brush, 1)));
+                int red0 = CountColor(rig.Window, 255, 0, 0);
+                Assert.True(red0 > 200, $"red={red0}");
+
+                app.Resources["Test.Candle"] = new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.FromRgb(0, 255, 0));
+                rig.Schema.InvalidateEnvironment();
+                rig.Frame();
+                int green = CountColor(rig.Window, 0, 255, 0), red = CountColor(rig.Window, 255, 0, 0);
+                Assert.True(green > 200 && red == 0, $"green={green} red={red}");
+                rig.Window.Close();
+            }
+            finally
+            {
+                app.Resources.Remove("Test.Candle");
+            }
+        }
+
+        private static int CountColor(Window window, byte r, byte g, byte b)
+        {
+            using var frame = window.CaptureRenderedFrame()!;
+            var size = frame.PixelSize;
+            int stride = size.Width * 4;
+            var buffer = new byte[stride * size.Height];
+            unsafe
+            {
+                fixed (byte* p = buffer) frame.CopyPixels(new PixelRect(size), (nint)p, buffer.Length, stride);
+            }
+            int n = 0;
+            for (int i = 0; i < buffer.Length; i += 4)
+                // 像素格式随平台(BGRA / RGBA),两种排列都认
+                if (Math.Abs(buffer[i] - b) + Math.Abs(buffer[i + 1] - g) + Math.Abs(buffer[i + 2] - r) < 40
+                    || Math.Abs(buffer[i] - r) + Math.Abs(buffer[i + 1] - g) + Math.Abs(buffer[i + 2] - b) < 40) n++;
+            return n;
         }
 
         [AvaloniaFact]

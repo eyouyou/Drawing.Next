@@ -102,6 +102,12 @@ namespace Hevo.Charting.Core
         /// </summary>
         void Present(IReadOnlyList<ChartLayer> staticLayers, IReadOnlyList<ChartLayer> overlayLayers);
 
+        /// <summary>
+        /// 本帧环境失效(见 <see cref="IFeatureProjector.InvalidateEnvironment"/>),在 <see cref="Present"/> 之前调:
+        /// 丢掉按资源解析的画刷 / 字体,随后的 Present 把全部图层(不只脏的)按现有指令重画。
+        /// </summary>
+        void OnEnvironmentChanged();
+
         /// <summary>Aspect 链变了,重建外壳 UI(还没应用模板时什么也不做)。</summary>
         void RefreshDecoration();
 

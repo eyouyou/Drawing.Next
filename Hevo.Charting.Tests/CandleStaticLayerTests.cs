@@ -46,7 +46,7 @@ namespace Hevo.Charting.Tests
             private readonly System.Windows.Window _window;
             public void CloseWindow() => _window.Close();
 
-            public Rig()
+            public Rig(Renderers.IChartRenderBackend? backend = null)
             {
                 for (int i = 0; i < Capacity; i++)
                 {
@@ -55,6 +55,7 @@ namespace Hevo.Charting.Tests
                 }
                 // 跟真实图表一样经 OnApplyTemplate 装配:挂进窗口(屏幕外)再布局
                 Cell.Template = Schema;
+                Cell.RenderBackend = backend;
                 Cell.Width = 400; Cell.Height = 300;
                 _window = new System.Windows.Window
                 {
@@ -112,6 +113,24 @@ namespace Hevo.Charting.Tests
                 Low = (double[])Low.Clone(); Close = (double[])Close.Clone();
             }
         }
+
+        [Fact]
+        public void EnvironmentInvalidated_RerecordsAllLayers_EvenWithoutDataChange() => IncrementalTestKit.RunOnSta(() =>
+        {
+            // 换主题:数据没变、图层不脏,环境失效时后端也要把全部图层按现有指令重录(资源画刷按新主题重新解析)
+            var backend = new Skia.SkiaRenderBackend();
+            var rig = new Rig(backend);
+            rig.Frame();
+            rig.Cell.Invalidate();
+            Assert.Equal(0, backend.LastRecordedLayers);
+
+            rig.Schema.InvalidateEnvironment();
+            rig.Frame();
+            int layers = rig.Cell.Engine.StaticLayers.Count + rig.Cell.Engine.OverlayLayers.Count;
+            Assert.True(layers > 0);
+            Assert.Equal(layers, backend.LastRecordedLayers);
+            rig.CloseWindow();
+        });
 
         [Fact]
         public void Tick_LastBarChangedInPlace_KeepsStaticLayer() => IncrementalTestKit.RunOnSta(() =>
